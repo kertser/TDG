@@ -277,6 +277,80 @@ button:hover { background: #1a5276; }
 /* ── Leaflet overrides ────────────────────────── */
 .leaflet-container { background: #0d1117 !important; }
 
+/* ── Unit icon (milsymbol) ────────────────────── */
+.unit-icon {
+    /* DivIcon already fixed-pixel; suppress any background/border Leaflet adds */
+    background: none !important;
+    border: none !important;
+    /* Prevent browser image scaling artefacts */
+    image-rendering: auto;
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+    transition: filter 0.15s;
+}
+.unit-icon:hover {
+    filter: drop-shadow(0 0 6px rgba(79,195,247,0.6)) drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+}
+.unit-marker-fallback {
+    background: none !important;
+    border: none !important;
+}
+
+/* ── Unit tooltip (name on hover) ─────────────── */
+.unit-tooltip {
+    background: rgba(16, 24, 48, 0.9) !important;
+    border: 1px solid rgba(79, 195, 247, 0.4) !important;
+    border-radius: 3px !important;
+    padding: 2px 8px !important;
+    color: #e0e0e0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4) !important;
+    white-space: nowrap !important;
+}
+.unit-tooltip::before { display: none !important; }
+
+/* ── Leaflet popup dark theme ─────────────────── */
+.leaflet-popup-content-wrapper {
+    background: rgba(22, 33, 62, 0.95) !important;
+    color: #e0e0e0 !important;
+    border-radius: 6px !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5) !important;
+    border: 1px solid rgba(15, 52, 96, 0.6) !important;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.leaflet-popup-content {
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+    margin: 10px 12px !important;
+}
+.leaflet-popup-content b { color: #4fc3f7; }
+.leaflet-popup-tip {
+    background: rgba(22, 33, 62, 0.95) !important;
+    border: 1px solid rgba(15, 52, 96, 0.6) !important;
+    border-top: none !important;
+    border-left: none !important;
+}
+.leaflet-popup-content button {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 3px;
+    background: #0f3460;
+    color: #b0c4de;
+    border: 1px solid #1a5276;
+    cursor: pointer;
+}
+.leaflet-popup-content button:hover {
+    background: #1a5276;
+    color: #fff;
+    border-color: #4fc3f7;
+}
+.leaflet-popup-close-button {
+    color: #888 !important;
+    font-size: 18px !important;
+}
+.leaflet-popup-close-button:hover { color: #ef5350 !important; }
+
 /* ── Distance Measurement Labels ──────────────── */
 .measure-label {
     background: rgba(30, 30, 40, 0.85) !important;
@@ -479,6 +553,144 @@ button:hover { background: #1a5276; }
     text-align: right;
     color: #e0e0e0;
     font-weight: 600;
+}
+
+/* ── Admin Sub-Tabs ──────────────────────────────── */
+.admin-subtabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+    padding-bottom: 4px;
+}
+.admin-subtab-btn {
+    flex: 1;
+    padding: 5px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px 3px 0 0;
+    color: #888;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.admin-subtab-btn:hover { color: #ccc; background: rgba(15, 52, 96, 0.3); }
+.admin-subtab-btn.active { color: #4fc3f7; border-color: #0f3460; border-bottom-color: transparent; background: rgba(15, 52, 96, 0.4); }
+.admin-subtab-panel { /* shown/hidden via JS */ }
+
+/* ── Admin Active Button State ───────────────────── */
+.admin-btn-active {
+    background: #1b5e20 !important;
+    color: #a5d6a7 !important;
+    border-color: #2e7d32 !important;
+}
+
+/* ── Scenario Builder Form ───────────────────────── */
+.sb-unit-form {
+    border: 1px solid rgba(79, 195, 247, 0.3) !important;
+    background: rgba(15, 30, 60, 0.7) !important;
+}
+.sb-form-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.sb-form-row label {
+    font-size: 10px;
+    color: #aaa;
+    white-space: nowrap;
+}
+.sb-form-row input, .sb-form-row select {
+    padding: 3px 5px;
+    font-size: 11px;
+}
+.sb-grid-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.sb-grid-row label {
+    font-size: 10px;
+    color: #90caf9;
+    width: 40px;
+    white-space: nowrap;
+}
+.sb-grid-row input {
+    padding: 3px 5px;
+    font-size: 11px;
+}
+
+/* ── Staged Unit Items ───────────────────────────── */
+.sb-unit-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px;
+    background: rgba(33, 150, 243, 0.08);
+    border-left: 3px solid #4fc3f7;
+    border-radius: 3px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.sb-unit-item:hover { background: rgba(33, 150, 243, 0.18); }
+.sb-unit-item.sb-unit-red {
+    background: rgba(244, 67, 54, 0.08);
+    border-left-color: #ef5350;
+}
+.sb-unit-item.sb-unit-red:hover { background: rgba(244, 67, 54, 0.18); }
+.sb-unit-name {
+    font-size: 11px;
+    font-weight: 600;
+    color: #e0e0e0;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sb-unit-type-badge {
+    font-size: 9px;
+    color: #888;
+    white-space: nowrap;
+}
+.sb-unit-del {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    font-size: 10px;
+    line-height: 1;
+    border-radius: 2px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #888;
+    cursor: pointer;
+}
+.sb-unit-del:hover { background: #5a2020; color: #ef9a9a; border-color: #e53935; }
+
+/* ── Admin Dashboard Table ───────────────────────── */
+.admin-dashboard-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+.admin-dashboard-table th {
+    padding: 3px 4px;
+    text-align: left;
+    color: #90caf9;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+}
+.admin-dashboard-table td {
+    padding: 3px 4px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.2);
+    color: #e0e0e0;
 }
 
 /* ── Overlay Context Menu ────────────────────── */

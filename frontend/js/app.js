@@ -10,6 +10,7 @@
     // Initialize UI
     KUI.init();
     KSessionUI.init();
+    KScenarioBuilder.init(map);
     KAdmin.init();
 
     // Initialize map layers

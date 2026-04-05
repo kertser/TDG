@@ -104,31 +104,163 @@
             <div id="admin-tab" class="tab-panel">
                 <h3>⚙ Administration</h3>
 
-                <div class="admin-section">
-                    <h4>Session Management</h4>
-                    <button id="admin-delete-all-sessions" class="admin-btn admin-btn-danger">🗑 Delete All Sessions</button>
-                    <button id="admin-refresh-sessions" class="admin-btn">🔄 Refresh Sessions</button>
-                    <div id="admin-session-count" class="admin-info"></div>
+                <!-- Admin sub-tabs -->
+                <div class="admin-subtabs">
+                    <button class="admin-subtab-btn active" data-panel="admin-builder-panel">Builder</button>
+                    <button class="admin-subtab-btn" data-panel="admin-session-panel">Session</button>
+                    <button class="admin-subtab-btn" data-panel="admin-monitor-panel">Monitor</button>
                 </div>
 
-                <div class="admin-section">
-                    <h4>Scenario Management</h4>
-                    <button id="admin-list-scenarios" class="admin-btn">📋 List Scenarios</button>
-                    <button id="admin-delete-all-scenarios" class="admin-btn admin-btn-danger">🗑 Delete All Scenarios</button>
-                    <div id="admin-scenario-list" class="admin-info"></div>
+                <!-- ═══ BUILDER SUB-TAB ═══════════════════════ -->
+                <div id="admin-builder-panel" class="admin-subtab-panel" style="display:block;">
+                    <div class="admin-section">
+                        <h4>Scenario Builder</h4>
+                        <button id="sb-toggle-btn" class="admin-btn">🗺 Scenario Builder</button>
+                    </div>
+
+                    <!-- Builder panel (shown when builder active) -->
+                    <div id="sb-panel" style="display:none;">
+                        <div class="admin-section">
+                            <h4>Scenario Info</h4>
+                            <input type="text" id="sb-scenario-title" placeholder="Scenario title" style="margin-bottom:4px;" />
+                            <input type="text" id="sb-scenario-desc" placeholder="Description (optional)" style="font-size:11px;" />
+                        </div>
+
+                        <div class="admin-section">
+                            <h4>Grid Settings</h4>
+                            <div class="sb-grid-row">
+                                <label>Origin</label>
+                                <input type="text" id="sb-grid-origin-lat" placeholder="Lat" style="width:48%;" value="49.025" />
+                                <input type="text" id="sb-grid-origin-lon" placeholder="Lon" style="width:48%;" value="4.44" />
+                            </div>
+                            <div class="sb-grid-row">
+                                <label>Size</label>
+                                <input type="number" id="sb-grid-cols" value="8" style="width:30%;" title="Columns" />
+                                <span style="color:#888;">×</span>
+                                <input type="number" id="sb-grid-rows" value="8" style="width:30%;" title="Rows" />
+                                <input type="number" id="sb-grid-size" value="1000" style="width:30%;" title="Square size (m)" />
+                            </div>
+                        </div>
+
+                        <!-- Unit placement form (shown on map click) -->
+                        <div id="sb-unit-form" style="display:none;" class="admin-section sb-unit-form">
+                            <h4 id="sb-form-title">Place Unit</h4>
+                            <div class="sb-form-row">
+                                <select id="sb-unit-side" style="width:40%;">
+                                    <option value="blue">Blue</option>
+                                    <option value="red">Red</option>
+                                </select>
+                                <select id="sb-unit-type" style="width:58%;"></select>
+                            </div>
+                            <input type="text" id="sb-unit-name" placeholder="Unit name" />
+                            <div class="sb-form-row">
+                                <input type="text" id="sb-unit-lat" placeholder="Lat" style="width:48%;" readonly />
+                                <input type="text" id="sb-unit-lon" placeholder="Lon" style="width:48%;" readonly />
+                            </div>
+                            <div class="sb-form-row">
+                                <label style="width:50px;">Str</label>
+                                <input type="number" id="sb-unit-strength" value="1.0" min="0" max="1" step="0.1" style="width:60px;" />
+                                <label style="width:50px;">Ammo</label>
+                                <input type="number" id="sb-unit-ammo" value="1.0" min="0" max="1" step="0.1" style="width:60px;" />
+                                <label style="width:40px;">Mor</label>
+                                <input type="number" id="sb-unit-morale" value="0.9" min="0" max="1" step="0.1" style="width:60px;" />
+                            </div>
+                            <div style="display:flex;gap:4px;margin-top:4px;">
+                                <button id="sb-confirm-unit" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;">✓ Confirm</button>
+                                <button id="sb-cancel-unit" class="admin-btn" style="flex:1;">Cancel</button>
+                            </div>
+                        </div>
+
+                        <!-- Staged units list -->
+                        <div class="admin-section">
+                            <h4>Units (<span id="sb-unit-count">0</span>)</h4>
+                            <div id="sb-unit-list"></div>
+                        </div>
+
+                        <button id="sb-save-scenario" class="admin-btn" style="width:100%;background:#1b5e20;color:#a5d6a7;font-weight:700;padding:8px;">💾 Save Scenario</button>
+                    </div>
+
+                    <div class="admin-section" style="margin-top:8px;">
+                        <h4>Scenarios</h4>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                            <button id="admin-list-scenarios" class="admin-btn">📋 List</button>
+                            <button id="admin-delete-all-scenarios" class="admin-btn admin-btn-danger">🗑 Delete All</button>
+                        </div>
+                        <div id="admin-scenario-list" class="admin-info"></div>
+                    </div>
                 </div>
 
-                <div class="admin-section">
-                    <h4>Current Session</h4>
-                    <div id="admin-current-session-info" class="admin-info">No active session</div>
-                    <button id="admin-pause-session" class="admin-btn" style="display:none;">⏸ Pause</button>
-                    <button id="admin-reset-tick" class="admin-btn" style="display:none;">↺ Reset to Tick 0</button>
+                <!-- ═══ SESSION SUB-TAB ═══════════════════════ -->
+                <div id="admin-session-panel" class="admin-subtab-panel" style="display:none;">
+                    <div class="admin-section">
+                        <h4>Session Management</h4>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                            <button id="admin-delete-all-sessions" class="admin-btn admin-btn-danger">🗑 Delete All</button>
+                            <button id="admin-refresh-sessions" class="admin-btn">🔄 Refresh</button>
+                        </div>
+                        <div id="admin-session-count" class="admin-info"></div>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>Current Session</h4>
+                        <div id="admin-session-status" class="admin-info">No active session</div>
+                        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                            <button id="admin-pause-session" class="admin-btn">⏸ Pause</button>
+                            <button id="admin-reset-session" class="admin-btn admin-btn-danger">↺ Reset</button>
+                        </div>
+                        <div style="display:flex;gap:4px;align-items:center;margin-top:6px;">
+                            <label style="font-size:11px;color:#aaa;white-space:nowrap;">Tick interval (s):</label>
+                            <input type="number" id="admin-tick-interval" value="60" min="1" style="width:60px;padding:3px;" />
+                            <button id="admin-apply-tick-interval" class="admin-btn" style="padding:3px 8px;font-size:10px;">Apply</button>
+                        </div>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>Participants</h4>
+                        <button id="admin-load-participants" class="admin-btn" style="margin-bottom:4px;">🔄 Load</button>
+                        <div id="admin-participants-list"></div>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>Inject Event</h4>
+                        <select id="admin-event-type" style="width:100%;padding:3px;margin-bottom:4px;font-size:11px;">
+                            <option value="custom">Custom</option>
+                            <option value="weather_change">Weather Change</option>
+                            <option value="reinforcement">Reinforcement</option>
+                            <option value="comms_change">Comms Change</option>
+                            <option value="intel_report">Intel Report</option>
+                        </select>
+                        <input type="text" id="admin-event-text" placeholder="Event description..." style="margin-bottom:4px;" />
+                        <button id="admin-inject-event" class="admin-btn">⚡ Inject Event</button>
+                        <div id="admin-event-status" class="admin-info"></div>
+                    </div>
                 </div>
 
-                <div class="admin-section">
-                    <h4>Database</h4>
-                    <button id="admin-db-stats" class="admin-btn">📊 DB Stats</button>
-                    <div id="admin-db-info" class="admin-info"></div>
+                <!-- ═══ MONITOR SUB-TAB ═══════════════════════ -->
+                <div id="admin-monitor-panel" class="admin-subtab-panel" style="display:none;">
+                    <div class="admin-section">
+                        <h4>God View</h4>
+                        <button id="admin-god-view-toggle" class="admin-btn">👁 God View OFF</button>
+                        <div id="admin-god-status" class="admin-info"></div>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>Unit Dashboard</h4>
+                        <button id="admin-load-dashboard" class="admin-btn" style="margin-bottom:4px;">🔄 Load</button>
+                        <div id="admin-unit-dashboard" style="max-height:200px;overflow-y:auto;"></div>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>All Orders (both sides)</h4>
+                        <button id="admin-load-orders" class="admin-btn" style="margin-bottom:4px;">🔄 Load</button>
+                        <div id="admin-orders-list" style="max-height:180px;overflow-y:auto;"></div>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>Database</h4>
+                        <button id="admin-db-stats" class="admin-btn">📊 DB Stats</button>
+                        <div id="admin-db-info" class="admin-info"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -185,6 +317,7 @@
     <script src="/js/reports.js"></script>
     <script src="/js/gamelog.js"></script>
     <script src="/js/session_ui.js"></script>
+    <script src="/js/scenario_builder.js"></script>
     <script src="/js/admin.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/app.js"></script>
