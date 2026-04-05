@@ -1,0 +1,35 @@
+name: tdg
+
+services:
+  postgres:
+    container_name: tdg-postgres
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: tdg
+      POSTGRES_PASSWORD: tdg_secret
+      POSTGRES_DB: tdg
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tdg"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    container_name: tdg-redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+
+

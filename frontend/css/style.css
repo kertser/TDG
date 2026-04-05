@@ -1,0 +1,422 @@
+/* ── Reset & Base ──────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+
+/* ── Top Bar ──────────────────────────────────── */
+#topbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 40px;
+    padding: 0 12px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+#app-title { font-weight: 700; color: #4fc3f7; white-space: nowrap; }
+#snail-display { color: #81c784; font-family: monospace; font-size: 13px; min-width: 120px; white-space: nowrap; }
+#coord-display { color: #aaa; font-family: monospace; font-size: 11px; min-width: 160px; white-space: nowrap; }
+#zoom-display { color: #64b5f6; font-family: monospace; font-size: 11px; white-space: nowrap; }
+#user-info { margin-left: auto; color: #aaa; white-space: nowrap; }
+
+/* ── Drawing Toolbar (inside topbar) ─────────── */
+#draw-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 4px;
+    background: rgba(26, 26, 46, 0.6);
+    border: 1px solid #0f3460;
+    border-radius: 5px;
+    margin: 0 4px;
+}
+.draw-btn {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #bbb;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+.draw-btn:hover { background: #1a5276; border-color: #4fc3f7; color: #fff; }
+.draw-btn.active { background: #0f3460; border-color: #4fc3f7; color: #4fc3f7; }
+.draw-btn.btn-cancel { color: #e53935; }
+.draw-btn.btn-cancel:hover { background: #3e1a1a; border-color: #e53935; }
+.draw-btn[data-tool="arrow"] { color: #f44336; font-size: 18px; }
+.draw-btn.sep { margin-left: 4px; }
+
+/* ── Main Layout ──────────────────────────────── */
+#main-container {
+    display: flex;
+    height: calc(100% - 40px);
+}
+
+#map {
+    flex: 1;
+    background: #0d1117;
+}
+
+/* ── Sidebar ──────────────────────────────────── */
+#sidebar {
+    width: 340px;
+    background: #16213e;
+    border-left: 1px solid #0f3460;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#sidebar-tabs {
+    display: flex;
+    border-bottom: 1px solid #0f3460;
+}
+.tab-btn {
+    flex: 1;
+    padding: 8px;
+    background: transparent;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.tab-btn.active { color: #4fc3f7; border-bottom: 2px solid #4fc3f7; }
+.tab-btn:hover { color: #fff; }
+
+.tab-panel { display: none; padding: 12px; overflow-y: auto; flex: 1; }
+.tab-panel.active { display: flex; flex-direction: column; gap: 10px; }
+.tab-panel h3 { font-size: 14px; color: #4fc3f7; margin-bottom: 4px; }
+
+/* ── Inputs & Buttons ─────────────────────────── */
+input[type="text"], textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-size: 13px;
+}
+textarea { min-height: 80px; resize: vertical; }
+button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    background: #0f3460;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+button:hover { background: #1a5276; }
+
+/* ── Grid axis labels (column/row headers on edges) ── */
+.grid-axis-label {
+    pointer-events: none;
+    text-align: center;
+}
+.grid-axis-label span {
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-shadow:
+        0 0 3px rgba(0,0,0,1),
+        0 0 6px rgba(0,0,0,0.8),
+        1px 1px 2px rgba(0,0,0,0.9);
+}
+.grid-axis-lg span {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: 2px;
+}
+.grid-axis-md span {
+    font-size: 14px;
+    color: rgba(230, 230, 230, 0.9);
+    letter-spacing: 1.5px;
+}
+.grid-axis-sm span {
+    font-size: 12px;
+    color: rgba(200, 200, 200, 0.8);
+    letter-spacing: 1px;
+}
+
+/* ── Grid corner coordinate labels ────────────── */
+.grid-corner-coord {
+    pointer-events: none;
+}
+.grid-corner-coord span {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 9px;
+    color: rgba(255, 210, 80, 0.65);
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.9);
+    white-space: nowrap;
+}
+
+/* ── Grid selection highlight ─────────────────── */
+.grid-highlight {
+    stroke: #ffd740;
+    stroke-width: 3;
+    fill: #ffd740;
+    fill-opacity: 0.15;
+}
+
+/* ── Order & Log items ────────────────────────── */
+.order-item, .log-item {
+    padding: 6px 8px;
+    background: #1a1a2e;
+    border-radius: 4px;
+    font-size: 12px;
+    border-left: 3px solid #0f3460;
+    margin-bottom: 2px;
+}
+.order-item .status { font-weight: 600; }
+.log-item.event { border-left-color: #f39c12; }
+.log-item.report { border-left-color: #27ae60; }
+.log-item.order { border-left-color: #2196f3; }
+.log-item.info { border-left-color: #607d8b; }
+
+/* ── Game log container ──────────────────────── */
+#game-log {
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Order list ──────────────────────────────── */
+#order-list {
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+/* ── Session list ─────────────────────────────── */
+.session-card {
+    padding: 8px;
+    background: #1a1a2e;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid #0f3460;
+}
+.session-card:hover { border-color: #4fc3f7; }
+.session-card .title { font-weight: 600; }
+.session-card .meta { font-size: 11px; color: #888; }
+
+/* ── Leaflet overrides ────────────────────────── */
+.leaflet-container { background: #0d1117 !important; }
+
+/* ── Distance Measurement Labels ──────────────── */
+.measure-label {
+    background: rgba(30, 30, 40, 0.85) !important;
+    border: 1px solid #ffd740 !important;
+    border-radius: 3px !important;
+    padding: 2px 6px !important;
+    color: #ffd740 !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    font-family: monospace !important;
+    box-shadow: none !important;
+}
+.measure-label::before { display: none !important; }
+
+.measure-total-label {
+    background: rgba(30, 30, 40, 0.9) !important;
+    border: 1px solid #ff9800 !important;
+    border-radius: 3px !important;
+    padding: 2px 6px !important;
+    color: #ff9800 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    font-family: monospace !important;
+    box-shadow: none !important;
+}
+.measure-total-label::before { display: none !important; }
+
+.measure-final-label {
+    background: rgba(30, 60, 30, 0.9) !important;
+    border: 1px solid #4caf50 !important;
+    border-radius: 4px !important;
+    padding: 3px 8px !important;
+    color: #4caf50 !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    font-family: monospace !important;
+    box-shadow: none !important;
+}
+.measure-final-label::before { display: none !important; }
+
+/* ── Start Session Button ─────────────────────── */
+#start-session-btn {
+    background: #1b5e20;
+    color: #a5d6a7;
+    font-weight: 700;
+}
+#start-session-btn:hover { background: #2e7d32; }
+
+/* ── Tick Button ──────────────────────────────── */
+#tick-btn {
+    background: #e65100;
+    color: #ffcc80;
+    font-weight: 700;
+}
+#tick-btn:hover { background: #ef6c00; }
+
+/* ── Leaflet scale control styling ───────────── */
+.leaflet-control-scale {
+    margin-bottom: 6px !important;
+    margin-left: 8px !important;
+}
+.leaflet-control-scale-line {
+    background: rgba(16, 24, 48, 0.75) !important;
+    border: 1px solid rgba(150, 170, 200, 0.5) !important;
+    border-top: none !important;
+    border-radius: 0 0 3px 3px !important;
+    padding: 1px 8px !important;
+    color: rgba(180, 200, 230, 0.9) !important;
+    font-size: 10px !important;
+    font-family: 'Consolas', 'Courier New', monospace !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.5px !important;
+    line-height: 14px !important;
+    text-align: center !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+}
+
+/* ── Selected unit tags ──────────────────────── */
+.selected-unit-tag {
+    display: inline-block;
+    background: #0d3460;
+    color: #4fc3f7;
+    border: 1px solid #4fc3f7;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+    margin: 1px;
+    white-space: nowrap;
+}
+
+/* ── Clickable event items ───────────────────── */
+.log-item.event[style*="cursor"] {
+    transition: background 0.15s;
+}
+.log-item.event:hover {
+    background: #222844;
+}
+
+
+/* ── Logout Button ───────────────────────────── */
+#logout-btn {
+    background: #37474f;
+    color: #ccc;
+    border-radius: 3px;
+    border: 1px solid #546e7a;
+}
+#logout-btn:hover {
+    background: #b71c1c;
+    color: #fff;
+    border-color: #e53935;
+}
+
+/* ── Selected Units Display ──────────────────── */
+#selected-units-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+}
+
+/* ── Admin Panel ─────────────────────────────── */
+.admin-section {
+    background: rgba(15, 20, 40, 0.5);
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 10px;
+}
+.admin-section h4 {
+    font-size: 12px;
+    color: #90caf9;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+}
+.admin-btn {
+    display: inline-block;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 4px;
+    background: #1a3a5c;
+    color: #b0c4de;
+    border: 1px solid #0f3460;
+    cursor: pointer;
+    margin: 2px 4px 2px 0;
+    transition: all 0.15s;
+}
+.admin-btn:hover {
+    background: #1a5276;
+    color: #fff;
+    border-color: #4fc3f7;
+}
+.admin-btn-danger {
+    background: #3e1a1a;
+    color: #ef9a9a;
+    border-color: #5a2020;
+}
+.admin-btn-danger:hover {
+    background: #5a2020;
+    color: #ffcdd2;
+    border-color: #e53935;
+}
+.admin-info {
+    font-size: 11px;
+    color: #aaa;
+    padding: 4px 0;
+    min-height: 18px;
+}
+.admin-success { color: #81c784 !important; }
+.admin-error { color: #ef9a9a !important; }
+.admin-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 6px;
+    background: #1a1a2e;
+    border-radius: 3px;
+    margin-bottom: 3px;
+    font-size: 12px;
+}
+.admin-item b { color: #e0e0e0; font-weight: 600; }
+.admin-item-meta { color: #666; font-size: 10px; font-family: monospace; }
+.admin-stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+.admin-stats-table td {
+    padding: 3px 6px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.3);
+}
+.admin-stats-table td:first-child {
+    color: #90caf9;
+    font-family: monospace;
+}
+.admin-stats-table td:last-child {
+    text-align: right;
+    color: #e0e0e0;
+    font-weight: 600;
+}

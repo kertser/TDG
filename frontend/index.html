@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TDG — Tactical Decision Game</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+    <!-- ── Top Bar ─────────────────────────────────── -->
+    <div id="topbar">
+        <span id="app-title">TDG</span>
+
+        <!-- Drawing tools (inline in topbar, hidden until session active) -->
+        <div id="draw-toolbar" style="display:none;">
+            <button class="draw-btn" data-tool="arrow" title="Curved Arrow (right-click to finish)">➜</button>
+            <button class="draw-btn" data-tool="polyline" title="Line (right-click to finish)">╱</button>
+            <button class="draw-btn" data-tool="rectangle" title="Rectangle">▭</button>
+            <button class="draw-btn" data-tool="marker" title="Marker">📍</button>
+            <button class="draw-btn" data-tool="circle" title="Circle">◯</button>
+            <button class="draw-btn sep" data-tool="measure" title="Measure (right-click to finish)">📏</button>
+            <button class="draw-btn" data-tool="clear-measure" title="Clear measurements">🗑</button>
+        </div>
+
+        <span id="session-info"></span>
+        <span id="snail-display" title="Snail address under cursor"></span>
+        <span id="coord-display" title="Coordinates under cursor"></span>
+        <span id="zoom-display" title="Current zoom level"></span>
+
+        <!-- Right-side controls (pushed right via margin-left:auto on first) -->
+        <button id="center-btn" class="topbar-icon-btn" style="display:none;" title="Center on operation area">🎯</button>
+        <span id="user-info"></span>
+        <button id="logout-btn" style="display:none;font-size:11px;padding:4px 8px;" title="Logout">⏻</button>
+    </div>
+
+    <!-- ── Main Layout ─────────────────────────────── -->
+    <div id="main-container">
+        <!-- Map -->
+        <div id="map"></div>
+
+        <!-- Right sidebar -->
+        <div id="sidebar">
+            <div id="sidebar-tabs">
+                <button class="tab-btn active" data-tab="session-tab">Session</button>
+                <button class="tab-btn" data-tab="orders-tab">Orders</button>
+                <button class="tab-btn" data-tab="events-tab">Events</button>
+                <button class="tab-btn" data-tab="log-tab">Log</button>
+                <button class="tab-btn" data-tab="admin-tab">Admin</button>
+            </div>
+
+            <!-- Session panel -->
+            <div id="session-tab" class="tab-panel active">
+                <h3>Session</h3>
+                <div id="auth-panel">
+                    <input type="text" id="display-name-input" placeholder="Your display name" />
+                    <button id="register-btn">Register / Login</button>
+                </div>
+                <div id="session-panel" style="display:none;">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button id="create-session-btn">+ New Session</button>
+                    </div>
+                    <button id="start-session-btn" style="display:none;">Start Session</button>
+                    <button id="tick-btn" style="display:none;">▶ Advance Tick</button>
+                    <div id="session-list"></div>
+                </div>
+                <div id="participants-panel"></div>
+            </div>
+
+            <!-- Orders panel -->
+            <div id="orders-tab" class="tab-panel">
+                <h3>Orders</h3>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <span style="font-size:11px;color:#aaa;white-space:nowrap;">Target units (left-click to select):</span>
+                    <button id="clear-unit-selection-btn" style="font-size:10px;padding:2px 6px;" title="Clear selection">✕</button>
+                </div>
+                <div id="selected-units-display" style="min-height:20px;margin-bottom:6px;">
+                    <span style="color:#888;font-size:11px;">No units selected</span>
+                </div>
+                <textarea id="order-text" placeholder="Enter order text...&#10;e.g. 1st Plt move to B4-3&#10;&#10;Left-click units on map to select, then type order."></textarea>
+                <button id="submit-order-btn">Submit Order</button>
+                <div id="order-list"></div>
+            </div>
+
+            <!-- Events panel -->
+            <div id="events-tab" class="tab-panel">
+                <h3>Events</h3>
+                <div id="events-list" style="overflow-y:auto;flex:1;"></div>
+            </div>
+
+            <!-- Game log panel -->
+            <div id="log-tab" class="tab-panel">
+                <h3>Game Log</h3>
+                <div id="game-log"></div>
+            </div>
+
+            <!-- Admin panel -->
+            <div id="admin-tab" class="tab-panel">
+                <h3>⚙ Administration</h3>
+
+                <div class="admin-section">
+                    <h4>Session Management</h4>
+                    <button id="admin-delete-all-sessions" class="admin-btn admin-btn-danger">🗑 Delete All Sessions</button>
+                    <button id="admin-refresh-sessions" class="admin-btn">🔄 Refresh Sessions</button>
+                    <div id="admin-session-count" class="admin-info"></div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>Scenario Management</h4>
+                    <button id="admin-list-scenarios" class="admin-btn">📋 List Scenarios</button>
+                    <button id="admin-delete-all-scenarios" class="admin-btn admin-btn-danger">🗑 Delete All Scenarios</button>
+                    <div id="admin-scenario-list" class="admin-info"></div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>Current Session</h4>
+                    <div id="admin-current-session-info" class="admin-info">No active session</div>
+                    <button id="admin-pause-session" class="admin-btn" style="display:none;">⏸ Pause</button>
+                    <button id="admin-reset-tick" class="admin-btn" style="display:none;">↺ Reset to Tick 0</button>
+                </div>
+
+                <div class="admin-section">
+                    <h4>Database</h4>
+                    <button id="admin-db-stats" class="admin-btn">📊 DB Stats</button>
+                    <div id="admin-db-info" class="admin-info"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Scripts ─────────────────────────────────── -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-editable@1.2.0/src/Leaflet.Editable.js"></script>
+    <script src="https://unpkg.com/milsymbol@2.2.0/dist/milsymbol.js"></script>
+
+    <script src="/js/map.js"></script>
+    <script src="/js/grid.js"></script>
+    <script src="/js/symbols.js"></script>
+    <script src="/js/units.js"></script>
+    <script src="/js/contacts.js"></script>
+    <script src="/js/overlays.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/orders.js"></script>
+    <script src="/js/events.js"></script>
+    <script src="/js/reports.js"></script>
+    <script src="/js/gamelog.js"></script>
+    <script src="/js/session_ui.js"></script>
+    <script src="/js/admin.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
+
