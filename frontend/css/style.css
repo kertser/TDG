@@ -80,7 +80,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
 #draw-toolbar {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
     padding: 2px 4px;
     background: rgba(26, 26, 46, 0.6);
     border: 1px solid #0f3460;
@@ -95,19 +95,23 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 3px;
+    border-radius: 4px;
     background: transparent;
     border: 1px solid transparent;
-    color: #bbb;
+    color: #8eafc0;
     cursor: pointer;
-    transition: all 0.12s;
+    transition: all 0.15s;
 }
-.draw-btn:hover { background: #1a5276; border-color: #4fc3f7; color: #fff; }
-.draw-btn.active { background: #0f3460; border-color: #4fc3f7; color: #4fc3f7; }
+.draw-btn svg { display: block; }
+.draw-btn:hover { background: rgba(26, 82, 118, 0.6); border-color: rgba(79, 195, 247, 0.5); color: #e0f0ff; }
+.draw-btn.active { background: rgba(15, 52, 96, 0.8); border-color: #4fc3f7; color: #4fc3f7; }
 .draw-btn.btn-cancel { color: #e53935; }
 .draw-btn.btn-cancel:hover { background: #3e1a1a; border-color: #e53935; }
-.draw-btn[data-tool="arrow"] { color: #f44336; font-size: 18px; }
 .draw-btn.sep { margin-left: 4px; }
+
+/* ── Topbar toggle buttons state ─────────────── */
+.topbar-icon-btn.toggled-off { opacity: 0.35; }
+.topbar-icon-btn.toggled-off:hover { opacity: 0.6; }
 
 /* ── Main Layout ──────────────────────────────── */
 #main-container {
@@ -476,3 +480,129 @@ button:hover { background: #1a5276; }
     color: #e0e0e0;
     font-weight: 600;
 }
+
+/* ── Overlay Context Menu ────────────────────── */
+.ctx-menu {
+    position: fixed;
+    z-index: 10000;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 6px 0;
+    min-width: 160px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    font-size: 12px;
+}
+.ctx-menu-section {
+    padding: 4px 10px;
+    border-bottom: 1px solid rgba(15,52,96,0.4);
+}
+.ctx-menu-section:last-child { border-bottom: none; }
+.ctx-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+.ctx-item {
+    display: block;
+    width: 100%;
+    padding: 6px 8px;
+    background: transparent;
+    border: none;
+    color: #e0e0e0;
+    cursor: pointer;
+    text-align: left;
+    font-size: 12px;
+    border-radius: 3px;
+}
+.ctx-item:hover { background: #1a5276; color: #fff; }
+.ctx-item-danger:hover { background: #5a2020; color: #ef9a9a; }
+.ctx-colors {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+.ctx-color-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.15s, transform 0.1s;
+}
+.ctx-color-swatch:hover { border-color: #4fc3f7; transform: scale(1.15); }
+.ctx-color-swatch.active { border-color: #fff; }
+.ctx-widths {
+    display: flex;
+    gap: 4px;
+}
+.ctx-width-btn {
+    flex: 1;
+    padding: 4px 6px;
+    background: #0f3460;
+    border: 1px solid #1a5276;
+    color: #b0c4de;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+}
+.ctx-width-btn:hover { background: #1a5276; color: #fff; border-color: #4fc3f7; }
+.ctx-width-btn.active { background: #1a5276; border-color: #4fc3f7; color: #4fc3f7; }
+
+/* ── Context menu header & label ─────────────── */
+.ctx-menu-header {
+    padding: 5px 10px 3px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #4fc3f7;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+}
+.ctx-input {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 12px;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    outline: none;
+}
+.ctx-input:focus { border-color: #4fc3f7; }
+.ctx-apply-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    background: #1b5e20;
+    color: #a5d6a7;
+    border: 1px solid #2e7d32;
+    border-radius: 3px;
+    cursor: pointer;
+    font-weight: 700;
+}
+.ctx-apply-btn:hover { background: #2e7d32; color: #fff; }
+
+/* ── Overlay marker label tooltip ────────────── */
+.overlay-marker-label {
+    background: rgba(16, 24, 48, 0.85) !important;
+    border: 1px solid rgba(79, 195, 247, 0.4) !important;
+    border-radius: 3px !important;
+    padding: 1px 6px !important;
+    color: #e0e0e0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4) !important;
+}
+.overlay-marker-label::before { display: none !important; }
+
+/* ── Rubber band selection rectangle ─────────── */
+.selection-rectangle {
+    border: 2px dashed #4fc3f7;
+    background: rgba(79, 195, 247, 0.1);
+    position: absolute;
+    pointer-events: none;
+    z-index: 1000;
+}
+

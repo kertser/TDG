@@ -165,6 +165,10 @@ const KSessionUI = (() => {
         if (centerBtn) centerBtn.style.display = 'none';
         const gridToggleBtn = document.getElementById('grid-toggle-btn');
         if (gridToggleBtn) gridToggleBtn.style.display = 'none';
+        const unitsToggleBtn = document.getElementById('units-toggle-btn');
+        if (unitsToggleBtn) unitsToggleBtn.style.display = 'none';
+        const overlaysToggleBtn = document.getElementById('overlays-toggle-btn');
+        if (overlaysToggleBtn) overlaysToggleBtn.style.display = 'none';
 
         // Reset game clock
         KMap.setGameTime(0, null);

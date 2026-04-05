@@ -1,358 +1,552 @@
 /**
  * overlays.js – Drawing tools and collaborative overlay rendering.
- * Uses Leaflet.Editable for standard shapes and custom Catmull-Rom
- * spline drawing for curved arrow overlays.
  *
- * Right-click = finish/commit drawing (arrow: finalizes the spline)
- * ESC = cancel drawing
+ * ALL drawing tools are custom (no Leaflet.Editable dependency):
+ *   Arrow:     Catmull-Rom spline, click points, right-click finish → blue/red
+ *   Polyline:  Click to add points, right-click finish
+ *   Rectangle: Click two corners (dashed)
+ *   Ellipse:   Click center, click edge (dashed)
+ *   Marker:    Single click
+ *
+ * Right-click on any overlay → context menu (delete, color, width).
+ * ESC = cancel any active drawing
  */
 const KOverlays = (() => {
     let overlaysLayer = null;
-    let overlayMap = {};  // overlay_id → L.layer
+    let overlayMap = {};       // overlay_id → Leaflet layer
+    let overlayDataMap = {};   // overlay_id → overlay data object
     let map = null;
     let sessionId = null;
     let token = null;
-    let currentDrawing = null;  // { type, layer }
+    let _visible = true;
 
-    // ── Arrow/spline drawing state ──────────────────
-    let arrowDrawing = false;
-    let arrowControlPoints = [];
-    let arrowPreviewGroup = null;
+    // ── Drawing state ────────────────────────────────
+    let activeTool = null;   // 'arrow'|'polyline'|'rectangle'|'ellipse'|'marker'|null
+    let drawPoints = [];
+    let previewGroup = null;
+    let _previewLine = null;
+    let _previewShape = null;
 
-    // Default overlay styles per type
-    const DEFAULT_STYLES = {
-        polyline:  { color: '#2196f3', weight: 3, opacity: 0.9 },
-        polygon:   { color: '#4caf50', weight: 2, fillOpacity: 0.15 },
-        rectangle: { color: '#ff9800', weight: 2, fillOpacity: 0.12 },
-        marker:    {},
-        circle:    { color: '#9c27b0', weight: 2, fillOpacity: 0.1 },
-        arrow:     { color: '#f44336', weight: 3, opacity: 0.9 },
-        label:     {},
-    };
+    // ── Side-based colors ────────────────────────────
+    const BLUE_COLOR = '#2196f3';
+    const RED_COLOR  = '#f44336';
+
+    function _getDrawColor() { return BLUE_COLOR; }
+
+    function _getOverlayColor(overlay) {
+        if (overlay.side === 'red') return RED_COLOR;
+        if (overlay.style_json && overlay.style_json.color) return overlay.style_json.color;
+        return BLUE_COLOR;
+    }
+
+    // ── Context menu state ───────────────────────────
+    let _ctxOverlayId = null;
+    let _ctxMenu = null;
 
     function init(leafletMap) {
         map = leafletMap;
         overlaysLayer = L.layerGroup().addTo(map);
-        arrowPreviewGroup = L.layerGroup().addTo(map);
+        previewGroup = L.layerGroup().addTo(map);
 
-        // Listen for Leaflet.Editable drawing completion
-        map.on('editable:drawing:commit', _onDrawingCommit);
-
-        // Global ESC handler to cancel any active drawing
+        // Global ESC handler
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 cancelDraw();
+                _hideCtxMenu();
             }
         });
 
-        // Right-click on the map: finish active Leaflet.Editable drawing
-        map.on('contextmenu', (e) => {
-            // Arrow tool has its own right-click handler
-            if (arrowDrawing) return;
-
-            if (currentDrawing && currentDrawing.layer) {
-                L.DomEvent.stopPropagation(e);
-                L.DomEvent.preventDefault(e);
-                _finishCurrentDrawing();
+        // Click anywhere to dismiss context menu
+        document.addEventListener('click', (e) => {
+            if (_ctxMenu && !_ctxMenu.contains(e.target)) {
+                _hideCtxMenu();
             }
         });
+
+        // Initialize context menu handlers
+        _initCtxMenu();
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Visibility Toggle ────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function toggle() {
+        _visible = !_visible;
+        if (overlaysLayer && map) {
+            if (_visible) {
+                if (!map.hasLayer(overlaysLayer)) map.addLayer(overlaysLayer);
+            } else {
+                if (map.hasLayer(overlaysLayer)) map.removeLayer(overlaysLayer);
+            }
+        }
+        return _visible;
+    }
+
+    function isVisible() { return _visible; }
+
+    // ══════════════════════════════════════════════════
+    // ── Context Menu ─────────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _initCtxMenu() {
+        _ctxMenu = document.getElementById('overlay-ctx-menu');
+        if (!_ctxMenu) return;
+
+        // Delete button
+        _ctxMenu.querySelector('[data-action="delete"]').addEventListener('click', () => {
+            if (_ctxOverlayId) {
+                KWebSocket.send('overlay_delete', { overlay_id: _ctxOverlayId });
+            }
+            _hideCtxMenu();
+        });
+
+        // Label apply button
+        const labelApply = document.getElementById('ctx-label-apply');
+        const labelInput = document.getElementById('ctx-label-input');
+        if (labelApply && labelInput) {
+            labelApply.addEventListener('click', () => {
+                if (_ctxOverlayId) {
+                    KWebSocket.send('overlay_update', {
+                        overlay_id: _ctxOverlayId,
+                        label: labelInput.value,  // empty string clears label
+                    });
+                }
+                _hideCtxMenu();
+            });
+            labelInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') labelApply.click();
+                e.stopPropagation(); // prevent ESC from also closing
+            });
+        }
+
+        // Color swatches
+        _ctxMenu.querySelectorAll('.ctx-color-swatch').forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                const color = swatch.dataset.color;
+                if (_ctxOverlayId) {
+                    const data = overlayDataMap[_ctxOverlayId];
+                    const newStyle = { ...(data?.style_json || {}), color };
+                    KWebSocket.send('overlay_update', {
+                        overlay_id: _ctxOverlayId,
+                        style_json: newStyle,
+                    });
+                }
+                _hideCtxMenu();
+            });
+        });
+
+        // Width buttons
+        _ctxMenu.querySelectorAll('.ctx-width-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const weight = parseInt(btn.dataset.width, 10);
+                if (_ctxOverlayId) {
+                    const data = overlayDataMap[_ctxOverlayId];
+                    const newStyle = { ...(data?.style_json || {}), weight };
+                    KWebSocket.send('overlay_update', {
+                        overlay_id: _ctxOverlayId,
+                        style_json: newStyle,
+                    });
+                }
+                _hideCtxMenu();
+            });
+        });
+    }
+
+    function _showCtxMenu(overlayId, x, y) {
+        if (!_ctxMenu) return;
+        _ctxOverlayId = overlayId;
+
+        const data = overlayDataMap[overlayId];
+        const overlayType = data?.overlay_type || '';
+        const isMarker = overlayType === 'marker';
+        const currentColor = data?.style_json?.color || BLUE_COLOR;
+        const currentWeight = data?.style_json?.weight || 3;
+
+        // Set type header
+        const typeLabel = _ctxMenu.querySelector('#ctx-menu-type-label');
+        if (typeLabel) {
+            const typeNames = { arrow: 'Arrow', polyline: 'Line', rectangle: 'Rectangle', circle: 'Ellipse', marker: 'Marker', polygon: 'Polygon', label: 'Label' };
+            typeLabel.textContent = typeNames[overlayType] || overlayType;
+        }
+
+        // Show/hide sections based on type
+        const labelSection = _ctxMenu.querySelector('.ctx-section-label');
+        const colorsSection = _ctxMenu.querySelector('.ctx-section-colors');
+        const widthsSection = _ctxMenu.querySelector('.ctx-section-widths');
+        if (labelSection) {
+            labelSection.style.display = 'block'; // always show label
+            const labelInput = document.getElementById('ctx-label-input');
+            if (labelInput) labelInput.value = data?.label || '';
+        }
+        if (colorsSection) colorsSection.style.display = isMarker ? 'none' : 'block';
+        if (widthsSection) widthsSection.style.display = isMarker ? 'none' : 'block';
+
+        // Highlight current color/width
+        _ctxMenu.querySelectorAll('.ctx-color-swatch').forEach(s => {
+            s.classList.toggle('active', s.dataset.color === currentColor);
+        });
+        _ctxMenu.querySelectorAll('.ctx-width-btn').forEach(b => {
+            b.classList.toggle('active', parseInt(b.dataset.width, 10) === currentWeight);
+        });
+
+        _ctxMenu.style.display = 'block';
+
+        // Position: keep on screen
+        const menuW = _ctxMenu.offsetWidth;
+        const menuH = _ctxMenu.offsetHeight;
+        const posX = (x + menuW > window.innerWidth) ? x - menuW : x;
+        const posY = (y + menuH > window.innerHeight) ? y - menuH : y;
+        _ctxMenu.style.left = posX + 'px';
+        _ctxMenu.style.top = posY + 'px';
+
+        // Focus label input for markers
+        if (isMarker) {
+            setTimeout(() => {
+                const inp = document.getElementById('ctx-label-input');
+                if (inp) inp.focus();
+            }, 50);
+        }
+    }
+
+    function _hideCtxMenu() {
+        if (_ctxMenu) {
+            _ctxMenu.style.display = 'none';
+        }
+        _ctxOverlayId = null;
     }
 
     function setSession(sessId, authToken) {
         sessionId = sessId;
         token = authToken;
 
-        // Show drawing toolbar and right-side controls
         const toolbar = document.getElementById('draw-toolbar');
         if (toolbar) toolbar.style.display = 'flex';
         const centerBtn = document.getElementById('center-btn');
         if (centerBtn) centerBtn.style.display = 'inline-flex';
         const gridToggleBtn = document.getElementById('grid-toggle-btn');
         if (gridToggleBtn) gridToggleBtn.style.display = 'inline-flex';
+        const unitsToggleBtn = document.getElementById('units-toggle-btn');
+        if (unitsToggleBtn) unitsToggleBtn.style.display = 'inline-flex';
+        const overlaysToggleBtn = document.getElementById('overlays-toggle-btn');
+        if (overlaysToggleBtn) overlaysToggleBtn.style.display = 'inline-flex';
     }
 
-    // ── Finish current Leaflet.Editable drawing ─────
-    function _finishCurrentDrawing() {
-        if (!currentDrawing || !currentDrawing.layer) return;
+    // ══════════════════════════════════════════════════
+    // ── Drawing Tool Entry Points ────────────────────
+    // ══════════════════════════════════════════════════
 
-        try {
-            const layer = currentDrawing.layer;
-            const editor = layer.editor;
-
-            if (!editor) {
-                cancelDraw();
-                return;
-            }
-
-            // For polylines: need at least 2 points
-            if (currentDrawing.type === 'polyline') {
-                const latlngs = layer.getLatLngs();
-                if (latlngs.length < 2) {
-                    cancelDraw();
-                    return;
-                }
-                // Pop the temporary guide vertex, then commit
-                try { editor.pop(); } catch {}
-                editor.commitDrawing();
-            } else if (currentDrawing.type === 'polygon') {
-                const latlngs = layer.getLatLngs();
-                const ring = latlngs[0] || latlngs;
-                if (ring.length < 3) {
-                    cancelDraw();
-                    return;
-                }
-                try { editor.pop(); } catch {}
-                editor.commitDrawing();
-            } else {
-                // Rectangle, circle, marker: commit directly
-                editor.commitDrawing();
-            }
-        } catch (err) {
-            console.warn('Finish drawing error:', err);
-            cancelDraw();
-        }
+    function isDrawing() {
+        return activeTool !== null;
     }
-
-    // ── Standard Shape Drawing ──────────────────────
 
     function startDraw(type) {
         if (!map) return;
-
-        // Cancel any active drawing first
         cancelDraw();
 
-        if (type === 'arrow') {
-            _startArrowDraw();
-            return;
-        }
-
-        switch (type) {
-            case 'polyline':
-                currentDrawing = { type: 'polyline', layer: map.editTools.startPolyline() };
-                break;
-            case 'polygon':
-                currentDrawing = { type: 'polygon', layer: map.editTools.startPolygon() };
-                break;
-            case 'rectangle':
-                currentDrawing = { type: 'rectangle', layer: map.editTools.startRectangle() };
-                break;
-            case 'marker':
-                currentDrawing = { type: 'marker', layer: map.editTools.startMarker() };
-                break;
-            case 'circle':
-                currentDrawing = { type: 'circle', layer: map.editTools.startCircle() };
-                break;
-            default:
-                console.warn('Unknown draw type:', type);
-                return;
-        }
-
-        // Visual feedback
+        activeTool = type;
+        drawPoints = [];
+        _previewLine = null;
+        _previewShape = null;
         map.getContainer().style.cursor = 'crosshair';
+
+        if (type === 'marker') {
+            map.on('click', _onMarkerClick);
+        } else if (type === 'rectangle') {
+            map.on('click', _onRectClick);
+            map.on('mousemove', _onRectMouseMove);
+            map.on('contextmenu', _onRectCancel);
+        } else if (type === 'ellipse') {
+            map.on('click', _onEllipseClick);
+            map.on('mousemove', _onEllipseMouseMove);
+            map.on('contextmenu', _onEllipseCancel);
+        } else {
+            // arrow or polyline
+            map.on('click', _onLineClick);
+            map.on('mousemove', _onLineMouseMove);
+            map.on('contextmenu', _onLineRightClick);
+        }
     }
 
     function cancelDraw() {
-        // Cancel standard Leaflet.Editable drawing
-        if (currentDrawing && currentDrawing.layer) {
-            try { currentDrawing.layer.remove(); } catch {}
-        }
-        currentDrawing = null;
-        if (map && map.editTools) {
-            try { map.editTools.stopDrawing(); } catch {}
-        }
-        if (map) {
-            map.getContainer().style.cursor = '';
-        }
-        // Cancel arrow drawing (clears preview)
-        _cancelArrowDraw();
-        // Reset toolbar buttons
+        _removeAllDrawListeners();
+        activeTool = null;
+        drawPoints = [];
+        _previewLine = null;
+        _previewShape = null;
+        previewGroup.clearLayers();
+        if (map) map.getContainer().style.cursor = '';
         document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
     }
 
-    function _onDrawingCommit(e) {
-        const layer = e.layer;
-        if (!currentDrawing || !sessionId) return;
-
-        const overlayType = currentDrawing.type;
-        const geometry = _layerToGeoJSON(layer);
-
-        if (!geometry) {
-            layer.remove();
-            currentDrawing = null;
-            map.getContainer().style.cursor = '';
-            return;
-        }
-
-        const style = { ...(DEFAULT_STYLES[overlayType] || {}) };
-
-        // Send via WebSocket
-        KWebSocket.send('overlay_create', {
-            overlay_type: overlayType,
-            geometry: geometry,
-            style_json: style,
-        });
-
-        // Remove the temporary drawn layer (re-added from server response)
-        layer.remove();
-        currentDrawing = null;
-        map.getContainer().style.cursor = '';
-        // Reset toolbar buttons
+    /** Stop listening but keep preview visible (for finalized shapes). */
+    function _stopDraw() {
+        _removeAllDrawListeners();
+        activeTool = null;
+        drawPoints = [];
+        _previewLine = null;
+        _previewShape = null;
+        if (map) map.getContainer().style.cursor = '';
         document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
     }
 
-    function _layerToGeoJSON(layer) {
-        if (!layer) return null;
-        if (layer instanceof L.Circle) {
-            const center = layer.getLatLng();
-            const radius = layer.getRadius();
-            return {
-                type: 'Point',
-                coordinates: [center.lng, center.lat],
-            };
-        }
-        if (layer.toGeoJSON) {
-            return layer.toGeoJSON().geometry;
-        }
-        return null;
+    function _removeAllDrawListeners() {
+        if (!map) return;
+        map.off('click', _onMarkerClick);
+        map.off('click', _onRectClick);
+        map.off('mousemove', _onRectMouseMove);
+        map.off('contextmenu', _onRectCancel);
+        map.off('click', _onEllipseClick);
+        map.off('mousemove', _onEllipseMouseMove);
+        map.off('contextmenu', _onEllipseCancel);
+        map.off('click', _onLineClick);
+        map.off('mousemove', _onLineMouseMove);
+        map.off('contextmenu', _onLineRightClick);
     }
 
     // ══════════════════════════════════════════════════
-    // ── Curved Arrow (Spline) Drawing ────────────────
+    // ── Arrow / Polyline (shared click-to-add logic) ─
     // ══════════════════════════════════════════════════
 
-    function _startArrowDraw() {
-        // Clear any previous arrow preview first
-        arrowPreviewGroup.clearLayers();
-        arrowDrawing = true;
-        arrowControlPoints = [];
-        _arrowPreviewLine = null;
-        map.getContainer().style.cursor = 'crosshair';
+    function _onLineClick(e) {
+        if (!activeTool) return;
+        drawPoints.push([e.latlng.lat, e.latlng.lng]);
 
-        map.on('click', _onArrowClick);
-        map.on('mousemove', _onArrowMouseMove);
-        map.on('contextmenu', _onArrowRightClick);
+        const color = _getDrawColor();
+        previewGroup.addLayer(L.circleMarker(e.latlng, {
+            radius: 4, color, fillColor: color, fillOpacity: 0.8, weight: 2,
+        }));
+        _updateLinePreview();
     }
 
-    /**
-     * Stop the arrow drawing mode (remove event listeners)
-     * but do NOT clear the preview visuals.
-     */
-    function _stopArrowDrawMode() {
-        arrowDrawing = false;
-        arrowControlPoints = [];
-        _arrowPreviewLine = null;
-        if (map) {
-            map.getContainer().style.cursor = '';
-            map.off('click', _onArrowClick);
-            map.off('mousemove', _onArrowMouseMove);
-            map.off('contextmenu', _onArrowRightClick);
+    function _onLineMouseMove(e) {
+        if (!activeTool || drawPoints.length === 0) return;
+        const color = _getDrawColor();
+        const pts = [...drawPoints, [e.latlng.lat, e.latlng.lng]];
+        const coords = activeTool === 'arrow' ? catmullRomSpline(pts, 16) : pts;
+
+        if (_previewLine) {
+            _previewLine.setLatLngs(coords);
+        } else {
+            _previewLine = L.polyline(coords, {
+                color, weight: 2, dashArray: '6,4', opacity: 0.6,
+            });
+            previewGroup.addLayer(_previewLine);
         }
     }
 
-    /**
-     * Cancel arrow drawing: stop drawing AND clear preview visuals.
-     * Used when user presses ESC or starts a different tool.
-     */
-    function _cancelArrowDraw() {
-        _stopArrowDrawMode();
-        arrowPreviewGroup.clearLayers();
-    }
-
-    let _arrowPreviewLine = null;
-
-    function _onArrowClick(e) {
-        if (!arrowDrawing) return;
-
-        arrowControlPoints.push([e.latlng.lat, e.latlng.lng]);
-
-        // Draw control point marker
-        const marker = L.circleMarker(e.latlng, {
-            radius: 5, color: '#f44336', fillColor: '#f44336',
-            fillOpacity: 0.9, weight: 2,
-        });
-        arrowPreviewGroup.addLayer(marker);
-
-        // Redraw spline preview
-        _updateArrowPreview();
-    }
-
-    function _onArrowMouseMove(e) {
-        if (!arrowDrawing || arrowControlPoints.length === 0) return;
-
-        // Show a preview line from last point to cursor
-        const pts = [...arrowControlPoints, [e.latlng.lat, e.latlng.lng]];
-        if (pts.length >= 2) {
-            const spline = catmullRomSpline(pts, 16);
-            if (_arrowPreviewLine) {
-                _arrowPreviewLine.setLatLngs(spline);
-            } else {
-                _arrowPreviewLine = L.polyline(spline, {
-                    color: '#f44336', weight: 2, dashArray: '6,4', opacity: 0.6,
-                });
-                arrowPreviewGroup.addLayer(_arrowPreviewLine);
-            }
-        }
-    }
-
-    function _onArrowRightClick(e) {
-        if (!arrowDrawing) return;
+    function _onLineRightClick(e) {
+        if (!activeTool) return;
         L.DomEvent.stopPropagation(e);
         L.DomEvent.preventDefault(e);
-        _finalizeArrow();
+        _finalizeLine();
     }
 
-    function _updateArrowPreview() {
-        if (arrowControlPoints.length < 2) return;
-
-        // Remove old preview line (keep control point markers)
-        if (_arrowPreviewLine) {
-            arrowPreviewGroup.removeLayer(_arrowPreviewLine);
-            _arrowPreviewLine = null;
+    function _updateLinePreview() {
+        if (drawPoints.length < 2) return;
+        if (_previewLine) {
+            previewGroup.removeLayer(_previewLine);
+            _previewLine = null;
         }
-
-        const spline = catmullRomSpline(arrowControlPoints, 20);
-        _arrowPreviewLine = L.polyline(spline, {
-            color: '#f44336', weight: 3, opacity: 0.7,
-        });
-        arrowPreviewGroup.addLayer(_arrowPreviewLine);
+        const color = _getDrawColor();
+        const coords = activeTool === 'arrow' ? catmullRomSpline(drawPoints, 20) : drawPoints;
+        _previewLine = L.polyline(coords, { color, weight: 3, opacity: 0.7 });
+        previewGroup.addLayer(_previewLine);
     }
 
-    function _finalizeArrow() {
-        if (arrowControlPoints.length < 2) {
-            _cancelArrowDraw();
-            return;
+    function _finalizeLine() {
+        if (drawPoints.length < 2) { cancelDraw(); return; }
+
+        const type = activeTool;
+        const color = _getDrawColor();
+        let coordinates, properties = {};
+
+        if (type === 'arrow') {
+            const spline = catmullRomSpline(drawPoints, 20);
+            coordinates = spline.map(p => [p[1], p[0]]);
+            properties = { control_points: drawPoints, is_spline: true };
+        } else {
+            coordinates = drawPoints.map(p => [p[1], p[0]]);
         }
 
-        // Compute final spline
-        const spline = catmullRomSpline(arrowControlPoints, 20);
-
-        // Build GeoJSON LineString
-        const coordinates = spline.map(p => [p[1], p[0]]); // [lng, lat]
         const geometry = { type: 'LineString', coordinates };
+        const style = { color, weight: 3, opacity: 0.9 };
 
-        const style = { ...DEFAULT_STYLES.arrow };
-
-        // Send to server
         KWebSocket.send('overlay_create', {
-            overlay_type: 'arrow',
-            geometry: geometry,
+            overlay_type: type,
+            geometry,
             style_json: style,
-            properties: {
-                control_points: arrowControlPoints,
-                is_spline: true,
-            },
+            properties,
         });
 
-        // Stop drawing mode but keep preview visible until server
-        // responds with overlay_created (the preview will be cleared
-        // when the user starts a new drawing tool).
-        _stopArrowDrawMode();
-
-        // Reset toolbar button
-        document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
+        _stopDraw();
     }
 
+    // ══════════════════════════════════════════════════
+    // ── Rectangle (two-click, dashed) ────────────────
+    // ══════════════════════════════════════════════════
+
+    function _onRectClick(e) {
+        if (activeTool !== 'rectangle') return;
+        drawPoints.push([e.latlng.lat, e.latlng.lng]);
+
+        if (drawPoints.length === 1) {
+            const color = _getDrawColor();
+            previewGroup.addLayer(L.circleMarker(e.latlng, {
+                radius: 4, color, fillColor: color, fillOpacity: 0.8, weight: 2,
+            }));
+        } else if (drawPoints.length >= 2) {
+            _finalizeRect();
+        }
+    }
+
+    function _onRectMouseMove(e) {
+        if (activeTool !== 'rectangle' || drawPoints.length !== 1) return;
+        const color = _getDrawColor();
+        const p1 = drawPoints[0];
+        const bounds = L.latLngBounds(
+            L.latLng(p1[0], p1[1]),
+            L.latLng(e.latlng.lat, e.latlng.lng)
+        );
+
+        if (_previewShape) {
+            _previewShape.setBounds(bounds);
+        } else {
+            _previewShape = L.rectangle(bounds, {
+                color, weight: 2, dashArray: '8,6', fillOpacity: 0.08,
+            });
+            previewGroup.addLayer(_previewShape);
+        }
+    }
+
+    function _onRectCancel(e) {
+        if (activeTool !== 'rectangle') return;
+        L.DomEvent.stopPropagation(e);
+        L.DomEvent.preventDefault(e);
+        cancelDraw();
+    }
+
+    function _finalizeRect() {
+        const p1 = drawPoints[0], p2 = drawPoints[1];
+        const color = _getDrawColor();
+
+        const minLat = Math.min(p1[0], p2[0]), maxLat = Math.max(p1[0], p2[0]);
+        const minLng = Math.min(p1[1], p2[1]), maxLng = Math.max(p1[1], p2[1]);
+
+        const coordinates = [[
+            [minLng, minLat], [maxLng, minLat],
+            [maxLng, maxLat], [minLng, maxLat],
+            [minLng, minLat],
+        ]];
+
+        KWebSocket.send('overlay_create', {
+            overlay_type: 'rectangle',
+            geometry: { type: 'Polygon', coordinates },
+            style_json: { color, weight: 2, dashArray: '8,6', fillOpacity: 0.08 },
+        });
+
+        _stopDraw();
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Ellipse (click center + click edge, dashed) ──
+    // ══════════════════════════════════════════════════
+
+    function _onEllipseClick(e) {
+        if (activeTool !== 'ellipse') return;
+        drawPoints.push([e.latlng.lat, e.latlng.lng]);
+
+        if (drawPoints.length === 1) {
+            const color = _getDrawColor();
+            previewGroup.addLayer(L.circleMarker(e.latlng, {
+                radius: 4, color, fillColor: color, fillOpacity: 0.8, weight: 2,
+            }));
+        } else if (drawPoints.length >= 2) {
+            _finalizeEllipse();
+        }
+    }
+
+    function _onEllipseMouseMove(e) {
+        if (activeTool !== 'ellipse' || drawPoints.length !== 1) return;
+        const color = _getDrawColor();
+        const center = drawPoints[0];
+        const edge = [e.latlng.lat, e.latlng.lng];
+        const pts = _computeEllipsePoints(center, edge, 48);
+
+        if (_previewShape) {
+            _previewShape.setLatLngs(pts);
+        } else {
+            _previewShape = L.polygon(pts, {
+                color, weight: 2, dashArray: '8,6', fillOpacity: 0.08,
+            });
+            previewGroup.addLayer(_previewShape);
+        }
+    }
+
+    function _onEllipseCancel(e) {
+        if (activeTool !== 'ellipse') return;
+        L.DomEvent.stopPropagation(e);
+        L.DomEvent.preventDefault(e);
+        cancelDraw();
+    }
+
+    function _finalizeEllipse() {
+        const center = drawPoints[0], edge = drawPoints[1];
+        const color = _getDrawColor();
+        const pts = _computeEllipsePoints(center, edge, 48);
+
+        // Convert to GeoJSON Polygon [lng, lat]
+        const ring = pts.map(p => [p[1], p[0]]);
+        ring.push(ring[0]); // close ring
+
+        KWebSocket.send('overlay_create', {
+            overlay_type: 'circle',  // stored as circle type, geometry is polygon
+            geometry: { type: 'Polygon', coordinates: [ring] },
+            style_json: { color, weight: 2, dashArray: '8,6', fillOpacity: 0.08 },
+            properties: { is_ellipse: true, center, edge },
+        });
+
+        _stopDraw();
+    }
+
+    /** Compute ellipse polygon points. Semi-axes from center→edge delta. */
+    function _computeEllipsePoints(center, edge, numPts) {
+        const dLat = Math.abs(edge[0] - center[0]);
+        const dLng = Math.abs(edge[1] - center[1]);
+        const semiA = dLng || dLat * 0.5;
+        const semiB = dLat || dLng * 0.5;
+
+        const pts = [];
+        for (let i = 0; i < numPts; i++) {
+            const a = (2 * Math.PI * i) / numPts;
+            pts.push([
+                center[0] + semiB * Math.sin(a),
+                center[1] + semiA * Math.cos(a),
+            ]);
+        }
+        return pts;
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Marker (single click) ────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _onMarkerClick(e) {
+        if (activeTool !== 'marker') return;
+
+        KWebSocket.send('overlay_create', {
+            overlay_type: 'marker',
+            geometry: { type: 'Point', coordinates: [e.latlng.lng, e.latlng.lat] },
+            style_json: {},
+        });
+
+        cancelDraw();
+    }
+
+    // ══════════════════════════════════════════════════
     // ── Catmull-Rom Spline Interpolation ─────────────
+    // ══════════════════════════════════════════════════
+
     function catmullRomSpline(points, numPerSegment = 20) {
         if (points.length < 2) return points.slice();
         if (points.length === 2) {
@@ -371,68 +565,43 @@ const KOverlays = (() => {
         const result = [];
 
         for (let i = 1; i < pts.length - 2; i++) {
-            const p0 = pts[i - 1];
-            const p1 = pts[i];
-            const p2 = pts[i + 1];
-            const p3 = pts[i + 2];
-
+            const p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2];
             for (let t = 0; t < 1; t += 1 / numPerSegment) {
-                const t2 = t * t;
-                const t3 = t2 * t;
-
-                const lat = 0.5 * (
-                    (2 * p1[0]) +
-                    (-p0[0] + p2[0]) * t +
-                    (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 +
-                    (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3
-                );
-                const lng = 0.5 * (
-                    (2 * p1[1]) +
-                    (-p0[1] + p2[1]) * t +
-                    (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 +
-                    (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3
-                );
-                result.push([lat, lng]);
+                const t2 = t * t, t3 = t2 * t;
+                result.push([
+                    0.5 * ((2*p1[0]) + (-p0[0]+p2[0])*t + (2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2 + (-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+                    0.5 * ((2*p1[1]) + (-p0[1]+p2[1])*t + (2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2 + (-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3),
+                ]);
             }
         }
         result.push(points[points.length - 1]);
-
         return result;
     }
 
-    // ── Arrowhead Rendering Helper ──────────────────
+    // ══════════════════════════════════════════════════
+    // ── Arrowhead Rendering ─────────────────────────
+    // ══════════════════════════════════════════════════
+
     function _createArrowhead(latlngs, style = {}) {
         if (latlngs.length < 2) return null;
-
         const tip = latlngs[latlngs.length - 1];
         const prev = latlngs[latlngs.length - 2];
-
         const dLat = tip[0] - prev[0];
         const dLng = tip[1] - prev[1];
         const angle = Math.atan2(dLng, dLat);
-
         const size = 0.0008;
         const spread = 0.45;
-
-        const left = [
-            tip[0] - size * Math.cos(angle - spread),
-            tip[1] - size * Math.sin(angle - spread),
-        ];
-        const right = [
-            tip[0] - size * Math.cos(angle + spread),
-            tip[1] - size * Math.sin(angle + spread),
-        ];
-
+        const left = [tip[0] - size * Math.cos(angle - spread), tip[1] - size * Math.sin(angle - spread)];
+        const right = [tip[0] - size * Math.cos(angle + spread), tip[1] - size * Math.sin(angle + spread)];
+        const color = style.color || BLUE_COLOR;
         return L.polygon([tip, left, right], {
-            color: style.color || '#f44336',
-            fillColor: style.color || '#f44336',
-            fillOpacity: 0.9,
-            weight: 1,
-            interactive: false,
+            color, fillColor: color, fillOpacity: 0.9, weight: 1, interactive: true,
         });
     }
 
-    // ── Rendering ────────────────────────────────────
+    // ══════════════════════════════════════════════════
+    // ── Server Overlay Rendering ─────────────────────
+    // ══════════════════════════════════════════════════
 
     async function loadFromServer() {
         if (!sessionId || !token) return;
@@ -452,61 +621,81 @@ const KOverlays = (() => {
         if (!overlaysLayer) return;
         overlaysLayer.clearLayers();
         overlayMap = {};
+        overlayDataMap = {};
         overlays.forEach(o => addOverlayToMap(o));
     }
 
     function addOverlayToMap(overlay) {
         if (!overlay.geometry || !overlaysLayer) return;
 
-        // Clear arrow preview since overlay from server replaces it
-        arrowPreviewGroup.clearLayers();
+        // Clear preview since server overlay replaces it
+        previewGroup.clearLayers();
 
-        const style = overlay.style_json || DEFAULT_STYLES[overlay.overlay_type] || {};
+        const color = _getOverlayColor(overlay);
+        const style = overlay.style_json ? { ...overlay.style_json } : {};
+        style.color = style.color || color;
         let layer = null;
 
         try {
             if (overlay.overlay_type === 'arrow' && overlay.geometry.type === 'LineString') {
                 const coords = overlay.geometry.coordinates.map(c => [c[1], c[0]]);
                 const group = L.layerGroup();
-
-                const line = L.polyline(coords, {
-                    color: style.color || '#f44336',
-                    weight: style.weight || 3,
-                    opacity: style.opacity || 0.9,
-                });
-                group.addLayer(line);
-
-                const arrow = _createArrowhead(coords, style);
-                if (arrow) group.addLayer(arrow);
-
+                group.addLayer(L.polyline(coords, {
+                    color: style.color, weight: style.weight || 3, opacity: style.opacity || 0.9,
+                }));
+                const ah = _createArrowhead(coords, style);
+                if (ah) group.addLayer(ah);
                 layer = group;
+            } else if (overlay.overlay_type === 'polyline' && overlay.geometry.type === 'LineString') {
+                const coords = overlay.geometry.coordinates.map(c => [c[1], c[0]]);
+                layer = L.polyline(coords, {
+                    color: style.color, weight: style.weight || 3, opacity: style.opacity || 0.9,
+                });
+            } else if (overlay.overlay_type === 'marker' && overlay.geometry.type === 'Point') {
+                const c = overlay.geometry.coordinates;
+                layer = L.marker([c[1], c[0]]);
+                // If marker has a label, show as permanent tooltip
+                if (overlay.label) {
+                    layer.bindTooltip(overlay.label, {
+                        permanent: true,
+                        direction: 'top',
+                        offset: [0, -20],
+                        className: 'overlay-marker-label',
+                    });
+                }
+            } else if (overlay.geometry.type === 'Polygon') {
+                const coords = overlay.geometry.coordinates[0].map(c => [c[1], c[0]]);
+                layer = L.polygon(coords, {
+                    color: style.color || color,
+                    weight: style.weight || 2,
+                    dashArray: style.dashArray || null,
+                    fillOpacity: style.fillOpacity || 0.08,
+                });
             } else {
                 layer = L.geoJSON(overlay.geometry, {
                     style: () => style,
-                    pointToLayer: (feature, latlng) => {
-                        if (overlay.overlay_type === 'circle') {
-                            return L.circle(latlng, {
-                                radius: overlay.properties?.radius || 500,
-                                ...style,
-                            });
-                        }
-                        return L.marker(latlng);
-                    },
+                    pointToLayer: (f, ll) => L.marker(ll),
                 });
             }
 
             if (layer) {
-                // Right-click to delete overlay
-                layer.on('contextmenu', (e) => {
+                // Right-click → context menu
+                const ctxHandler = (e) => {
                     L.DomEvent.stopPropagation(e);
                     L.DomEvent.preventDefault(e);
-                    if (confirm('Delete this overlay?')) {
-                        KWebSocket.send('overlay_delete', { overlay_id: overlay.id });
-                    }
-                });
+                    const origEvt = e.originalEvent || e;
+                    _showCtxMenu(overlay.id, origEvt.clientX, origEvt.clientY);
+                };
+
+                if (layer instanceof L.LayerGroup) {
+                    layer.eachLayer(sub => sub.on('contextmenu', ctxHandler));
+                } else {
+                    layer.on('contextmenu', ctxHandler);
+                }
 
                 overlaysLayer.addLayer(layer);
                 overlayMap[overlay.id] = layer;
+                overlayDataMap[overlay.id] = overlay;
             }
         } catch (err) {
             console.warn('Failed to render overlay:', overlay.id, err);
@@ -520,10 +709,10 @@ const KOverlays = (() => {
     }
 
     function onOverlayUpdated(data) {
-        // Remove old, add new
         if (data.id && overlayMap[data.id]) {
             overlaysLayer.removeLayer(overlayMap[data.id]);
             delete overlayMap[data.id];
+            delete overlayDataMap[data.id];
         }
         addOverlayToMap(data);
     }
@@ -533,12 +722,13 @@ const KOverlays = (() => {
         if (id && overlayMap[id]) {
             overlaysLayer.removeLayer(overlayMap[id]);
             delete overlayMap[id];
+            delete overlayDataMap[id];
         }
     }
 
     return {
-        init, setSession, startDraw, cancelDraw,
-        loadFromServer, render,
+        init, setSession, startDraw, cancelDraw, isDrawing,
+        loadFromServer, render, toggle, isVisible,
         onOverlayCreated, onOverlayUpdated, onOverlayDeleted,
     };
 })();

@@ -31,7 +31,6 @@ const KMap = (() => {
             center: center,
             zoom: zoom,
             zoomControl: true,
-            editable: true,
             contextmenu: false,
             dragging: false,          // ◄ disable default left-button drag
         });
@@ -190,10 +189,6 @@ const KMap = (() => {
             if (_currentGameTime) {
                 const h = String(_currentGameTime.getUTCHours()).padStart(2, '0');
                 const m = String(_currentGameTime.getUTCMinutes()).padStart(2, '0');
-                const day = Math.floor((_currentGameTime.getTime() -
-                    new Date(_currentGameTime.toISOString().split('T')[0]).getTime()) /
-                    (24 * 60 * 60 * 1000)) || 0;
-                // Show date + time
                 const dateStr = _currentGameTime.toISOString().split('T')[0];
                 _clockEl.time.textContent = `${dateStr} ${h}:${m}`;
             } else {
@@ -228,10 +223,34 @@ const KMap = (() => {
             measureGroup.removeLayer(_previewLine);
             _previewLine = null;
         }
+        // After measurement is done, make layers right-clickable for deletion
+        _enableMeasureDelete();
     }
 
     function clearMeasure() {
         stopMeasure();
+        measureGroup.clearLayers();
+        measurePoints = [];
+    }
+
+    /** Make finished measurement layers interactive for right-click deletion. */
+    function _enableMeasureDelete() {
+        if (measureGroup.getLayers().length === 0) return;
+
+        measureGroup.eachLayer(layer => {
+            // Make segments and markers interactive for right-click
+            if (layer instanceof L.CircleMarker || layer instanceof L.Polyline) {
+                layer.options.interactive = true;
+                if (layer._path) layer._path.style.pointerEvents = 'auto';
+                layer.on('contextmenu', _onMeasureLayerRightClick);
+            }
+        });
+    }
+
+    function _onMeasureLayerRightClick(e) {
+        L.DomEvent.stopPropagation(e);
+        L.DomEvent.preventDefault(e);
+        // Clear all measurements on right-click
         measureGroup.clearLayers();
         measurePoints = [];
     }

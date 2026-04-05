@@ -77,6 +77,9 @@ class Unit(Base):
     move_speed_mps: Mapped[float] = mapped_column(Float, default=5.0)      # ~18 km/h
     detection_range_m: Mapped[float] = mapped_column(Float, default=2000.0) # 2 km
 
+    # User assignment — list of user_id strings who can command this unit
+    assigned_user_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     is_destroyed: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

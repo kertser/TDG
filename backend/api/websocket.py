@@ -111,7 +111,9 @@ async def websocket_endpoint(
                 )
 
             elif msg_type == "overlay_create":
-                await _handle_overlay_create(session_id, user.id, side, msg_data, websocket)
+                # Map 'admin' side to 'blue' for overlay storage (OverlaySide enum)
+                overlay_side = side if side in ("blue", "red", "observer") else "blue"
+                await _handle_overlay_create(session_id, user.id, overlay_side, msg_data, websocket)
 
             elif msg_type == "overlay_update":
                 await _handle_overlay_update(session_id, msg_data, websocket)
@@ -196,15 +198,19 @@ async def _handle_overlay_update(
 
     async with async_session_factory() as db:
         try:
-            result = await overlay_service.update_overlay(
+            update_kwargs = dict(
                 session_id=session_id,
                 overlay_id=uuid.UUID(overlay_id),
                 geometry=data.get("geometry"),
                 style_json=data.get("style_json"),
-                label=data.get("label"),
                 properties=data.get("properties"),
                 db=db,
             )
+            # Only pass label if explicitly included in the message
+            if "label" in data:
+                update_kwargs["label"] = data["label"]
+
+            result = await overlay_service.update_overlay(**update_kwargs)
             await db.commit()
             if result is None:
                 await websocket.send_text(

@@ -97,7 +97,6 @@
 
         KWebSocket.on('overlay_created', (data) => {
             KOverlays.onOverlayCreated(data);
-            KGameLog.addEntry('Overlay created', 'info');
         });
 
         KWebSocket.on('overlay_updated', (data) => {
@@ -106,7 +105,6 @@
 
         KWebSocket.on('overlay_deleted', (data) => {
             KOverlays.onOverlayDeleted(data);
-            KGameLog.addEntry('Overlay deleted', 'info');
         });
 
         KWebSocket.on('order_status', (data) => {

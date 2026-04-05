@@ -70,13 +70,17 @@ async def create_overlay(
 
     serialized = _serialize_overlay(overlay)
 
-    # Broadcast to session
+    # Broadcast to session (only to same side + admin/observer)
     await ws_manager.broadcast(
         session_id,
         {"type": "overlay_created", "data": serialized},
+        only_side=side,
     )
 
     return serialized
+
+
+_NOT_SET = object()
 
 
 async def update_overlay(
@@ -84,7 +88,7 @@ async def update_overlay(
     overlay_id: uuid.UUID,
     geometry: dict | None = None,
     style_json: dict | None = None,
-    label: str | None = None,
+    label=_NOT_SET,
     properties: dict | None = None,
     db: AsyncSession = None,
 ) -> dict | None:
@@ -103,8 +107,8 @@ async def update_overlay(
         overlay.geometry = from_shape(shape(geometry), srid=4326)
     if style_json is not None:
         overlay.style_json = style_json
-    if label is not None:
-        overlay.label = label
+    if label is not _NOT_SET:
+        overlay.label = label if label else None  # empty string → None
     if properties is not None:
         overlay.properties = properties
 
@@ -116,6 +120,7 @@ async def update_overlay(
     await ws_manager.broadcast(
         session_id,
         {"type": "overlay_updated", "data": serialized},
+        only_side=overlay.side.value,
     )
 
     return serialized
@@ -137,12 +142,15 @@ async def delete_overlay(
     if overlay is None:
         return False
 
+    overlay_side = overlay.side.value
+
     await db.delete(overlay)
     await db.flush()
 
     await ws_manager.broadcast(
         session_id,
         {"type": "overlay_deleted", "data": {"overlay_id": str(overlay_id)}},
+        only_side=overlay_side,
     )
 
     return True

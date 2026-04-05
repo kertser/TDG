@@ -49,6 +49,7 @@ def _serialize_unit(unit: Unit) -> dict:
         "move_speed_mps": unit.move_speed_mps,
         "detection_range_m": unit.detection_range_m,
         "is_destroyed": unit.is_destroyed,
+        "assigned_user_ids": unit.assigned_user_ids,
     }
 
 

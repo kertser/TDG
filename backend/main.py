@@ -21,6 +21,19 @@ async def lifespan(app: FastAPI):
     app.state.redis = aioredis.from_url(
         settings.REDIS_URL, decode_responses=True
     )
+
+    # Auto-create tables and apply schema updates (dev mode)
+    from backend.database import engine, Base
+    from sqlalchemy import text
+    import backend.models  # noqa: F401 — ensure all models registered
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+        await conn.run_sync(Base.metadata.create_all)
+        # Add assigned_user_ids column if not exists (migration for existing DBs)
+        await conn.execute(text(
+            "ALTER TABLE units ADD COLUMN IF NOT EXISTS assigned_user_ids JSONB"
+        ))
+
     yield
     # ── Shutdown ──────────────────────────────────────
     await app.state.redis.close()

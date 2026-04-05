@@ -1,6 +1,6 @@
 /**
  * ui.js – Sidebar tab switching, drawing toolbar in topbar,
- *         standalone center-on-map button.
+ *         standalone center-on-map, grid-toggle, units-toggle, overlays-toggle buttons.
  */
 const KUI = (() => {
     function init() {
@@ -25,11 +25,8 @@ const KUI = (() => {
                     _clearActive();
                     btn.classList.add('active');
                     KMap.startMeasure();
-                } else if (tool === 'clear-measure') {
-                    KMap.clearMeasure();
-                    _clearActive();
                 } else {
-                    // Drawing tool (arrow, polyline, rectangle, marker, circle)
+                    // Drawing tool (arrow, polyline, rectangle, ellipse, marker)
                     KMap.stopMeasure();
                     _clearActive();
                     btn.classList.add('active');
@@ -51,8 +48,28 @@ const KUI = (() => {
         if (gridToggleBtn) {
             gridToggleBtn.addEventListener('click', () => {
                 const visible = KGrid.toggle();
-                gridToggleBtn.style.opacity = visible ? '1' : '0.4';
+                gridToggleBtn.classList.toggle('toggled-off', !visible);
                 gridToggleBtn.title = visible ? 'Hide grid' : 'Show grid';
+            });
+        }
+
+        // Units toggle button
+        const unitsToggleBtn = document.getElementById('units-toggle-btn');
+        if (unitsToggleBtn) {
+            unitsToggleBtn.addEventListener('click', () => {
+                const visible = KUnits.toggle();
+                unitsToggleBtn.classList.toggle('toggled-off', !visible);
+                unitsToggleBtn.title = visible ? 'Hide units' : 'Show units';
+            });
+        }
+
+        // Overlays toggle button
+        const overlaysToggleBtn = document.getElementById('overlays-toggle-btn');
+        if (overlaysToggleBtn) {
+            overlaysToggleBtn.addEventListener('click', () => {
+                const visible = KOverlays.toggle();
+                overlaysToggleBtn.classList.toggle('toggled-off', !visible);
+                overlaysToggleBtn.title = visible ? 'Hide overlays' : 'Show overlays';
             });
         }
     }
