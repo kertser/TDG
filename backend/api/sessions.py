@@ -35,6 +35,7 @@ class SessionRead(BaseModel):
     status: str
     tick: int
     tick_interval: int
+    current_time: datetime | None = None
     participant_count: int = 0
     created_at: datetime
 
@@ -84,6 +85,7 @@ async def create_session(body: SessionCreate, db: DB, user: CurrentUser):
         status=session.status.value,
         tick=session.tick,
         tick_interval=session.tick_interval,
+        current_time=session.current_time,
         participant_count=1,
         created_at=session.created_at,
     )
@@ -106,6 +108,7 @@ async def list_sessions(db: DB, user: CurrentUser):
             status=s.status.value,
             tick=s.tick,
             tick_interval=s.tick_interval,
+            current_time=s.current_time,
             participant_count=len(s.participants),
             created_at=s.created_at,
         )
@@ -154,6 +157,7 @@ async def get_session(session_id: uuid.UUID, db: DB):
         status=s.status.value,
         tick=s.tick,
         tick_interval=s.tick_interval,
+        current_time=s.current_time,
         participant_count=len(s.participants),
         created_at=s.created_at,
     )
@@ -218,7 +222,11 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     if session.current_time is None:
         session.current_time = datetime.now(timezone.utc)
     await db.flush()
-    return {"status": session.status.value, "tick": session.tick}
+    return {
+        "status": session.status.value,
+        "tick": session.tick,
+        "current_time": session.current_time.isoformat() if session.current_time else None,
+    }
 
 
 @router.post("/{session_id}/pause")

@@ -3,7 +3,7 @@
  * Uses Leaflet.Editable for standard shapes and custom Catmull-Rom
  * spline drawing for curved arrow overlays.
  *
- * Right-click = finish/commit drawing
+ * Right-click = finish/commit drawing (arrow: finalizes the spline)
  * ESC = cancel drawing
  */
 const KOverlays = (() => {
@@ -45,9 +45,9 @@ const KOverlays = (() => {
             }
         });
 
-        // Right-click on the map: finish active drawing (polyline/polygon)
+        // Right-click on the map: finish active Leaflet.Editable drawing
         map.on('contextmenu', (e) => {
-            // Arrow tool has its own handler
+            // Arrow tool has its own right-click handler
             if (arrowDrawing) return;
 
             if (currentDrawing && currentDrawing.layer) {
@@ -62,9 +62,13 @@ const KOverlays = (() => {
         sessionId = sessId;
         token = authToken;
 
-        // Show drawing toolbar
+        // Show drawing toolbar and right-side controls
         const toolbar = document.getElementById('draw-toolbar');
         if (toolbar) toolbar.style.display = 'flex';
+        const centerBtn = document.getElementById('center-btn');
+        if (centerBtn) centerBtn.style.display = 'inline-flex';
+        const gridToggleBtn = document.getElementById('grid-toggle-btn');
+        if (gridToggleBtn) gridToggleBtn.style.display = 'inline-flex';
     }
 
     // ── Finish current Leaflet.Editable drawing ─────
@@ -80,7 +84,7 @@ const KOverlays = (() => {
                 return;
             }
 
-            // For polylines/polygons: need at least 2 points
+            // For polylines: need at least 2 points
             if (currentDrawing.type === 'polyline') {
                 const latlngs = layer.getLatLngs();
                 if (latlngs.length < 2) {
@@ -114,7 +118,7 @@ const KOverlays = (() => {
     function startDraw(type) {
         if (!map) return;
 
-        // Cancel any active drawing
+        // Cancel any active drawing first
         cancelDraw();
 
         if (type === 'arrow') {
@@ -122,26 +126,25 @@ const KOverlays = (() => {
             return;
         }
 
-        if (type === 'polygon') {
-            currentDrawing = { type: 'polygon', layer: map.editTools.startPolygon() };
-        } else {
-            switch (type) {
-                case 'polyline':
-                    currentDrawing = { type: 'polyline', layer: map.editTools.startPolyline() };
-                    break;
-                case 'rectangle':
-                    currentDrawing = { type: 'rectangle', layer: map.editTools.startRectangle() };
-                    break;
-                case 'marker':
-                    currentDrawing = { type: 'marker', layer: map.editTools.startMarker() };
-                    break;
-                case 'circle':
-                    currentDrawing = { type: 'circle', layer: map.editTools.startCircle() };
-                    break;
-                default:
-                    console.warn('Unknown draw type:', type);
-                    return;
-            }
+        switch (type) {
+            case 'polyline':
+                currentDrawing = { type: 'polyline', layer: map.editTools.startPolyline() };
+                break;
+            case 'polygon':
+                currentDrawing = { type: 'polygon', layer: map.editTools.startPolygon() };
+                break;
+            case 'rectangle':
+                currentDrawing = { type: 'rectangle', layer: map.editTools.startRectangle() };
+                break;
+            case 'marker':
+                currentDrawing = { type: 'marker', layer: map.editTools.startMarker() };
+                break;
+            case 'circle':
+                currentDrawing = { type: 'circle', layer: map.editTools.startCircle() };
+                break;
+            default:
+                console.warn('Unknown draw type:', type);
+                return;
         }
 
         // Visual feedback
@@ -160,7 +163,7 @@ const KOverlays = (() => {
         if (map) {
             map.getContainer().style.cursor = '';
         }
-        // Cancel arrow drawing
+        // Cancel arrow drawing (clears preview)
         _cancelArrowDraw();
         // Reset toolbar buttons
         document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
@@ -205,7 +208,6 @@ const KOverlays = (() => {
             return {
                 type: 'Point',
                 coordinates: [center.lng, center.lat],
-                // Store radius in properties (handled separately)
             };
         }
         if (layer.toGeoJSON) {
@@ -219,9 +221,11 @@ const KOverlays = (() => {
     // ══════════════════════════════════════════════════
 
     function _startArrowDraw() {
+        // Clear any previous arrow preview first
+        arrowPreviewGroup.clearLayers();
         arrowDrawing = true;
         arrowControlPoints = [];
-        arrowPreviewGroup.clearLayers();
+        _arrowPreviewLine = null;
         map.getContainer().style.cursor = 'crosshair';
 
         map.on('click', _onArrowClick);
@@ -229,11 +233,13 @@ const KOverlays = (() => {
         map.on('contextmenu', _onArrowRightClick);
     }
 
-    function _cancelArrowDraw() {
-        if (!arrowDrawing) return;
+    /**
+     * Stop the arrow drawing mode (remove event listeners)
+     * but do NOT clear the preview visuals.
+     */
+    function _stopArrowDrawMode() {
         arrowDrawing = false;
         arrowControlPoints = [];
-        arrowPreviewGroup.clearLayers();
         _arrowPreviewLine = null;
         if (map) {
             map.getContainer().style.cursor = '';
@@ -241,6 +247,15 @@ const KOverlays = (() => {
             map.off('mousemove', _onArrowMouseMove);
             map.off('contextmenu', _onArrowRightClick);
         }
+    }
+
+    /**
+     * Cancel arrow drawing: stop drawing AND clear preview visuals.
+     * Used when user presses ESC or starts a different tool.
+     */
+    function _cancelArrowDraw() {
+        _stopArrowDrawMode();
+        arrowPreviewGroup.clearLayers();
     }
 
     let _arrowPreviewLine = null;
@@ -328,9 +343,10 @@ const KOverlays = (() => {
             },
         });
 
-        // Clean up
-        _arrowPreviewLine = null;
-        _cancelArrowDraw();
+        // Stop drawing mode but keep preview visible until server
+        // responds with overlay_created (the preview will be cleared
+        // when the user starts a new drawing tool).
+        _stopArrowDrawMode();
 
         // Reset toolbar button
         document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
@@ -442,6 +458,9 @@ const KOverlays = (() => {
     function addOverlayToMap(overlay) {
         if (!overlay.geometry || !overlaysLayer) return;
 
+        // Clear arrow preview since overlay from server replaces it
+        arrowPreviewGroup.clearLayers();
+
         const style = overlay.style_json || DEFAULT_STYLES[overlay.overlay_type] || {};
         let layer = null;
 
@@ -461,85 +480,65 @@ const KOverlays = (() => {
                 if (arrow) group.addLayer(arrow);
 
                 layer = group;
-            } else if (overlay.overlay_type === 'circle' && overlay.geometry.type === 'Point') {
-                const radius = (overlay.properties && overlay.properties.radius) || 500;
-                layer = L.circle(
-                    [overlay.geometry.coordinates[1], overlay.geometry.coordinates[0]],
-                    { radius, ...style }
-                );
-            } else if (overlay.overlay_type === 'marker' && overlay.geometry.type === 'Point') {
-                layer = L.marker([
-                    overlay.geometry.coordinates[1],
-                    overlay.geometry.coordinates[0],
-                ]);
             } else {
                 layer = L.geoJSON(overlay.geometry, {
                     style: () => style,
-                    pointToLayer: (feature, latlng) => L.marker(latlng),
+                    pointToLayer: (feature, latlng) => {
+                        if (overlay.overlay_type === 'circle') {
+                            return L.circle(latlng, {
+                                radius: overlay.properties?.radius || 500,
+                                ...style,
+                            });
+                        }
+                        return L.marker(latlng);
+                    },
                 });
+            }
+
+            if (layer) {
+                // Right-click to delete overlay
+                layer.on('contextmenu', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    L.DomEvent.preventDefault(e);
+                    if (confirm('Delete this overlay?')) {
+                        KWebSocket.send('overlay_delete', { overlay_id: overlay.id });
+                    }
+                });
+
+                overlaysLayer.addLayer(layer);
+                overlayMap[overlay.id] = layer;
             }
         } catch (err) {
             console.warn('Failed to render overlay:', overlay.id, err);
-            return;
-        }
-
-        if (layer) {
-            if (overlay.label) {
-                layer.bindTooltip(overlay.label, { permanent: true, direction: 'center' });
-            }
-
-            let popup = `<b>Overlay</b> (${overlay.overlay_type})<br>`;
-            popup += `Side: ${overlay.side}<br>`;
-            if (overlay.label) popup += `Label: ${overlay.label}<br>`;
-            popup += `<button onclick="KOverlays.removeOverlay('${overlay.id}')" style="margin-top:4px">Delete</button>`;
-            if (layer.bindPopup) layer.bindPopup(popup);
-
-            overlaysLayer.addLayer(layer);
-            overlayMap[overlay.id] = layer;
         }
     }
 
-    function updateOverlayOnMap(overlay) {
-        if (overlayMap[overlay.id]) {
-            overlaysLayer.removeLayer(overlayMap[overlay.id]);
-            delete overlayMap[overlay.id];
-        }
-        addOverlayToMap(overlay);
+    // ── WS event handlers ────────────────────────────
+
+    function onOverlayCreated(data) {
+        addOverlayToMap(data);
     }
 
-    function removeOverlayFromMap(overlayId) {
-        if (overlayMap[overlayId]) {
-            overlaysLayer.removeLayer(overlayMap[overlayId]);
-            delete overlayMap[overlayId];
+    function onOverlayUpdated(data) {
+        // Remove old, add new
+        if (data.id && overlayMap[data.id]) {
+            overlaysLayer.removeLayer(overlayMap[data.id]);
+            delete overlayMap[data.id];
         }
+        addOverlayToMap(data);
     }
 
-    function removeOverlay(overlayId) {
-        const m = KMap.getMap();
-        if (m) m.closePopup();
-        removeOverlayFromMap(overlayId);
-
-        if (sessionId && token) {
-            fetch(`/api/sessions/${sessionId}/overlays/${overlayId}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` },
-            }).catch(err => console.warn('Overlay REST delete failed:', err));
+    function onOverlayDeleted(data) {
+        const id = data.overlay_id || data.id;
+        if (id && overlayMap[id]) {
+            overlaysLayer.removeLayer(overlayMap[id]);
+            delete overlayMap[id];
         }
-
-        KWebSocket.send('overlay_delete', { overlay_id: overlayId });
     }
-
-    // ── WebSocket handlers ──────────────────────────
-
-    function onOverlayCreated(data)  { addOverlayToMap(data); }
-    function onOverlayUpdated(data)  { updateOverlayOnMap(data); }
-    function onOverlayDeleted(data)  { removeOverlayFromMap(data.overlay_id); }
 
     return {
-        init, setSession,
-        startDraw, cancelDraw,
+        init, setSession, startDraw, cancelDraw,
         loadFromServer, render,
-        addOverlayToMap, updateOverlayToMap: updateOverlayOnMap, removeOverlayFromMap, removeOverlay,
         onOverlayCreated, onOverlayUpdated, onOverlayDeleted,
     };
 })();

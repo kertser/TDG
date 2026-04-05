@@ -1,5 +1,6 @@
 /**
- * ui.js – Sidebar tab switching, drawing toolbar in topbar, center-on-map.
+ * ui.js – Sidebar tab switching, drawing toolbar in topbar,
+ *         standalone center-on-map button.
  */
 const KUI = (() => {
     function init() {
@@ -14,16 +15,12 @@ const KUI = (() => {
             });
         });
 
-        // Drawing toolbar buttons
+        // Drawing toolbar buttons (inside #draw-toolbar)
         document.querySelectorAll('.draw-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const tool = btn.dataset.tool;
 
-                if (tool === 'cancel') {
-                    KOverlays.cancelDraw();
-                    KMap.stopMeasure();
-                    _clearActive();
-                } else if (tool === 'measure') {
+                if (tool === 'measure') {
                     KOverlays.cancelDraw();
                     _clearActive();
                     btn.classList.add('active');
@@ -31,10 +28,8 @@ const KUI = (() => {
                 } else if (tool === 'clear-measure') {
                     KMap.clearMeasure();
                     _clearActive();
-                } else if (tool === 'center') {
-                    KMap.centerOnOperation();
                 } else {
-                    // Drawing tool
+                    // Drawing tool (arrow, polyline, rectangle, marker, circle)
                     KMap.stopMeasure();
                     _clearActive();
                     btn.classList.add('active');
@@ -42,6 +37,24 @@ const KUI = (() => {
                 }
             });
         });
+
+        // Standalone center button (right side of topbar)
+        const centerBtn = document.getElementById('center-btn');
+        if (centerBtn) {
+            centerBtn.addEventListener('click', () => {
+                KMap.centerOnOperation();
+            });
+        }
+
+        // Grid toggle button (right side of topbar)
+        const gridToggleBtn = document.getElementById('grid-toggle-btn');
+        if (gridToggleBtn) {
+            gridToggleBtn.addEventListener('click', () => {
+                const visible = KGrid.toggle();
+                gridToggleBtn.style.opacity = visible ? '1' : '0.4';
+                gridToggleBtn.title = visible ? 'Hide grid' : 'Show grid';
+            });
+        }
     }
 
     function _clearActive() {

@@ -161,6 +161,13 @@ const KSessionUI = (() => {
         // Hide toolbar and session controls
         const drawToolbar = document.getElementById('draw-toolbar');
         if (drawToolbar) drawToolbar.style.display = 'none';
+        const centerBtn = document.getElementById('center-btn');
+        if (centerBtn) centerBtn.style.display = 'none';
+        const gridToggleBtn = document.getElementById('grid-toggle-btn');
+        if (gridToggleBtn) gridToggleBtn.style.display = 'none';
+
+        // Reset game clock
+        KMap.setGameTime(0, null);
 
         const startBtn = document.getElementById('start-session-btn');
         const tickBtn = document.getElementById('tick-btn');
@@ -293,7 +300,11 @@ const KSessionUI = (() => {
 
         // Notify app to initialize map layers
         if (window.onSessionJoined) {
-            window.onSessionJoined(sessionId, currentToken);
+            try {
+                await window.onSessionJoined(sessionId, currentToken);
+            } catch (err) {
+                console.error('onSessionJoined error:', err);
+            }
         }
     }
 

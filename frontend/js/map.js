@@ -1,6 +1,7 @@
 /**
  * map.js – Leaflet map initialization with multiple base layers,
- *          scale control, distance measurement, and center-on-operation.
+ *          scale control, distance measurement, center-on-operation,
+ *          and game clock display.
  *
  *          Middle-button (wheel click) drag → map panning.
  *          Left-click is reserved for tools / unit selection.
@@ -19,6 +20,11 @@ const KMap = (() => {
     // ── Middle-button pan state ─────────────────────
     let _mdPanning = false;
     let _mdLastPt = null;
+
+    // ── Game clock state ────────────────────────────
+    let _clockEl = null;
+    let _currentTick = 0;
+    let _currentGameTime = null;
 
     function init(elementId = 'map', center = [49.0582, 4.49547], zoom = 13) {
         map = L.map(elementId, {
@@ -72,10 +78,29 @@ const KMap = (() => {
             maxWidth: 150,
         }).addTo(map);
 
+        // ── Game clock control (bottom-right) ───────────
+        const GameClockControl = L.Control.extend({
+            options: { position: 'bottomright' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'game-clock-control');
+                container.innerHTML =
+                    '<span class="game-clock-icon">🕐</span>' +
+                    '<span id="game-clock-time" class="game-clock-time">--:--</span>' +
+                    '<span id="game-clock-tick" class="game-clock-tick">T0</span>';
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            },
+        });
+        new GameClockControl().addTo(map);
+        _clockEl = {
+            time: document.getElementById('game-clock-time'),
+            tick: document.getElementById('game-clock-tick'),
+        };
+
         // ── Measure layer group ─────────────────────────
         measureGroup = L.layerGroup().addTo(map);
 
-        // ── Coordinate + Zoom display (bottom-left overlay) ──
+        // ── Coordinate + Zoom display ───────────────────
         const zoomEl = document.getElementById('zoom-display');
         const coordEl = document.getElementById('coord-display');
 
@@ -100,7 +125,7 @@ const KMap = (() => {
         const container = map.getContainer();
 
         container.addEventListener('pointerdown', (e) => {
-            if (e.button === 1) {               // middle mouse button
+            if (e.button === 1) {
                 e.preventDefault();
                 e.stopPropagation();
                 _mdPanning = true;
@@ -126,7 +151,6 @@ const KMap = (() => {
             }
         });
 
-        // Prevent browser default middle-click actions (auto-scroll, paste)
         container.addEventListener('auxclick', (e) => {
             if (e.button === 1) e.preventDefault();
         });
@@ -146,6 +170,36 @@ const KMap = (() => {
             return;
         }
         map.setView(operationCenter, operationZoom);
+    }
+
+    // ── Game Clock ──────────────────────────────────
+    function setGameTime(tick, gameTimeISO) {
+        _currentTick = tick;
+        if (gameTimeISO) {
+            _currentGameTime = new Date(gameTimeISO);
+        }
+        _updateClockDisplay();
+    }
+
+    function _updateClockDisplay() {
+        if (!_clockEl) return;
+        if (_clockEl.tick) {
+            _clockEl.tick.textContent = `T${_currentTick}`;
+        }
+        if (_clockEl.time) {
+            if (_currentGameTime) {
+                const h = String(_currentGameTime.getUTCHours()).padStart(2, '0');
+                const m = String(_currentGameTime.getUTCMinutes()).padStart(2, '0');
+                const day = Math.floor((_currentGameTime.getTime() -
+                    new Date(_currentGameTime.toISOString().split('T')[0]).getTime()) /
+                    (24 * 60 * 60 * 1000)) || 0;
+                // Show date + time
+                const dateStr = _currentGameTime.toISOString().split('T')[0];
+                _clockEl.time.textContent = `${dateStr} ${h}:${m}`;
+            } else {
+                _clockEl.time.textContent = '--:--';
+            }
+        }
     }
 
     // ── Distance Measurement Tool ───────────────────
@@ -270,6 +324,7 @@ const KMap = (() => {
     return {
         init, getMap,
         setOperationCenter, centerOnOperation,
+        setGameTime,
         startMeasure, stopMeasure, clearMeasure, isMeasuring,
     };
 })();

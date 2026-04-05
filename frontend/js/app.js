@@ -22,45 +22,65 @@
         console.log('Joined session:', sessionId);
 
         // Load grid overlay
-        await KGrid.load(map, sessionId);
-        KGrid.setupMouseTracker(map);
+        try {
+            await KGrid.load(map, sessionId);
+            KGrid.setupMouseTracker(map);
+        } catch (err) {
+            console.warn('Grid load error:', err);
+        }
 
         // Compute operation center from grid bounding box
-        const gridGJ = KGrid.getGridGeoJson();
-        if (gridGJ && gridGJ.features && gridGJ.features.length > 0) {
-            let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-            gridGJ.features.forEach(f => {
-                if (f.geometry && f.geometry.coordinates) {
-                    f.geometry.coordinates[0].forEach(c => {
-                        if (c[1] < minLat) minLat = c[1];
-                        if (c[1] > maxLat) maxLat = c[1];
-                        if (c[0] < minLng) minLng = c[0];
-                        if (c[0] > maxLng) maxLng = c[0];
-                    });
-                }
+        try {
+            const gridGJ = KGrid.getGridGeoJson();
+            if (gridGJ && gridGJ.features && gridGJ.features.length > 0) {
+                let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+                gridGJ.features.forEach(f => {
+                    if (f.geometry && f.geometry.coordinates) {
+                        f.geometry.coordinates[0].forEach(c => {
+                            if (c[1] < minLat) minLat = c[1];
+                            if (c[1] > maxLat) maxLat = c[1];
+                            if (c[0] < minLng) minLng = c[0];
+                            if (c[0] > maxLng) maxLng = c[0];
+                        });
+                    }
+                });
+                const centerLat = (minLat + maxLat) / 2;
+                const centerLng = (minLng + maxLng) / 2;
+                KMap.setOperationCenter(centerLat, centerLng, 13);
+                map.setView([centerLat, centerLng], 13);
+            }
+        } catch (err) {
+            console.warn('Grid center error:', err);
+        }
+
+        // Fetch session data to initialize game clock
+        try {
+            const sessResp = await fetch(`/api/sessions/${sessionId}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
             });
-            const centerLat = (minLat + maxLat) / 2;
-            const centerLng = (minLng + maxLng) / 2;
-            KMap.setOperationCenter(centerLat, centerLng, 13);
-            // Fly to operation area immediately
-            map.setView([centerLat, centerLng], 13);
+            if (sessResp.ok) {
+                const sessData = await sessResp.json();
+                KMap.setGameTime(sessData.tick || 0, sessData.current_time || null);
+            }
+        } catch (err) {
+            console.warn('Failed to fetch session for clock:', err);
         }
 
         // Load units
-        await KUnits.load(sessionId, token);
+        try { await KUnits.load(sessionId, token); } catch (err) { console.warn('Units load error:', err); }
 
         // Load contacts
-        await KContacts.load(sessionId, token);
+        try { await KContacts.load(sessionId, token); } catch (err) { console.warn('Contacts load error:', err); }
 
         // Setup overlays for this session
         KOverlays.setSession(sessionId, token);
-        await KOverlays.loadFromServer();
+        try { await KOverlays.loadFromServer(); } catch (err) { console.warn('Overlays load error:', err); }
 
         // Initialize orders panel
-        KOrders.init(sessionId, token);
+        try { KOrders.init(sessionId, token); } catch (err) { console.warn('Orders init error:', err); }
 
         // Load events
-        await KEvents.load(sessionId, token);
+        try { await KEvents.load(sessionId, token); } catch (err) { console.warn('Events load error:', err); }
 
         // Connect WebSocket
         KWebSocket.connect(sessionId, token);
@@ -69,6 +89,10 @@
         KWebSocket.on('state_update', (data) => {
             if (data.units) KUnits.update(data.units);
             if (data.contacts) KContacts.render(data.contacts);
+            // Update game clock from state update
+            if (data.tick !== undefined) {
+                KMap.setGameTime(data.tick, data.game_time || null);
+            }
         });
 
         KWebSocket.on('overlay_created', (data) => {
@@ -108,6 +132,8 @@
 
         KWebSocket.on('tick_update', (data) => {
             KGameLog.addEntry(`Tick ${data.tick}`, 'info');
+            // Update game clock on tick
+            KMap.setGameTime(data.tick, data.game_time || null);
         });
 
         KGameLog.addEntry('Connected to session', 'info');

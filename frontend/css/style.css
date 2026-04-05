@@ -20,6 +20,62 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
 #zoom-display { color: #64b5f6; font-family: monospace; font-size: 11px; white-space: nowrap; }
 #user-info { margin-left: auto; color: #aaa; white-space: nowrap; }
 
+/* ── Topbar standalone icon buttons ──────────── */
+#center-btn { margin-left: auto; }  /* overrides #user-info's auto when visible */
+.topbar-icon-btn {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    font-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #bbb;
+    cursor: pointer;
+    transition: all 0.12s;
+}
+.topbar-icon-btn:hover { background: #1a5276; border-color: #4fc3f7; color: #fff; }
+
+/* ── Game Clock Control (bottom-right, on map) ── */
+.game-clock-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16, 24, 48, 0.85);
+    border: 1px solid rgba(79, 195, 247, 0.4);
+    border-radius: 5px;
+    padding: 5px 12px;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    pointer-events: auto;
+}
+.game-clock-icon {
+    font-size: 16px;
+}
+.game-clock-time {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: #4fc3f7;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+.game-clock-tick {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #ff9800;
+    background: rgba(255, 152, 0, 0.12);
+    border: 1px solid rgba(255, 152, 0, 0.3);
+    border-radius: 3px;
+    padding: 1px 6px;
+    white-space: nowrap;
+}
+
 /* ── Drawing Toolbar (inside topbar) ─────────── */
 #draw-toolbar {
     display: flex;

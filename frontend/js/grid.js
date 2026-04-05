@@ -17,6 +17,7 @@ const KGrid = (() => {
     let gridGeoJson = null;
     let _map = null;
     let _zoomHandler = null;
+    let _visible = true;
 
     async function load(map, sessId) {
         sessionId = sessId;
@@ -48,6 +49,8 @@ const KGrid = (() => {
     function _renderAll(map) {
         if (!gridGeoJson || !gridGeoJson.features || gridGeoJson.features.length === 0) return;
         _removeLayers(map);
+
+        if (!_visible) return;  // grid is hidden, just remove layers
 
         const zoom = map.getZoom();
 
@@ -317,5 +320,13 @@ const KGrid = (() => {
 
     function getGridGeoJson() { return gridGeoJson; }
 
-    return { load, getSnailAtPoint, setupMouseTracker, getGridGeoJson };
+    function toggle() {
+        _visible = !_visible;
+        if (_map) _renderAll(_map);
+        return _visible;
+    }
+
+    function isVisible() { return _visible; }
+
+    return { load, getSnailAtPoint, setupMouseTracker, getGridGeoJson, toggle, isVisible };
 })();
