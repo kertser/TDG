@@ -25,6 +25,9 @@ const KTerrain = (() => {
     let _paintMode = false;
     let _paintType = 'forest';
 
+    // Spatial index for fast point → terrain lookup (from cached data)
+    let _cellIndex = null;  // { cellSizeLat, cellSizeLon, grid: Map<"row,col" → cell> }
+
     // Terrain color map (must match backend TERRAIN_COLORS)
     const TERRAIN_COLORS = {
         road:     '#666666',
@@ -50,8 +53,23 @@ const KTerrain = (() => {
 
     function init(leafletMap) {
         map = leafletMap;
-        terrainLayer = L.layerGroup();
-        elevationLayer = L.layerGroup();
+
+        // Create custom panes so we can set layer-level opacity
+        // This avoids overlap-stacking: cells are opaque within the pane,
+        // and the pane itself is translucent as a whole.
+        if (!map.getPane('terrainPane')) {
+            map.createPane('terrainPane');
+            map.getPane('terrainPane').style.zIndex = 250;
+            map.getPane('terrainPane').style.opacity = '0.25';
+        }
+        if (!map.getPane('elevationPane')) {
+            map.createPane('elevationPane');
+            map.getPane('elevationPane').style.zIndex = 249;
+            map.getPane('elevationPane').style.opacity = '0.35';
+        }
+
+        terrainLayer = L.layerGroup({ pane: 'terrainPane' });
+        elevationLayer = L.layerGroup({ pane: 'elevationPane' });
     }
 
     function setSession(sid) {
@@ -65,11 +83,12 @@ const KTerrain = (() => {
         if (!sessionId) return;
 
         try {
-            const resp = await fetch(`/api/sessions/${sessionId}/terrain`, {
+            const resp = await fetch(`/api/sessions/${sessionId}/terrain/compact`, {
                 headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             });
             if (!resp.ok) return;
             _terrainData = await resp.json();
+            _buildSpatialIndex();
             _renderTerrain();
         } catch (err) {
             console.warn('Terrain load error:', err);
@@ -92,44 +111,123 @@ const KTerrain = (() => {
 
     // ── Render terrain polygons ─────────────────────────
 
+    /**
+     * Build a grid-based spatial index from loaded compact terrain data.
+     * Maps each cell to a grid bucket by (row, col) for O(1) point lookup.
+     */
+    function _buildSpatialIndex() {
+        _cellIndex = null;
+        if (!_terrainData || !_terrainData.cells || !_terrainData.cells.length) return;
+
+        const cells = _terrainData.cells;
+        const cellSizeLat = _terrainData.cell_size_lat || 0.0003;
+        const cellSizeLon = _terrainData.cell_size_lon || 0.0003;
+
+        // Find bounding box origin (min lat/lon)
+        let minLat = Infinity, minLon = Infinity;
+        for (let i = 0; i < cells.length; i++) {
+            if (cells[i].la < minLat) minLat = cells[i].la;
+            if (cells[i].lo < minLon) minLon = cells[i].lo;
+        }
+
+        // Build grid map: "row,col" → cell
+        const grid = new Map();
+        for (let i = 0; i < cells.length; i++) {
+            const c = cells[i];
+            const row = Math.round((c.la - minLat) / cellSizeLat);
+            const col = Math.round((c.lo - minLon) / cellSizeLon);
+            grid.set(`${row},${col}`, c);
+        }
+
+        _cellIndex = { cellSizeLat, cellSizeLon, minLat, minLon, grid };
+    }
+
+    /**
+     * Fast client-side terrain lookup at a geographic point.
+     * Uses cached compact data + spatial index — no API call.
+     * @param {number} lat
+     * @param {number} lon
+     * @returns {{type: string, label: string, elevation: number|null, slope: number|null, source: string}|null}
+     */
+    function getTerrainAtPoint(lat, lon) {
+        if (!_cellIndex) return null;
+
+        const { cellSizeLat, cellSizeLon, minLat, minLon, grid } = _cellIndex;
+        const row = Math.round((lat - minLat) / cellSizeLat);
+        const col = Math.round((lon - minLon) / cellSizeLon);
+        const cell = grid.get(`${row},${col}`);
+        if (!cell) return null;
+
+        return {
+            type:      cell.t,
+            label:     TERRAIN_LABELS[cell.t] || cell.t,
+            elevation: cell.e != null ? cell.e : null,
+            slope:     cell.sl != null ? cell.sl : null,
+            source:    cell.sr || '?',
+            snailPath: cell.s,
+        };
+    }
+
     function _renderTerrain() {
-        if (!_terrainData || !_terrainData.features) return;
+        if (!_terrainData) return;
         terrainLayer.clearLayers();
 
-        L.geoJSON(_terrainData, {
-            style: (feature) => {
-                const props = feature.properties || {};
-                return {
-                    fillColor: props.color || TERRAIN_COLORS[props.terrain_type] || '#90EE90',
-                    fillOpacity: 0.35,
-                    color: props.color || TERRAIN_COLORS[props.terrain_type] || '#90EE90',
-                    weight: 0.5,
-                    opacity: 0.6,
-                };
-            },
-            onEachFeature: (feature, layer) => {
-                const props = feature.properties || {};
-                const mods = props.modifiers || {};
+        // Compact format: {cells: [{s, t, la, lo, e, sl, sr, c}, ...], cell_size_lat, cell_size_lon, colors}
+        const cells = _terrainData.cells;
+        if (!cells || !cells.length) return;
 
-                let tip = `<b>${TERRAIN_LABELS[props.terrain_type] || props.terrain_type}</b>`;
-                tip += `<br>Source: ${props.source || '?'}`;
-                if (props.elevation_m != null) tip += `<br>Elevation: ${Math.round(props.elevation_m)}m`;
-                if (props.slope_deg != null) tip += `<br>Slope: ${props.slope_deg.toFixed(1)}°`;
-                tip += `<br>Move: ${mods.movement ?? '?'} | Vis: ${mods.visibility ?? '?'}`;
-                tip += `<br>Prot: ${mods.protection ?? '?'} | Atk: ${mods.attack ?? '?'}`;
-                tip += `<br><span style="opacity:0.6">${props.snail_path}</span>`;
+        const halfLat = (_terrainData.cell_size_lat || 0.0003) / 2;
+        const halfLon = (_terrainData.cell_size_lon || 0.0003) / 2;
+        const colors = _terrainData.colors || TERRAIN_COLORS;
+        const modifiers = _terrainData.modifiers || {};
 
-                layer.bindTooltip(tip, { sticky: true, className: 'terrain-tooltip' });
+        // Use Canvas renderer in custom pane for performance (critical for 65k+ cells)
+        const canvasRenderer = L.canvas({ padding: 0.1, pane: 'terrainPane' });
 
-                // Admin painting: click to paint
-                layer.on('click', (e) => {
-                    if (_paintMode && props.snail_path) {
-                        _paintCell(props.snail_path);
+        for (let i = 0; i < cells.length; i++) {
+            const c = cells[i];
+            const color = colors[c.t] || TERRAIN_COLORS[c.t] || '#90EE90';
+            const bounds = [
+                [c.la - halfLat, c.lo - halfLon],
+                [c.la + halfLat, c.lo + halfLon],
+            ];
+
+            const rect = L.rectangle(bounds, {
+                fillColor: color,
+                fillOpacity: 0.7,
+                stroke: false,
+                renderer: canvasRenderer,
+                pane: 'terrainPane',
+            });
+
+            // Tooltip on hover (built lazily)
+            rect.on('mouseover', function () {
+                if (!this.getTooltip()) {
+                    const mods = modifiers[c.t] || {};
+                    let tip = `<b>${TERRAIN_LABELS[c.t] || c.t}</b>`;
+                    tip += `<br>Source: ${c.sr || '?'}`;
+                    if (c.e != null) tip += `<br>Elevation: ${Math.round(c.e)}m`;
+                    if (c.sl != null) tip += `<br>Slope: ${c.sl}°`;
+                    tip += `<br>Move: ${mods.movement ?? '?'} | Vis: ${mods.visibility ?? '?'}`;
+                    tip += `<br>Prot: ${mods.protection ?? '?'} | Atk: ${mods.attack ?? '?'}`;
+                    tip += `<br><span style="opacity:0.6">${c.s}</span>`;
+                    this.bindTooltip(tip, { sticky: true, className: 'terrain-tooltip' });
+                    this.openTooltip();
+                }
+            });
+
+            // Admin painting: click to paint
+            if (_paintMode) {
+                rect.on('click', (e) => {
+                    if (_paintMode && c.s) {
+                        _paintCell(c.s);
                         L.DomEvent.stopPropagation(e);
                     }
                 });
-            },
-        }).addTo(terrainLayer);
+            }
+
+            rect.addTo(terrainLayer);
+        }
     }
 
     // ── Render elevation heatmap ────────────────────────
@@ -139,14 +237,16 @@ const KTerrain = (() => {
         elevationLayer.clearLayers();
 
         L.geoJSON(_elevationData, {
+            pane: 'elevationPane',
             style: (feature) => {
                 const props = feature.properties || {};
                 return {
                     fillColor: props.color || '#8B7355',
-                    fillOpacity: 0.4,
+                    fillOpacity: 0.7,
                     color: props.color || '#8B7355',
                     weight: 0.3,
                     opacity: 0.5,
+                    pane: 'elevationPane',
                 };
             },
             onEachFeature: (feature, layer) => {
@@ -402,6 +502,7 @@ const KTerrain = (() => {
             elevationLayer.clearLayers();
             _terrainData = null;
             _elevationData = null;
+            _cellIndex = null;
         } catch (err) {
             console.warn('Clear terrain error:', err);
         }
@@ -432,6 +533,7 @@ const KTerrain = (() => {
         analyze, analyzeWithProgress, estimateCellCount,
         clearTerrain, getStats,
         getTerrainColors, getTerrainLabels,
+        getTerrainAtPoint,
     };
 })();
 

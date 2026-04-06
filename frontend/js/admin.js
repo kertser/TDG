@@ -3220,7 +3220,7 @@ const KAdmin = (() => {
         const depthSel = document.getElementById('terrain-analyze-depth');
         const estimateEl = document.getElementById('terrain-cell-estimate');
         if (!depthSel || !estimateEl) return;
-        const depth = parseInt(depthSel.value || '2');
+        const depth = parseInt(depthSel.value || '3');
         const estimate = await KTerrain.estimateCellCount(depth);
         if (estimate) {
             const warn = estimate.total_cells > 50000 ? ' ⚠' : '';
@@ -3235,17 +3235,17 @@ const KAdmin = (() => {
         const sid = _getAdminSessionId();
         if (!sid) return alert('No session selected');
 
-        const depth = parseInt(document.getElementById('terrain-analyze-depth')?.value || '2');
+        const depth = parseInt(document.getElementById('terrain-analyze-depth')?.value || '3');
         let skipElev = document.getElementById('terrain-skip-elevation')?.checked || false;
         const statusEl = document.getElementById('terrain-analyze-status');
         const progressContainer = document.getElementById('terrain-progress-container');
         const progressFill = document.getElementById('terrain-progress-fill');
         const progressText = document.getElementById('terrain-progress-text');
 
-        // Auto-skip elevation for very high depths (too many API calls)
+        // Auto-skip elevation for extremely high depths only if no rasterio
         if (depth >= 4 && !skipElev) {
-            if (!confirm(`Depth ${depth} generates many cells. Elevation API will be very slow.\n\nSkip elevation? (Cancel = include elevation)`)) {
-                skipElev = true;
+            if (!confirm(`Depth ${depth} generates many cells. This may take a few minutes.\n\nContinue?`)) {
+                return;
             }
         }
 

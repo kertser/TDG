@@ -81,7 +81,11 @@ const KMap = (() => {
                     '<span class="coord-sep">│</span>' +
                     '<span id="coord-display" title="Coordinates under cursor"></span>' +
                     '<span class="coord-sep">│</span>' +
-                    '<span id="zoom-display" title="Current zoom level"></span>';
+                    '<span id="zoom-display" title="Current zoom level"></span>' +
+                    '<span class="coord-sep terrain-sep" style="display:none">│</span>' +
+                    '<span id="terrain-display" title="Terrain type under cursor"></span>' +
+                    '<span class="coord-sep terrain-sep" style="display:none">│</span>' +
+                    '<span id="elevation-display" title="Elevation under cursor"></span>';
                 L.DomEvent.disableClickPropagation(container);
                 return container;
             },
@@ -124,6 +128,9 @@ const KMap = (() => {
         // ── Coordinate + Zoom display ───────────────────
         const zoomEl = document.getElementById('zoom-display');
         const coordEl = document.getElementById('coord-display');
+        const terrainEl = document.getElementById('terrain-display');
+        const elevationEl = document.getElementById('elevation-display');
+        const terrainSeps = document.querySelectorAll('.terrain-sep');
 
         if (zoomEl) {
             zoomEl.textContent = `Z${map.getZoom()}`;
@@ -135,6 +142,34 @@ const KMap = (() => {
         if (coordEl) {
             map.on('mousemove', (e) => {
                 coordEl.textContent = `${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`;
+
+                // Update terrain + elevation from cached terrain data (no API call)
+                if (typeof KTerrain !== 'undefined' && terrainEl) {
+                    const info = KTerrain.getTerrainAtPoint(e.latlng.lat, e.latlng.lng);
+                    if (info) {
+                        terrainEl.textContent = info.label;
+                        terrainSeps.forEach(s => s.style.display = '');
+                        if (elevationEl) {
+                            elevationEl.textContent = info.elevation != null
+                                ? `↑${Math.round(info.elevation)}m`
+                                : '';
+                            // Show/hide elevation separator based on whether we have elevation data
+                            if (info.elevation == null && terrainSeps.length >= 2) {
+                                terrainSeps[1].style.display = 'none';
+                            }
+                        }
+                    } else {
+                        terrainEl.textContent = '';
+                        if (elevationEl) elevationEl.textContent = '';
+                        terrainSeps.forEach(s => s.style.display = 'none');
+                    }
+                }
+            });
+
+            map.on('mouseout', () => {
+                if (terrainEl) terrainEl.textContent = '';
+                if (elevationEl) elevationEl.textContent = '';
+                terrainSeps.forEach(s => s.style.display = 'none');
             });
         }
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 import json
 import logging
+import math
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -31,7 +32,7 @@ router = APIRouter()
 # ── Pydantic schemas ─────────────────────────────────────────
 
 class AnalyzeRequest(BaseModel):
-    depth: int = 1
+    depth: int = 3
     force: bool = False
     skip_elevation: bool = False
 
@@ -87,7 +88,7 @@ async def analyze_terrain_stream(
     session_id: uuid.UUID,
     db: DB,
     current_user: CurrentUser,
-    depth: int = Query(1, ge=0, le=4),
+    depth: int = Query(3, ge=0, le=4),
     force: bool = Query(False),
     skip_elevation: bool = Query(False),
 ):
@@ -127,7 +128,7 @@ async def analyze_terrain_stream(
 async def estimate_cell_count(
     session_id: uuid.UUID,
     db: DB,
-    depth: int = Query(1, ge=0, le=4),
+    depth: int = Query(3, ge=0, le=4),
 ):
     """
     Estimate the number of terrain cells that would be generated at a given depth.
@@ -156,6 +157,67 @@ async def estimate_cell_count(
 
 
 # ── Query endpoints ──────────────────────────────────────────
+
+@router.get("/{session_id}/terrain/compact")
+async def get_terrain_compact(
+    session_id: uuid.UUID,
+    db: DB,
+    depth: int | None = Query(None, description="Filter by depth"),
+):
+    """
+    Return terrain cells as compact JSON (no polygon geometry).
+    Each cell is {snail_path, lat, lon, terrain_type, source, elevation_m, ...}.
+    The client reconstructs rectangles from centroids + cell_size_deg.
+    ~100× faster than the GeoJSON polygon endpoint for large grids.
+    """
+    # Load grid for cell size computation
+    result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    grid_def = result.scalar_one_or_none()
+    if grid_def is None:
+        raise HTTPException(status_code=404, detail="No grid definition for this session")
+
+    # Load terrain cells
+    query = select(TerrainCell).where(TerrainCell.session_id == session_id)
+    if depth is not None:
+        query = query.where(TerrainCell.depth == depth)
+    result = await db.execute(query)
+    cells = result.scalars().all()
+
+    if not cells:
+        return {"cells": [], "cell_size_deg": 0, "colors": TERRAIN_COLORS}
+
+    # Compute approximate cell size in degrees from the grid
+    # Use the most common depth among returned cells
+    cell_depth = cells[0].depth if cells else 1
+    cell_size_m = grid_def.base_square_size_m / (3 ** cell_depth)
+    # Approximate degrees (varies by latitude, use grid center)
+    avg_lat = sum(c.centroid_lat for c in cells) / len(cells) if cells else 49.0
+    lat_deg = cell_size_m / 111320.0
+    lon_deg = cell_size_m / (111320.0 * max(0.1, abs(math.cos(math.radians(avg_lat)))))
+
+    compact_cells = []
+    for cell in cells:
+        compact_cells.append({
+            "s": cell.snail_path,
+            "t": cell.terrain_type,
+            "la": round(cell.centroid_lat, 7),
+            "lo": round(cell.centroid_lon, 7),
+            "e": round(cell.elevation_m, 1) if cell.elevation_m is not None else None,
+            "sl": round(cell.slope_deg, 1) if cell.slope_deg is not None else None,
+            "sr": cell.source,
+            "c": cell.confidence,
+        })
+
+    return {
+        "cells": compact_cells,
+        "cell_size_lat": round(lat_deg, 8),
+        "cell_size_lon": round(lon_deg, 8),
+        "colors": TERRAIN_COLORS,
+        "modifiers": {t: TERRAIN_MODIFIERS[t] for t in TERRAIN_TYPES if t in TERRAIN_MODIFIERS},
+    }
+
 
 @router.get("/{session_id}/terrain")
 async def get_terrain(
