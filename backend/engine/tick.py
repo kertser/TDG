@@ -32,6 +32,9 @@ from backend.models.unit import Unit
 from backend.models.order import Order, OrderStatus
 from backend.models.contact import Contact
 from backend.models.event import Event
+from backend.models.terrain_cell import TerrainCell
+from backend.models.elevation_cell import ElevationCell
+from backend.models.grid import GridDefinition
 
 from backend.engine.terrain import TerrainService
 from backend.engine.movement import process_movement
@@ -70,7 +73,52 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         select(Scenario).where(Scenario.id == session.scenario_id)
     )
     scenario = result.scalar_one_or_none()
-    terrain = TerrainService(scenario.terrain_meta if scenario else None)
+
+    # ── Build TerrainService: prefer DB cells, fallback to terrain_meta ──
+    terrain_cells_dict = None
+    elevation_cells_dict = None
+    grid_service = None
+
+    # Try to load terrain cells from DB
+    tc_result = await db.execute(
+        select(TerrainCell.snail_path, TerrainCell.terrain_type)
+        .where(TerrainCell.session_id == session_id)
+    )
+    tc_rows = tc_result.all()
+    if tc_rows:
+        terrain_cells_dict = {row[0]: row[1] for row in tc_rows}
+
+        # Load elevation cells
+        ec_result = await db.execute(
+            select(
+                ElevationCell.snail_path,
+                ElevationCell.elevation_m,
+                ElevationCell.slope_deg,
+                ElevationCell.aspect_deg,
+            ).where(ElevationCell.session_id == session_id)
+        )
+        ec_rows = ec_result.all()
+        if ec_rows:
+            elevation_cells_dict = {
+                row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                for row in ec_rows
+            }
+
+        # Load grid service for point→snail resolution
+        gd_result = await db.execute(
+            select(GridDefinition).where(GridDefinition.session_id == session_id)
+        )
+        gd = gd_result.scalar_one_or_none()
+        if gd:
+            from backend.services.grid_service import GridService
+            grid_service = GridService(gd)
+
+    terrain = TerrainService(
+        terrain_meta=scenario.terrain_meta if scenario else None,
+        terrain_cells=terrain_cells_dict,
+        elevation_cells=elevation_cells_dict,
+        grid_service=grid_service,
+    )
 
     tick = session.tick
     tick_duration = session.tick_interval or 60  # seconds

@@ -18,6 +18,7 @@
     KUnits.init(map);
     KContacts.init(map);
     KOverlays.init(map);
+    KTerrain.init(map);
 
     // Fetch and display app version
     fetch('/api/version').then(r => r.json()).then(data => {
@@ -91,6 +92,12 @@
         // Setup overlays for this session
         KOverlays.setSession(sessionId, token);
         try { await KOverlays.loadFromServer(); } catch (err) { console.warn('Overlays load error:', err); }
+
+        // Load terrain overlay (if analyzed)
+        try {
+            KTerrain.setSession(sessionId);
+            await KTerrain.load(sessionId, token);
+        } catch (err) { console.warn('Terrain load error:', err); }
 
         // Initialize orders panel
         try { KOrders.init(sessionId, token); } catch (err) { console.warn('Orders init error:', err); }

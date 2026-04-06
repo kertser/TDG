@@ -2036,3 +2036,126 @@ button:hover { background: #1a5276; }
     color: #4fc3f7;
     text-decoration: underline;
 }
+
+/* ── Terrain Overlay Styles ──────────────────── */
+.terrain-legend {
+    background: rgba(26, 26, 46, 0.92);
+    border: 1px solid rgba(79, 195, 247, 0.2);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: #e0e0e0;
+    line-height: 1.6;
+    max-height: 260px;
+    overflow-y: auto;
+    backdrop-filter: blur(6px);
+}
+.terrain-legend b {
+    color: #4fc3f7;
+    font-size: 12px;
+}
+.terrain-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.terrain-legend-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid rgba(255,255,255,0.2);
+    vertical-align: middle;
+}
+
+.terrain-tooltip {
+    background: rgba(26, 26, 46, 0.95) !important;
+    border: 1px solid rgba(79, 195, 247, 0.3) !important;
+    border-radius: 6px !important;
+    color: #e0e0e0 !important;
+    font-size: 11px !important;
+    padding: 6px 10px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+}
+.terrain-tooltip::before {
+    border-right-color: rgba(79, 195, 247, 0.3) !important;
+}
+
+/* Terrain admin painting */
+.terrain-paint-toolbar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.terrain-paint-toolbar select {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+.terrain-paint-toolbar button {
+    font-size: 11px;
+    padding: 3px 10px;
+}
+.terrain-stats-bar {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.terrain-stat-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    color: #1a1a2e;
+    font-weight: 600;
+}
+
+/* Terrain analysis progress bar */
+.terrain-progress-bar {
+    width: 100%;
+    height: 14px;
+    background: rgba(15, 52, 96, 0.6);
+    border-radius: 7px;
+    border: 1px solid rgba(79, 195, 247, 0.25);
+    overflow: hidden;
+    position: relative;
+}
+.terrain-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #1b5e20, #2e7d32, #43a047);
+    border-radius: 7px;
+    transition: width 0.3s ease;
+    position: relative;
+}
+.terrain-progress-fill.error {
+    background: linear-gradient(90deg, #c62828, #e53935);
+}
+.terrain-progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255,255,255,0.08) 50%,
+        transparent 100%
+    );
+    animation: terrain-progress-shine 1.5s ease-in-out infinite;
+}
+@keyframes terrain-progress-shine {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+}
+

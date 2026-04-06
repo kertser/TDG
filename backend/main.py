@@ -76,6 +76,10 @@ def create_app() -> FastAPI:
     from backend.api import scenarios as scenarios_router
     app.include_router(scenarios_router.router, prefix="/api/scenarios", tags=["scenarios"])
 
+    # Terrain endpoints
+    from backend.api import terrain as terrain_router
+    app.include_router(terrain_router.router, prefix="/api/sessions", tags=["terrain"])
+
     # Admin endpoints
     from backend.api import admin as admin_router
     app.include_router(admin_router.router, prefix="/api/admin", tags=["admin"])

@@ -162,6 +162,7 @@
                 <button class="admin-subtab-btn" data-panel="admin-coc-panel" title="Unit chain of command hierarchy">CoC</button>
                 <button class="admin-subtab-btn" data-panel="admin-users-panel" title="Manage registered users">Users</button>
                 <button class="admin-subtab-btn" data-panel="admin-types-panel" title="Manage unit types and icons">Types</button>
+                <button class="admin-subtab-btn" data-panel="admin-terrain-panel" title="Terrain analysis & painting">Terrain</button>
             </div>
 
             <!-- ═══ BUILDER SUB-TAB ═══════════════════════ -->
@@ -394,6 +395,85 @@
                     <div style="margin-top:8px;display:flex;gap:4px;">
                         <button id="admin-add-unit-type" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Add a new custom unit type">➕ Add Type</button>
                         <button id="admin-reset-unit-types" class="admin-btn" style="font-size:10px;" title="Reset all types to defaults">↺ Reset Defaults</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ TERRAIN SUB-TAB ═══════════════════════════ -->
+            <div id="admin-terrain-panel" class="admin-subtab-panel" style="display:none;">
+                <div class="admin-section">
+                    <h4>⛰ Terrain Analysis</h4>
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                        Analyze terrain from OSM data + elevation. Auto-classifies roads, forests, water, urban areas, etc.
+                    </div>
+                    <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+                        <label style="font-size:10px;color:#90caf9;">Depth:</label>
+                        <select id="terrain-analyze-depth" style="padding:3px 6px;font-size:11px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;">
+                            <option value="1">1 (~333m cells)</option>
+                            <option value="2" selected>2 (~111m cells)</option>
+                            <option value="3">3 (~37m cells)</option>
+                            <option value="4">4 (~12m cells) ⚠ slow</option>
+                        </select>
+                        <span id="terrain-cell-estimate" style="font-size:10px;color:#4fc3f7;margin-left:4px;"></span>
+                    </div>
+                    <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+                        <label style="font-size:10px;color:#90caf9;">
+                            <input type="checkbox" id="terrain-skip-elevation" style="accent-color:#4fc3f7;"> Skip elevation
+                        </label>
+                    </div>
+                    <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">
+                        <button id="terrain-analyze-btn" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Run terrain analysis (OSM + elevation)">🔍 Analyze Terrain</button>
+                        <button id="terrain-analyze-force-btn" class="admin-btn" style="font-size:10px;" title="Force re-analyze (overwrite existing)">🔄 Force Re-analyze</button>
+                        <button id="terrain-clear-btn" class="admin-btn admin-btn-danger" style="font-size:10px;" title="Clear auto-analyzed terrain (keeps manual)">🗑 Clear</button>
+                    </div>
+                    <!-- Progress bar -->
+                    <div id="terrain-progress-container" style="display:none;margin-top:6px;">
+                        <div class="terrain-progress-bar">
+                            <div class="terrain-progress-fill" id="terrain-progress-fill"></div>
+                        </div>
+                        <div id="terrain-progress-text" style="font-size:10px;color:#90caf9;margin-top:2px;"></div>
+                    </div>
+                    <div id="terrain-analyze-status" class="admin-info" style="margin-top:4px;"></div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>🎨 Terrain Painting</h4>
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                        Manually paint terrain cells on the map. Manual cells are never overwritten by auto-analysis.
+                    </div>
+                    <div class="terrain-paint-toolbar">
+                        <select id="terrain-paint-type">
+                            <option value="road">🛣 Road</option>
+                            <option value="open">🌾 Open</option>
+                            <option value="forest" selected>🌲 Forest</option>
+                            <option value="urban">🏘 Urban</option>
+                            <option value="water">💧 Water</option>
+                            <option value="fields">🌽 Fields</option>
+                            <option value="marsh">🌿 Marsh</option>
+                            <option value="desert">🏜 Desert</option>
+                            <option value="scrub">🌿 Scrub</option>
+                            <option value="bridge">🌉 Bridge</option>
+                            <option value="mountain">⛰ Mountain</option>
+                            <option value="orchard">🌳 Orchard</option>
+                        </select>
+                        <button id="terrain-paint-start-btn" class="admin-btn" title="Start painting mode">🖌 Paint</button>
+                        <button id="terrain-paint-stop-btn" class="admin-btn" style="display:none;" title="Stop painting">✋ Stop</button>
+                    </div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>📊 Terrain Stats</h4>
+                    <div id="terrain-stats-container" style="font-size:11px;color:#aaa;">
+                        No terrain data. Run analysis first.
+                    </div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>🗺 Map Overlay</h4>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                        <button id="terrain-show-btn" class="admin-btn" title="Show/hide terrain overlay on map">👁 Toggle Terrain</button>
+                        <button id="terrain-elev-btn" class="admin-btn" title="Show/hide elevation heatmap">📈 Toggle Elevation</button>
+                        <button id="terrain-legend-btn" class="admin-btn" title="Show/hide terrain legend">📋 Toggle Legend</button>
                     </div>
                 </div>
             </div>
@@ -862,6 +942,7 @@
     <script src="/js/gamelog.js"></script>
     <script src="/js/session_ui.js"></script>
     <script src="/js/scenario_builder.js"></script>
+    <script src="/js/terrain.js"></script>
     <script src="/js/admin.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/app.js"></script>

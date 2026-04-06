@@ -58,6 +58,7 @@ const KAdmin = (() => {
                 else if (panelId === 'admin-session-panel') { _refreshSessions(); _loadParticipants(); _populateSessionScenarioDropdown(); }
                 else if (panelId === 'admin-builder-panel') refreshScenarioList();
                 else if (panelId === 'admin-types-panel') _renderUnitTypes();
+                else if (panelId === 'admin-terrain-panel') { _loadTerrainStats(); _updateCellEstimate(); }
             });
         });
 
@@ -135,6 +136,24 @@ const KAdmin = (() => {
 
         // ── Public CoC tab refresh ──────────────────
         _bind('coc-refresh-btn', 'click', loadPublicCoC);
+
+        // ── Terrain sub-tab ────────────────────────
+        _bind('terrain-analyze-btn', 'click', () => _analyzeTerrain(false));
+        _bind('terrain-analyze-force-btn', 'click', () => _analyzeTerrain(true));
+        _bind('terrain-clear-btn', 'click', _clearTerrain);
+        _bind('terrain-paint-start-btn', 'click', _startTerrainPaint);
+        _bind('terrain-paint-stop-btn', 'click', _stopTerrainPaint);
+        _bind('terrain-show-btn', 'click', () => KTerrain.toggle());
+        _bind('terrain-elev-btn', 'click', () => KTerrain.toggleElevation());
+        _bind('terrain-legend-btn', 'click', () => KTerrain.toggleLegend());
+
+        // Depth change → update cell count estimate
+        const depthSel = document.getElementById('terrain-analyze-depth');
+        if (depthSel) {
+            depthSel.addEventListener('change', _updateCellEstimate);
+            // Initial estimate on panel open
+            setTimeout(_updateCellEstimate, 500);
+        }
 
         // ── Initialize modals ─────────────────────────
         _initAssignModal();
@@ -3193,6 +3212,157 @@ const KAdmin = (() => {
         // Close admin window
         const win = document.getElementById('admin-window');
         if (win) win.style.display = 'none';
+    }
+
+    // ── Terrain Admin Functions ──────────────────────────
+
+    async function _updateCellEstimate() {
+        const depthSel = document.getElementById('terrain-analyze-depth');
+        const estimateEl = document.getElementById('terrain-cell-estimate');
+        if (!depthSel || !estimateEl) return;
+        const depth = parseInt(depthSel.value || '2');
+        const estimate = await KTerrain.estimateCellCount(depth);
+        if (estimate) {
+            const warn = estimate.total_cells > 50000 ? ' ⚠' : '';
+            estimateEl.textContent = `≈ ${estimate.total_cells.toLocaleString()} cells (${estimate.cell_size_m}m)${warn}`;
+            estimateEl.style.color = estimate.total_cells > 50000 ? '#ff9800' : '#4fc3f7';
+        } else {
+            estimateEl.textContent = '';
+        }
+    }
+
+    async function _analyzeTerrain(force = false) {
+        const sid = _getAdminSessionId();
+        if (!sid) return alert('No session selected');
+
+        const depth = parseInt(document.getElementById('terrain-analyze-depth')?.value || '2');
+        let skipElev = document.getElementById('terrain-skip-elevation')?.checked || false;
+        const statusEl = document.getElementById('terrain-analyze-status');
+        const progressContainer = document.getElementById('terrain-progress-container');
+        const progressFill = document.getElementById('terrain-progress-fill');
+        const progressText = document.getElementById('terrain-progress-text');
+
+        // Auto-skip elevation for very high depths (too many API calls)
+        if (depth >= 4 && !skipElev) {
+            if (!confirm(`Depth ${depth} generates many cells. Elevation API will be very slow.\n\nSkip elevation? (Cancel = include elevation)`)) {
+                skipElev = true;
+            }
+        }
+
+        // Show progress bar
+        if (progressContainer) progressContainer.style.display = 'block';
+        if (progressFill) { progressFill.style.width = '0%'; progressFill.classList.remove('error'); }
+        if (progressText) progressText.textContent = 'Starting analysis...';
+        if (statusEl) { statusEl.textContent = ''; statusEl.className = 'admin-info'; }
+
+        // Disable buttons during analysis
+        const analyzeBtn = document.getElementById('terrain-analyze-btn');
+        const forceBtn = document.getElementById('terrain-analyze-force-btn');
+        if (analyzeBtn) analyzeBtn.disabled = true;
+        if (forceBtn) forceBtn.disabled = true;
+
+        const result = await KTerrain.analyzeWithProgress(depth, force, skipElev, (event) => {
+            // Update progress bar in real time
+            if (progressFill && event.progress >= 0) {
+                progressFill.style.width = `${Math.round(event.progress * 100)}%`;
+            }
+            if (progressText && event.message) {
+                progressText.textContent = event.message;
+            }
+            if (event.step === 'error') {
+                if (progressFill) progressFill.classList.add('error');
+                if (statusEl) {
+                    statusEl.textContent = `❌ ${event.message}`;
+                    statusEl.className = 'admin-info admin-error';
+                }
+            }
+        });
+
+        // Re-enable buttons
+        if (analyzeBtn) analyzeBtn.disabled = false;
+        if (forceBtn) forceBtn.disabled = false;
+
+        if (result) {
+            if (progressFill) progressFill.style.width = '100%';
+            if (progressText) progressText.textContent = `✅ Done in ${result.duration_s}s`;
+            if (statusEl) {
+                statusEl.textContent = `✅ ${result.cells_created} created, ${result.cells_updated} updated, ` +
+                    `${result.cells_skipped} skipped. OSM: ${result.osm_features} features. ` +
+                    `${result.cell_size_m}m resolution. Time: ${result.duration_s}s`;
+                statusEl.className = 'admin-info admin-success';
+            }
+            _loadTerrainStats();
+
+            // Auto-hide progress bar after 5 seconds
+            setTimeout(() => {
+                if (progressContainer) progressContainer.style.display = 'none';
+            }, 5000);
+        } else if (!statusEl?.textContent?.includes('❌')) {
+            if (statusEl) { statusEl.textContent = '❌ Analysis failed. Check console.'; statusEl.className = 'admin-info admin-error'; }
+        }
+    }
+
+    async function _clearTerrain() {
+        if (!confirm('Clear all auto-analyzed terrain? Manual cells will be preserved.')) return;
+        await KTerrain.clearTerrain(true);
+        const statusEl = document.getElementById('terrain-analyze-status');
+        if (statusEl) { statusEl.textContent = '🗑 Terrain cleared (manual cells preserved)'; statusEl.className = 'admin-info'; }
+        _loadTerrainStats();
+    }
+
+    function _startTerrainPaint() {
+        const type = document.getElementById('terrain-paint-type')?.value || 'forest';
+        KTerrain.startPaintMode(type);
+        // Make sure terrain layer is visible
+        if (!KTerrain.isVisible()) KTerrain.toggle();
+        const startBtn = document.getElementById('terrain-paint-start-btn');
+        const stopBtn = document.getElementById('terrain-paint-stop-btn');
+        if (startBtn) startBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = '';
+
+        // Listen for type changes
+        const sel = document.getElementById('terrain-paint-type');
+        if (sel) sel.addEventListener('change', () => KTerrain.setPaintType(sel.value));
+    }
+
+    function _stopTerrainPaint() {
+        KTerrain.stopPaintMode();
+        const startBtn = document.getElementById('terrain-paint-start-btn');
+        const stopBtn = document.getElementById('terrain-paint-stop-btn');
+        if (startBtn) startBtn.style.display = '';
+        if (stopBtn) stopBtn.style.display = 'none';
+    }
+
+    async function _loadTerrainStats() {
+        const container = document.getElementById('terrain-stats-container');
+        if (!container) return;
+        const stats = await KTerrain.getStats();
+        if (!stats || stats.total_cells === 0) {
+            container.innerHTML = '<span style="color:#888;">No terrain data. Run analysis first.</span>';
+            return;
+        }
+        const colors = KTerrain.getTerrainColors();
+        const labels = KTerrain.getTerrainLabels();
+        let html = `<div style="margin-bottom:4px;"><b style="color:#4fc3f7;">Total cells:</b> ${stats.total_cells}</div>`;
+
+        // Type breakdown chips
+        html += '<div class="terrain-stats-bar">';
+        for (const [type, count] of Object.entries(stats.by_type || {}).sort((a, b) => b[1] - a[1])) {
+            const color = colors[type] || '#90EE90';
+            const label = (labels[type] || type).replace(/^[^\w]+ /, '');
+            html += `<span class="terrain-stat-chip" style="background:${color};">${label}: ${count}</span>`;
+        }
+        html += '</div>';
+
+        // Source breakdown
+        html += '<div style="margin-top:6px;font-size:10px;color:#aaa;">';
+        html += '<b>Sources:</b> ';
+        for (const [src, count] of Object.entries(stats.by_source || {})) {
+            html += `${src}: ${count}  `;
+        }
+        html += '</div>';
+
+        container.innerHTML = html;
     }
 
     return {

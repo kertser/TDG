@@ -51,6 +51,58 @@
 - Custom arrow rendering via Leaflet polyline decorators or SVG overlay.
 - NATO tactical graphics (boundary lines, phase lines, axis of advance) can be built as styled GeoJSON features with custom renderers on top of Leaflet.
 
+### 1.7 Terrain Intelligence
+
+#### 1.7.1 Approach Evaluation
+
+| Approach | Strengths | Weaknesses | Verdict |
+|---|---|---|---|
+| **A. OSM Overpass API** | Excellent for roads, buildings, waterways, bridges — precise vector geometry. Free, one-time fetch → offline forever. | Poor vegetation classification (forest vs grassland vs scrub) in rural/uninhabited areas. Rate-limited (1 req/s). | **Use for infrastructure layer.** |
+| **B. Tile Image AI (GPT-4o vision)** | Could classify any visible map content. | Fragile (color scheme changes break it), expensive ($10+/grid), slow (minutes of LLM calls), unreliable. | **Not recommended.** Structured geodata is superior. |
+| **C. ESA WorldCover raster** | 10m resolution global land cover (forest, grassland, cropland, wetland, urban, desert, water). Free open data. | No roads, bridges, or individual buildings — only land cover classes. | **Use for vegetation/land type layer.** |
+| **D. Hybrid (A+C) + Manual + Elevation** | Each source fills the other's gaps. Admin manual override covers scenario-specific features (fortifications, key buildings). Elevation data adds height dimension. | ~2 weeks implementation. | **★ Recommended.** |
+
+**Decision:** Use **Hybrid approach** — OSM Overpass for infrastructure vectors + ESA WorldCover for land cover raster + Open-Elevation/SRTM for height map + Admin manual terrain painting for scenario-specific features.
+
+#### 1.7.2 Data Sources
+
+| Source | What it provides | Resolution | Access method | Cost |
+|---|---|---|---|---|
+| **OSM Overpass API** | Roads, highways, bridges, buildings, waterways, landuse polygons, forests, wetlands | Vector (infinite precision) | HTTP query with bbox filter | Free (rate-limited) |
+| **ESA WorldCover 2021** | Global land cover: 10 classes (tree, shrub, grass, crop, urban, bare, water, wetland, mangrove, moss) | 10m raster | Cloud-Optimized GeoTIFF (COG) via S3 — `rasterio` reads over HTTP with range requests, no bulk download needed | Free |
+| **SRTM / Copernicus DEM** | Elevation (height above sea level) | 30m (SRTM GL1) / 25m (Copernicus GLO-30) | COG via AWS OpenData or OpenTopography API | Free |
+| **Admin manual painting** | Scenario-specific: fortifications, minefields, key buildings, destroyed bridges, custom terrain | Per-cell (snail path) | Admin UI tool → REST API | N/A |
+
+#### 1.7.3 Expanded Terrain Taxonomy
+
+12 terrain types replacing the original 5, with military-relevant modifiers:
+
+| Type | Movement | Visibility | Protection | Attack Mod | Primary Source |
+|---|---|---|---|---|---|
+| `road` | 1.0 | 1.0 | 1.0 | 1.0 | OSM `highway=*` |
+| `open` | 0.8 | 1.0 | 1.0 | 1.0 | ESA class 30 (grassland) |
+| `forest` | 0.5 | 0.4 | 1.4 | 0.7 | ESA class 10 (tree cover) |
+| `urban` | 0.4 | 0.5 | 1.5 | 0.8 | OSM `building=*`, ESA class 50 |
+| `water` | 0.05 | 1.0 | 0.5 | 0.2 | OSM `waterway=*`, ESA class 80 |
+| `fields` | 0.7 | 0.9 | 1.0 | 0.9 | ESA class 40 (cropland) |
+| `marsh` | 0.3 | 0.8 | 0.8 | 0.5 | ESA class 90 (wetland) |
+| `desert` | 0.7 | 1.0 | 0.8 | 1.0 | ESA class 60 (bare/sparse) |
+| `scrub` | 0.6 | 0.7 | 1.2 | 0.8 | ESA class 20 (shrubland) |
+| `bridge` | 1.0 | 1.0 | 0.8 | 0.9 | OSM `bridge=yes` |
+| `mountain` | 0.3 | 0.6 | 1.5 | 0.6 | Elevation slope > 20° |
+| `orchard` | 0.5 | 0.6 | 1.2 | 0.8 | OSM `landuse=orchard/vineyard` |
+
+#### 1.7.4 Elevation Effects on Gameplay
+
+Height data affects multiple engine subsystems:
+
+| Subsystem | Elevation Effect |
+|---|---|
+| **Movement** | Slope penalty: `slope_factor = max(0.2, 1.0 - slope_deg/45)`. Uphill is slower, downhill slightly faster (capped). |
+| **Detection** | Higher ground bonus: `+10% detection range per 50m height advantage`. Ridge blocks line-of-sight (future: LOS raycast). |
+| **Combat** | Height advantage: `+15% fire effectiveness` when firing downhill. Reduced protection when attacking uphill targets. |
+| **Terrain classification** | Steep slopes (>20°) override base type to `mountain`. Flat areas above treeline → `desert`/`open`. |
+
 ---
 
 ## Section 2: Architecture Overview
@@ -384,6 +436,44 @@ RedAgent
   decision_state  JSONB         -- last reasoning output for debugging
 ```
 
+### 4.14 TerrainCell
+```
+TerrainCell
+  id              UUID  PK
+  session_id      UUID  FK → Session
+  snail_path      VARCHAR(50)    -- e.g. "B4-3" (depth 1) or "B4-3-7" (depth 2)
+  depth           INTEGER        -- subdivision depth of this cell
+  terrain_type    VARCHAR(20)    -- from expanded taxonomy (road, forest, urban, etc.)
+  modifiers       JSONB          -- {movement, visibility, protection, attack}
+  source          VARCHAR(20)    -- 'osm', 'landcover', 'elevation', 'manual', 'default'
+  confidence      FLOAT          -- 0.0 – 1.0
+  centroid_lat    FLOAT
+  centroid_lon    FLOAT
+  elevation_m     FLOAT nullable -- height above sea level at centroid
+  slope_deg       FLOAT nullable -- terrain slope in degrees
+  raw_tags        JSONB nullable -- original OSM tags or ESA class ID
+  created_at      TIMESTAMP
+
+  UNIQUE(session_id, snail_path)
+```
+
+### 4.15 ElevationCell
+```
+ElevationCell
+  id              UUID  PK
+  session_id      UUID  FK → Session
+  snail_path      VARCHAR(50)    -- matches TerrainCell granularity
+  depth           INTEGER
+  elevation_m     FLOAT          -- height above sea level at centroid
+  slope_deg       FLOAT          -- slope in degrees (computed from neighbors)
+  aspect_deg      FLOAT nullable -- downhill direction (0=N, 90=E)
+  centroid_lat    FLOAT
+  centroid_lon    FLOAT
+  created_at      TIMESTAMP
+
+  UNIQUE(session_id, snail_path)
+```
+
 ### Entity Relationship Summary
 ```
 Scenario 1──N Session
@@ -396,6 +486,8 @@ Session  1──N Contact
 Session  1──N Event
 Session  1──N Report
 Session  1──N RedAgent
+Session  1──N TerrainCell
+Session  1──N ElevationCell
 Unit     0──1 Unit (parent)
 RedAgent ──N Unit (controlled)
 ```
@@ -442,6 +534,7 @@ Used for fields that vary by context and shouldn't be rigidly schematized at MVP
 | Command interpretation | Order, LocationReference | OrderParser + IntentInterpreter write; Rules Engine reads |
 | History / replay | Event, Report | Append-only |
 | Configuration | Scenario, GridDefinition, User, SessionParticipant | Setup-time writes |
+| Terrain intelligence | TerrainCell, ElevationCell | Auto-analysis + admin manual override; read by Rules Engine |
 
 ### 5.7 Redis Usage
 - **Pub/Sub channels** per session: `session:{id}:events` — for WebSocket fan-out.
@@ -935,6 +1028,95 @@ if unit.ammo <= 0:
 | `scripts/run_dev.py` | Dev runner: start backend + watch |
 | `AGENTS.MD` | This file |
 
+### Phase 11: Terrain Intelligence — Auto-Analysis, Elevation, Manual Painting
+**Goal:** Automatic terrain classification from real-world geodata (OSM + ESA WorldCover), elevation/height map, and admin manual override painting. Terrain feeds into all engine subsystems.
+
+#### Phase 11a: Data Models & Terrain Engine Refactor
+
+| File | Contents |
+|---|---|
+| `backend/models/terrain_cell.py` | **NEW.** TerrainCell SQLAlchemy model: `id`, `session_id` (FK), `snail_path` (VARCHAR, unique with session), `depth`, `terrain_type` (VARCHAR 20), `modifiers` (JSONB), `source` (VARCHAR 20: osm/landcover/elevation/manual/default), `confidence` (FLOAT), `centroid_lat`, `centroid_lon`, `elevation_m` (nullable), `slope_deg` (nullable), `raw_tags` (JSONB nullable), `created_at`. Composite unique on `(session_id, snail_path)`. |
+| `backend/models/elevation_cell.py` | **NEW.** ElevationCell SQLAlchemy model: `id`, `session_id` (FK), `snail_path` (VARCHAR, unique with session), `depth`, `elevation_m`, `slope_deg`, `aspect_deg` (nullable), `centroid_lat`, `centroid_lon`, `created_at`. |
+| `backend/models/__init__.py` | Import TerrainCell, ElevationCell |
+| `backend/engine/terrain.py` | **REFACTOR.** Expand from 5 terrain types to 12 (Section 1.7.3). Add DB-backed cell lookup mode: constructor accepts optional `terrain_cells: dict[snail_path, str]` + `elevation_cells: dict[snail_path, dict]` + `grid_service` for point→snail resolution. Keep same public interface (`get_terrain_at`, `movement_factor`, `visibility_factor`, `protection_factor`, `attack_modifier`). Add elevation-aware methods: `get_elevation_at(lon, lat)`, `get_slope_at(lon, lat)`, `elevation_advantage(from_lon, from_lat, to_lon, to_lat)`. Falls back to legacy `terrain_meta` regions if no cells loaded. |
+
+#### Phase 11b: OSM Overpass Analyzer
+
+| File | Contents |
+|---|---|
+| `backend/services/terrain_analysis/__init__.py` | (empty) |
+| `backend/services/terrain_analysis/osm_analyzer.py` | **NEW.** `OSMAnalyzer` class. Given grid bbox, sends Overpass API query for landuse/natural/highway/waterway/building tags. Returns list of `{geometry: Shapely, terrain_type: str, tags: dict, priority: int}`. Priority-ranked tag mapping: `bridge=yes` → bridge (P1), `highway=*` → road (P2), `building=*` → urban (P3), `landuse=residential` → urban (P4), `waterway=river` → water (P5), `natural=water` → water (P6), `natural=wood` → forest (P7), `natural=wetland` → marsh (P8), `landuse=farmland` → fields (P9), `landuse=orchard` → orchard (P10). Uses `httpx` async HTTP client. Caches raw Overpass response in memory during analysis run. |
+| `backend/services/terrain_analysis/overpass_queries.py` | **NEW.** Overpass QL query templates. Builds bbox-filtered queries for different feature categories. Handles rate limiting (1 req/s) and retries. |
+
+#### Phase 11c: ESA WorldCover Land Cover Analyzer
+
+| File | Contents |
+|---|---|
+| `backend/services/terrain_analysis/landcover_analyzer.py` | **NEW.** `LandCoverAnalyzer` class. Given list of (lat, lon) centroids, fetches ESA WorldCover 2021 GeoTIFF data via Cloud-Optimized GeoTIFF (COG) HTTP range requests. Maps ESA class IDs to terrain types: 10→forest, 20→scrub, 30→open, 40→fields, 50→urban, 60→desert, 70→desert, 80→water, 90→marsh, 95→forest, 100→marsh. Uses `rasterio` with `vsicurl` to read remote COG tiles — no full download needed. Returns `dict[snail_path, (terrain_type, esa_class_id)]`. |
+| `backend/services/terrain_analysis/esa_tiles.py` | **NEW.** ESA WorldCover tile index: maps lat/lon to S3 tile URLs (`s3://esa-worldcover/v200/2021/map/ESA_WorldCover_10m_2021_v200_{tile_id}_Map.tif`). Handles tile boundary crossing for grids spanning multiple tiles. |
+
+#### Phase 11d: Elevation / Height Map Analyzer
+
+| File | Contents |
+|---|---|
+| `backend/services/terrain_analysis/elevation_analyzer.py` | **NEW.** `ElevationAnalyzer` class. Given list of (lat, lon) centroids, fetches elevation from one of: (1) Open-Elevation API (`POST /api/v1/lookup` with batch of coords — free, no auth), (2) SRTM 30m COG tiles on AWS OpenData (via `rasterio`), or (3) Copernicus GLO-30 DEM. Returns `dict[snail_path, {elevation_m, slope_deg, aspect_deg}]`. Slope computed from neighboring cell elevations using finite differences. Aspect is the downhill compass direction. |
+
+#### Phase 11e: Terrain Merger & Analysis Orchestrator
+
+| File | Contents |
+|---|---|
+| `backend/services/terrain_analysis/merger.py` | **NEW.** `TerrainMerger` class. Merges results from OSM, ESA, Elevation analyzers with priority: (1) Admin manual overrides (source=manual, never overwritten), (2) OSM features for infrastructure (road, bridge, building/urban, water — high confidence vectors), (3) Elevation override: slope > 20° → mountain (regardless of other sources), (4) ESA land cover for vegetation types (forest, scrub, fields, marsh, desert), (5) Default: "open". Writes merged `TerrainCell` rows + `ElevationCell` rows to DB. |
+| `backend/services/terrain_analysis/service.py` | **NEW.** `TerrainAnalysisService` — main orchestrator. Method: `async analyze_grid(session_id, db, depth=1, force=False)`. Steps: (1) Load GridDefinition + build GridService, (2) Enumerate all cells at target depth, compute centroids, (3) Run OSM analyzer on grid bbox, (4) Run ESA land cover analyzer on centroids, (5) Run elevation analyzer on centroids, (6) Merge results, (7) Bulk upsert TerrainCell + ElevationCell rows. Parameter `force` controls whether to overwrite existing cells (except manual). Returns analysis summary stats. |
+
+#### Phase 11f: Terrain API Endpoints
+
+| File | Contents |
+|---|---|
+| `backend/api/terrain.py` | **NEW.** FastAPI router for terrain endpoints: |
+|  | `POST /api/sessions/{id}/terrain/analyze` — admin-only. Triggers terrain analysis at given depth (default 1). Returns `{status, cells_created, cells_updated, duration_s}`. Runs as async background if large grid. |
+|  | `GET /api/sessions/{id}/terrain` — returns all TerrainCells as GeoJSON FeatureCollection (polygons colored by terrain type). Query params: `?depth=` to filter. |
+|  | `GET /api/sessions/{id}/terrain/at?lat=&lon=` — single point terrain query. Returns `{terrain_type, modifiers, elevation_m, slope_deg, source, confidence}`. |
+|  | `PATCH /api/sessions/{id}/terrain/{snail_path}` — admin manual override. Sets terrain_type, source='manual'. Manual cells are never overwritten by auto-analysis. |
+|  | `DELETE /api/sessions/{id}/terrain` — admin-only. Clears all auto-analyzed cells (preserves manual). |
+|  | `GET /api/sessions/{id}/elevation` — returns ElevationCells as GeoJSON with elevation coloring. |
+|  | `GET /api/sessions/{id}/elevation/at?lat=&lon=` — single point elevation query. |
+| `backend/api/terrain.py` | `POST /api/sessions/{id}/terrain/paint` — admin batch paint. Body: `{snail_paths: [...], terrain_type: str}`. Sets multiple cells at once. Source='manual'. |
+| `backend/main.py` | Register terrain router. |
+
+#### Phase 11g: Engine Integration
+
+| File | Contents |
+|---|---|
+| `backend/engine/tick.py` | **MODIFY.** At tick start, bulk-load TerrainCells + ElevationCells for session into dicts. Construct `TerrainService` with cell data + GridService. Pass to all engine subsystems. One DB query (~900 rows), cached for entire tick. |
+| `backend/engine/movement.py` | **MODIFY.** Add slope penalty: `slope_factor = max(0.2, 1.0 - slope_deg/45)`. Multiply into effective_speed alongside terrain_factor. No interface change — TerrainService handles it. |
+| `backend/engine/detection.py` | **MODIFY.** Add elevation advantage: `height_bonus = 1.0 + (observer_elevation - target_elevation) / 500`. Multiply into effective_range when observer is higher. TerrainService provides elevation lookup. |
+| `backend/engine/combat.py` | **MODIFY.** Add height advantage: `height_mod = 1.0 + 0.15 * (attacker_elevation - target_elevation) / 50` (capped 0.7–1.5). Multiply into fire_effectiveness. |
+
+#### Phase 11h: Frontend — Terrain Overlay & Admin Painting
+
+| File | Contents |
+|---|---|
+| `frontend/js/terrain.js` | **NEW.** `KTerrain` module. (1) Fetch terrain GeoJSON `GET /sessions/{id}/terrain`, render as semi-transparent colored Leaflet GeoJSON layer. Color map: road=#666, open=#90EE90, forest=#228B22, urban=#A0A0A0, water=#4488FF, fields=#DAA520, marsh=#8B8B00, desert=#DEB887, scrub=#9ACD32, bridge=#888, mountain=#8B7355, orchard=#556B2F. (2) Toggle show/hide. (3) Terrain legend popup. (4) Hover tooltip showing terrain type + modifiers + elevation. (5) Elevation contour/heatmap overlay mode (toggle). |
+| `frontend/js/ui.js` | **MODIFY.** Add terrain toggle button to map control panel (second 3×2 grid). SVG icon for terrain layer. |
+| `frontend/js/admin.js` | **MODIFY.** Add terrain section to admin panel: (1) "Analyze Terrain" button with depth selector (1/2) and progress bar, (2) "Clear Terrain" button, (3) Terrain painting mode: select terrain type from dropdown, click cells on map to paint them. Right-click to erase (reset to auto). Painting sends `PATCH /terrain/{snail_path}` or batch `POST /terrain/paint`. (4) Elevation analysis trigger. (5) Show terrain stats (cell count per type). |
+| `frontend/index.html` | **MODIFY.** Include `terrain.js` script tag. |
+| `frontend/css/style.css` | **MODIFY.** Styles for terrain legend, terrain painting toolbar, elevation heatmap opacity. |
+
+#### Phase 11i: Tests
+
+| File | Contents |
+|---|---|
+| `backend/tests/test_terrain_analysis.py` | **NEW.** Tests: OSM tag → terrain type mapping, ESA class → terrain type mapping, merger priority logic, elevation slope computation, manual override protection, point query. Mock external APIs (Overpass, ESA COG). |
+| `backend/tests/test_terrain_engine.py` | **NEW.** Tests: DB-backed TerrainService returns correct factors, elevation advantage calculations, slope penalty, fallback to legacy terrain_meta. |
+
+#### New Dependencies
+
+| Package | Purpose | Notes |
+|---|---|---|
+| `rasterio>=1.4.0` | Read ESA WorldCover COG tiles + SRTM elevation over HTTP | Requires GDAL C library — add `gdal-bin libgdal-dev` to Docker |
+| `numpy` | Raster array operations, slope/aspect computation | Usually already present with rasterio |
+| `httpx` | Async HTTP for Overpass API, Open-Elevation API | Already in requirements.txt |
+
 ---
 
 ## Appendix A: Implementation Status
@@ -955,6 +1137,7 @@ if unit.ammo <= 0:
 | **Phase 8: Red AI** | ❌ Not started | RedAgent model exists, but AI decision loop not implemented |
 | **Phase 9: Reports, Events, Log** | ⚠ Partial | Events endpoint + frontend panel. Reports endpoint exists. AI-generated reports not wired. |
 | **Phase 10: Polish & Deployment** | ⚠ Partial | Dev workflow works. Dockerfile/nginx not yet tested in production. |
+| **Phase 11: Terrain Intelligence** | ✅ Complete | TerrainCell/ElevationCell models, OSM Overpass analyzer, ESA WorldCover (optional rasterio), Open-Elevation API, terrain merger, 12-type taxonomy, admin painting, elevation slope/aspect, engine integration (tick loads cells), terrain API (12 endpoints inc. SSE streaming + cell-count), frontend overlay + legend + admin panel. **SSE progress bar** for real-time analysis feedback. **High-res support**: depth 1-4 (333m → 12m cells). **Performance**: O(n) spatial-hash neighbor map, STRtree OSM lookup, concurrent elevation batches, batched DB writes, fast enumerate_cells. |
 
 ### Features Implemented Beyond Original Plan
 
@@ -1049,7 +1232,9 @@ KShU/
 │   │   ├── event.py
 │   │   ├── report.py
 │   │   ├── red_agent.py
-│   │   └── grid.py
+│   │   ├── grid.py
+│   │   ├── terrain_cell.py        ← NEW: TerrainCell (snail_path → terrain type + modifiers)
+│   │   └── elevation_cell.py      ← NEW: ElevationCell (snail_path → height/slope/aspect)
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py
@@ -1064,6 +1249,7 @@ KShU/
 │   │   ├── events.py
 │   │   ├── reports.py
 │   │   ├── scenarios.py
+│   │   ├── terrain.py             ← NEW: Terrain analysis + painting + elevation endpoints
 │   │   └── websocket.py
 │   ├── services/
 │   │   ├── __init__.py
@@ -1072,7 +1258,16 @@ KShU/
 │   │   ├── visibility_service.py ← Fog-of-war, command authority, unit serialization
 │   │   ├── overlay_service.py
 │   │   ├── ws_manager.py
-│   │   └── tick_scheduler.py
+│   │   ├── tick_scheduler.py
+│   │   └── terrain_analysis/      ← NEW: Terrain intelligence package
+│   │       ├── __init__.py
+│   │       ├── service.py         ← Orchestrator: analyze_grid()
+│   │       ├── osm_analyzer.py    ← OSM Overpass query + tag→terrain mapping
+│   │       ├── overpass_queries.py ← Overpass QL templates
+│   │       ├── landcover_analyzer.py ← ESA WorldCover COG reader
+│   │       ├── esa_tiles.py       ← ESA tile URL index
+│   │       ├── elevation_analyzer.py ← SRTM/Open-Elevation height fetcher
+│   │       └── merger.py          ← Priority merge: OSM+ESA+Elevation+Manual
 │   ├── engine/
 │   │   ├── __init__.py
 │   │   ├── tick.py
@@ -1113,6 +1308,7 @@ KShU/
 │       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu
 │       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
 │       ├── admin.js              ← Admin panel (3200+ lines): dashboard, CoC, wizard, god view, users, types
+│       ├── terrain.js            ← NEW: Terrain overlay rendering, legend, elevation heatmap
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 └── scripts/
     ├── __init__.py

@@ -343,6 +343,46 @@ class GridService:
             children.append((child_path, poly))
         return children
 
+    def enumerate_cells(self, depth: int) -> list[tuple[str, float, float]]:
+        """
+        Fast enumeration of all cells at a given depth.
+        Returns list of (snail_path, center_lat, center_lon) without building
+        full polygons or GeoJSON — much faster than grid_as_geojson for large depths.
+        """
+        cells: list[tuple[str, float, float]] = []
+        cos_r = math.cos(self._rot_rad)
+        sin_r = math.sin(self._rot_rad)
+
+        def _recurse(path: str, x_min: float, y_min: float, size: float, cur: int):
+            if cur >= depth:
+                cx = x_min + size / 2
+                cy = y_min + size / 2
+                rx = cx * cos_r - cy * sin_r
+                ry = cx * sin_r + cy * cos_r
+                lon, lat = self._to_geo.transform(rx, ry)
+                cells.append((path, lat, lon))
+            else:
+                sub = size / self._recursion_base
+                for sn in range(1, 10):
+                    co, ro = SNAIL_TO_OFFSET[sn]
+                    _recurse(f"{path}-{sn}", x_min + co * sub, y_min + ro * sub, sub, cur + 1)
+
+        for row in range(self._rows):
+            for col in range(self._columns):
+                label = self._make_top_label(col, row)
+                x0 = col * self._square_size
+                y0 = row * self._square_size
+                if depth == 0:
+                    cx = x0 + self._square_size / 2
+                    cy = y0 + self._square_size / 2
+                    rx = cx * cos_r - cy * sin_r
+                    ry = cx * sin_r + cy * cos_r
+                    lon, lat = self._to_geo.transform(rx, ry)
+                    cells.append((label, lat, lon))
+                else:
+                    _recurse(label, x0, y0, self._square_size, 0)
+        return cells
+
     def grid_as_geojson(self, depth: int = 0) -> dict:
         """Full grid as GeoJSON FeatureCollection at given depth."""
         features = []
