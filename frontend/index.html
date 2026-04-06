@@ -68,7 +68,7 @@
                         <button id="create-session-btn" title="Create a new game session from the latest scenario">+ New Session</button>
                     </div>
                     <button id="start-session-btn" style="display:none;" title="Start the session (creates units from scenario)">Start Session</button>
-                    <button id="tick-btn" style="display:none;" title="Advance simulation by one tick">▶ Advance Tick</button>
+                    <button id="turn-btn" style="display:none;" title="Advance simulation by one turn">▶ Next Turn</button>
                     <div id="session-list"></div>
                 </div>
                 <div id="participants-panel"></div>
@@ -252,12 +252,12 @@
                     <div id="admin-session-status" class="admin-info">No active session</div>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
                         <button id="admin-pause-session" class="admin-btn" title="Pause the running session">⏸ Pause</button>
-                        <button id="admin-reset-session" class="admin-btn admin-btn-danger" title="Reset session to tick 0 (recreates units from scenario)">↺ Reset</button>
+                        <button id="admin-reset-session" class="admin-btn admin-btn-danger" title="Reset session to turn 0 (recreates units from scenario)">↺ Reset</button>
                     </div>
                     <div style="display:flex;gap:4px;align-items:center;margin-top:6px;">
-                        <label style="font-size:11px;color:#aaa;white-space:nowrap;">Tick interval (s):</label>
-                        <input type="number" id="admin-tick-interval" value="60" min="1" style="width:60px;padding:3px;" title="Seconds of game time per simulation tick" />
-                        <button id="admin-apply-tick-interval" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Apply new tick interval to current session">Apply</button>
+                        <label style="font-size:11px;color:#aaa;white-space:nowrap;">Turn interval (min):</label>
+                        <input type="number" id="admin-turn-interval" value="1" min="1" style="width:60px;padding:3px;" title="Minutes of game time per turn" />
+                        <button id="admin-apply-turn-interval" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Apply new turn interval to current session">Apply</button>
                     </div>
                 </div>
 
@@ -380,7 +380,6 @@
                         <option value="blue">🔵 Blue</option>
                         <option value="red">🔴 Red</option>
                         <option value="observer">👁 Observer</option>
-                        <option value="admin">⚙ Admin</option>
                     </select>
                 </div>
                 <div class="admin-modal-row">

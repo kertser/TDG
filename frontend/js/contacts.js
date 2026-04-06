@@ -80,5 +80,10 @@ const KContacts = (() => {
         });
     }
 
-    return { init, load, render };
+    /** Clear all contacts from map (used on logout). */
+    function clearAll() {
+        if (contactsLayer) contactsLayer.clearLayers();
+    }
+
+    return { init, load, render, clearAll };
 })();

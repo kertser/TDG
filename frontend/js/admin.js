@@ -83,7 +83,7 @@ const KAdmin = (() => {
         _bind('admin-refresh-sessions', 'click', _refreshSessions);
         _bind('admin-pause-session', 'click', _pauseSession);
         _bind('admin-reset-session', 'click', _resetSession);
-        _bind('admin-apply-tick-interval', 'click', _applyTickInterval);
+        _bind('admin-apply-turn-interval', 'click', _applyTurnInterval);
         _bind('admin-load-participants', 'click', _loadParticipants);
         _bind('admin-inject-event', 'click', _injectEvent);
         _bind('admin-apply-grid', 'click', _applyGrid);
@@ -250,7 +250,7 @@ const KAdmin = (() => {
             sessions.forEach(s => {
                 const opt = document.createElement('option');
                 opt.value = s.id;
-                opt.textContent = `${s.id.substring(0, 8)}… [${s.status}] T${s.tick} (${s.participant_count}p)`;
+                opt.textContent = `${s.id.substring(0, 8)}… [${s.status}] Turn ${s.tick} (${s.participant_count}p)`;
                 sel.appendChild(opt);
             });
 
@@ -403,9 +403,9 @@ const KAdmin = (() => {
                 KWebSocket.disconnect();
                 document.getElementById('session-info').textContent = '';
                 const startBtn = document.getElementById('start-session-btn');
-                const tickBtn = document.getElementById('tick-btn');
+                const turnBtn = document.getElementById('turn-btn');
                 if (startBtn) startBtn.style.display = 'none';
-                if (tickBtn) tickBtn.style.display = 'none';
+                if (turnBtn) turnBtn.style.display = 'none';
                 KSessionUI.loadSessions();
                 KGameLog.addEntry('All sessions deleted (admin)', 'info');
                 _loadAdminSessions();
@@ -442,7 +442,7 @@ const KAdmin = (() => {
                 method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
             });
             const data = await resp.json();
-            _showInfo('admin-session-status', `Paused at tick ${data.tick}`, 'success');
+            _showInfo('admin-session-status', `Paused at turn ${data.tick}`, 'success');
         } catch (err) {
             _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
         }
@@ -451,31 +451,39 @@ const KAdmin = (() => {
     async function _resetSession() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
-        if (!confirm('⚠ Reset session to tick 0? All progress will be lost.')) return;
+        if (!confirm('⚠ Reset session to turn 0? All progress will be lost.')) return;
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/reset`, {
                 method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
             });
             const data = await resp.json();
             _showInfo('admin-session-status', `✓ ${data.message}`, 'success');
-            KGameLog.addEntry('Session reset to tick 0 (admin)', 'info');
+            KGameLog.addEntry('Session reset to turn 0 (admin)', 'info');
+            // Reload grid and units on the map if this is the active session
+            const userSid = _getUserSessionId();
+            if (sid === userSid) {
+                const map = KMap.getMap();
+                try { await KGrid.load(map, userSid); } catch(e) {}
+                try { await KUnits.load(userSid, _getToken()); } catch(e) {}
+            }
         } catch (err) {
             _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
         }
     }
 
-    async function _applyTickInterval() {
+    async function _applyTurnInterval() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
-        const val = parseInt(document.getElementById('admin-tick-interval').value);
-        if (!val || val < 1) { alert('Invalid interval'); return; }
+        const minutes = parseInt(document.getElementById('admin-turn-interval').value);
+        if (!minutes || minutes < 1) { alert('Invalid interval'); return; }
+        const seconds = minutes * 60;  // Convert minutes to seconds for backend
         try {
             await fetch(`/api/admin/sessions/${sid}/tick-interval`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ tick_interval: val }),
+                body: JSON.stringify({ tick_interval: seconds }),
             });
-            _showInfo('admin-session-status', `Tick interval: ${val}s`, 'success');
+            _showInfo('admin-session-status', `Turn interval: ${minutes} min`, 'success');
         } catch (err) {
             _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
         }
@@ -640,10 +648,16 @@ const KAdmin = (() => {
         if (!token || !sid) return;
         if (!confirm('Kick this participant?')) return;
         try {
-            await fetch(`/api/admin/sessions/${sid}/participants/${participantId}`, {
-                method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` },
+            const resp = await fetch(`/api/admin/sessions/${sid}/participants/${participantId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
             });
-            _loadParticipants();
+            if (resp.ok || resp.status === 204) {
+                _loadParticipants();
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Kick failed');
+            }
         } catch (err) { alert(err.message); }
     }
 
@@ -932,9 +946,18 @@ const KAdmin = (() => {
 
     async function deleteUser(userId, name) {
         if (!confirm(`Delete user "${name}"? This will also remove them from all sessions.`)) return;
+        const token = _getToken();
         try {
-            await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
-            _loadUsers();
+            const resp = await fetch(`/api/admin/users/${userId}`, {
+                method: 'DELETE',
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (resp.ok || resp.status === 204) {
+                _loadUsers();
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Delete failed');
+            }
         } catch (err) { alert(err.message); }
     }
 
@@ -1109,19 +1132,21 @@ const KAdmin = (() => {
 
     /**
      * Check if the current user has command authority over a unit.
-     * User can assign a unit if they are directly assigned to it
-     * or to a proper ancestor in the parent chain.
+     * User can manage a unit if:
+     *   1. They are directly assigned to a proper ancestor (they command the parent unit).
+     *   2. They are directly assigned to this unit (they can reassign it).
+     * They should NOT be able to manage units above them in the hierarchy.
      */
     function _userCanAssign(unit, allUnitMap) {
         const userId = KSessionUI.getUserId();
         if (!userId) return false;
 
-        // Case 1: User is directly assigned to this unit
+        // Case 1: User is directly assigned to this unit (can manage/reassign)
         if (unit.assigned_user_ids && unit.assigned_user_ids.includes(userId)) {
             return true;
         }
 
-        // Case 2: User is assigned to a proper ancestor
+        // Case 2: User is assigned to a proper ancestor (has downward authority)
         let parentId = unit.parent_unit_id;
         const visited = new Set();
         while (parentId && allUnitMap[parentId]) {
@@ -1565,9 +1590,37 @@ const KAdmin = (() => {
         if (type === 'error') el.classList.add('admin-error');
     }
 
+    /** Reset admin state on logout — re-lock admin, close window, clear god view. */
+    function resetOnLogout() {
+        _adminUnlocked = false;
+        _godViewEnabled = false;
+        _adminSelectedSessionId = null;
+
+        // Re-lock admin panel
+        const gate = document.getElementById('admin-lock-gate');
+        const content = document.getElementById('admin-content');
+        if (gate) gate.style.display = 'block';
+        if (content) content.style.display = 'none';
+
+        // Clear password input
+        const pw = document.getElementById('admin-pw-input');
+        if (pw) pw.value = '';
+
+        // Reset god view button
+        const godBtn = document.getElementById('admin-god-view-toggle');
+        if (godBtn) {
+            godBtn.textContent = '👁 God View OFF';
+            godBtn.classList.remove('admin-btn-active');
+        }
+
+        // Close admin window
+        const win = document.getElementById('admin-window');
+        if (win) win.style.display = 'none';
+    }
+
     return {
         init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
-        onStateUpdate,
+        onStateUpdate, resetOnLogout,
         editScenario, deleteScenario, kickParticipant,
         renameUser, deleteUser, assignUserToSession,
         loadPublicCoC,

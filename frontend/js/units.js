@@ -75,8 +75,10 @@ const KUnits = (() => {
         if (!userId) return false;
         // If unit has no assignments, anyone on the same side can select
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
-        // Otherwise only if assigned to this user
-        return unit.assigned_user_ids.includes(userId);
+        // If assigned to this user
+        if (unit.assigned_user_ids.includes(userId)) return true;
+        // Check if user has command authority via parent chain
+        return _hasCommandAuthority(unit, userId);
     }
 
     /** Can the current user assign/unassign this unit? */
@@ -84,7 +86,28 @@ const KUnits = (() => {
         const userId = KSessionUI.getUserId();
         if (!userId) return false;
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
-        return unit.assigned_user_ids.includes(userId);
+        if (unit.assigned_user_ids.includes(userId)) return true;
+        // Check command authority via parent chain
+        return _hasCommandAuthority(unit, userId);
+    }
+
+    /** Check if user has authority over unit via ancestor chain */
+    function _hasCommandAuthority(unit, userId) {
+        const unitMap = {};
+        allUnitsData.forEach(u => { unitMap[u.id] = u; });
+
+        let parentId = unit.parent_unit_id;
+        const visited = new Set();
+        while (parentId && unitMap[parentId]) {
+            if (visited.has(parentId)) break;
+            visited.add(parentId);
+            const parent = unitMap[parentId];
+            if (parent.assigned_user_ids && parent.assigned_user_ids.includes(userId)) {
+                return true;
+            }
+            parentId = parent.parent_unit_id;
+        }
+        return false;
     }
 
     // ══════════════════════════════════════════════════
@@ -715,6 +738,17 @@ const KUnits = (() => {
         return allUnitsData;
     }
 
+    /** Clear all unit layers and data (used on logout). */
+    function clearAll() {
+        if (unitsLayer) unitsLayer.clearLayers();
+        if (_selectionLayer) _selectionLayer.clearLayers();
+        if (_hoverLayer) _hoverLayer.clearLayers();
+        if (_movementArrowsLayer) _movementArrowsLayer.clearLayers();
+        unitMarkers = {};
+        allUnitsData = [];
+        selectedUnitIds.clear();
+    }
+
     function update(units) {
         render(units);
     }
@@ -728,5 +762,6 @@ const KUnits = (() => {
         toggle, isVisible,
         toggleSelect, assignToMe,
         getSelectedIds, clearSelection, getAllUnits,
+        clearAll,
     };
 })();

@@ -639,7 +639,7 @@ async def admin_kick_participant(
 async def admin_set_tick_interval(
     session_id: uuid.UUID, body: TickIntervalUpdate, db: DB, user: CurrentUser,
 ):
-    """Admin: change the tick interval (seconds) for a session."""
+    """Admin: change the tick interval (seconds) for a session. Frontend sends minutes, backend stores seconds."""
     result = await db.execute(select(Session).where(Session.id == session_id))
     session = result.scalar_one_or_none()
     if session is None:
@@ -682,7 +682,7 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     from backend.services.session_service import initialize_session_from_scenario
     await initialize_session_from_scenario(session, session.scenario, db)
 
-    return {"status": session.status.value, "tick": 0, "message": "Session reset to tick 0"}
+    return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0"}
 
 
 # ══════════════════════════════════════════════════════

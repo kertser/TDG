@@ -69,12 +69,12 @@ async def create_session(body: SessionCreate, db: DB, user: CurrentUser):
     db.add(session)
     await db.flush()
 
-    # Creator auto-joins as admin
+    # Creator auto-joins as blue player
     participant = SessionParticipant(
         session_id=session.id,
         user_id=user.id,
-        side=Side.admin,
-        role="creator",
+        side=Side.blue,
+        role="commander",
     )
     db.add(participant)
     await db.flush()

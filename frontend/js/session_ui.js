@@ -18,7 +18,7 @@ const KSessionUI = (() => {
         const logoutBtn = document.getElementById('logout-btn');
         const createBtn = document.getElementById('create-session-btn');
         const startBtn = document.getElementById('start-session-btn');
-        const tickBtn = document.getElementById('tick-btn');
+        const turnBtn = document.getElementById('turn-btn');
 
         registerBtn.addEventListener('click', () => _doLogin(nameInput.value.trim()));
         nameInput.addEventListener('keydown', (e) => {
@@ -41,9 +41,9 @@ const KSessionUI = (() => {
                         headers: { 'Authorization': `Bearer ${currentToken}` },
                     });
                     const data = await resp.json();
-                    KGameLog.addEntry(`Session started (tick ${data.tick})`, 'info');
+                    KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
                     startBtn.style.display = 'none';
-                    if (tickBtn) tickBtn.style.display = 'block';
+                    if (turnBtn) turnBtn.style.display = 'block';
 
                     // Reload grid + units + contacts after session start
                     // (grid & units are created on start from scenario data)
@@ -78,8 +78,8 @@ const KSessionUI = (() => {
             });
         }
 
-        if (tickBtn) {
-            tickBtn.addEventListener('click', async () => {
+        if (turnBtn) {
+            turnBtn.addEventListener('click', async () => {
                 if (!currentSessionId || !currentToken) return;
                 try {
                     const resp = await fetch(`/api/sessions/${currentSessionId}/tick`, {
@@ -88,15 +88,15 @@ const KSessionUI = (() => {
                     });
                     const data = await resp.json();
                     KGameLog.addEntry(
-                        `Tick ${data.tick}: ${data.events_count} events, ${data.units_alive} alive`,
+                        `Turn ${data.tick}: ${data.events_count} events, ${data.units_alive} alive`,
                         'info'
                     );
-                    // Reload units and contacts after tick
+                    // Reload units and contacts after turn
                     await KUnits.load(currentSessionId, currentToken);
                     await KContacts.load(currentSessionId, currentToken);
                     await KEvents.load(currentSessionId, currentToken);
                 } catch (err) {
-                    console.error('Tick failed:', err);
+                    console.error('Turn advance failed:', err);
                 }
             });
         }
@@ -163,9 +163,11 @@ const KSessionUI = (() => {
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) logoutBtn.style.display = 'none';
 
-        // Hide admin topbar button
+        // Hide admin topbar button and close admin window
         const adminTopBtn = document.getElementById('admin-topbar-btn');
         if (adminTopBtn) adminTopBtn.style.display = 'none';
+        const adminWindow = document.getElementById('admin-window');
+        if (adminWindow) adminWindow.style.display = 'none';
 
         // Hide toolbar and session controls
         const drawToolbar = document.getElementById('draw-toolbar');
@@ -183,13 +185,47 @@ const KSessionUI = (() => {
         KMap.setGameTime(0, null);
 
         const startBtn = document.getElementById('start-session-btn');
-        const tickBtn = document.getElementById('tick-btn');
+        const turnBtn = document.getElementById('turn-btn');
         if (startBtn) startBtn.style.display = 'none';
-        if (tickBtn) tickBtn.style.display = 'none';
+        if (turnBtn) turnBtn.style.display = 'none';
 
         // Clear session list
         const listEl = document.getElementById('session-list');
         if (listEl) listEl.innerHTML = '';
+
+        // Clear map layers (units, contacts, overlays, grid)
+        try { KUnits.clearAll(); } catch(e) {}
+        try { KContacts.clearAll(); } catch(e) {}
+        try { KOverlays.clearAll(); } catch(e) {}
+        try { KGrid.clearAll(); } catch(e) {}
+
+        // Clear sidebar panels content
+        const cocTree = document.getElementById('coc-tree-public');
+        if (cocTree) cocTree.innerHTML = '';
+        const eventsList = document.getElementById('events-list');
+        if (eventsList) eventsList.innerHTML = '';
+        const orderList = document.getElementById('order-list');
+        if (orderList) orderList.innerHTML = '';
+        const gameLog = document.getElementById('game-log');
+        if (gameLog) gameLog.innerHTML = '';
+        const selectedUnits = document.getElementById('selected-units-display');
+        if (selectedUnits) selectedUnits.innerHTML = '<span style="color:#888;font-size:11px;">No units selected</span>';
+        const participantsPanel = document.getElementById('participants-panel');
+        if (participantsPanel) participantsPanel.innerHTML = '';
+
+        // Reset sidebar to session tab
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const sessionTabBtn = document.querySelector('[data-tab="session-tab"]');
+        if (sessionTabBtn) sessionTabBtn.classList.add('active');
+        const sessionTab = document.getElementById('session-tab');
+        if (sessionTab) sessionTab.classList.add('active');
+
+        // Deactivate scenario builder if active
+        try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
+
+        // Reset admin state (re-lock, close window, clear god view)
+        try { KAdmin.resetOnLogout(); } catch(e) {}
     }
 
     async function _createSession() {
@@ -279,7 +315,7 @@ const KSessionUI = (() => {
                 card.className = 'session-card';
                 card.innerHTML = `
                     <div class="title">Session ${s.id.substring(0, 8)}...</div>
-                    <div class="meta">Status: ${s.status} | Tick: ${s.tick} | Players: ${s.participant_count}</div>
+                    <div class="meta">Status: ${s.status} | Turn: ${s.tick} | Players: ${s.participant_count}</div>
                 `;
                 card.addEventListener('click', () => joinAndEnter(s.id));
                 listEl.appendChild(card);
@@ -307,9 +343,9 @@ const KSessionUI = (() => {
 
         // Show session control buttons
         const startBtn = document.getElementById('start-session-btn');
-        const tickBtn = document.getElementById('tick-btn');
+        const turnBtn = document.getElementById('turn-btn');
         if (startBtn) startBtn.style.display = 'block';
-        if (tickBtn) tickBtn.style.display = 'block';
+        if (turnBtn) turnBtn.style.display = 'block';
 
         // Notify app to initialize map layers
         if (window.onSessionJoined) {

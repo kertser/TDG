@@ -136,8 +136,8 @@
         });
 
         KWebSocket.on('tick_update', (data) => {
-            KGameLog.addEntry(`Tick ${data.tick}`, 'info');
-            // Update game clock on tick
+            KGameLog.addEntry(`Turn ${data.tick}`, 'info');
+            // Update game clock on turn
             KMap.setGameTime(data.tick, data.game_time || null);
         });
 

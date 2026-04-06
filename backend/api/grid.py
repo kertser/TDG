@@ -149,12 +149,13 @@ async def point_to_snail(
     depth: int = Query(3, ge=0, le=3),
     db: AsyncSession = Depends(get_db),
 ):
-    """Convert geographic point to snail address."""
+    """Convert geographic point to snail address. Returns null fields if point is outside grid."""
     svc = await _get_grid_service(session_id, db)
 
     snail_path = svc.point_to_snail(lat, lon, depth=depth)
     if snail_path is None:
-        raise HTTPException(status_code=400, detail="Point is outside the grid")
+        # Return a graceful empty response instead of 400 error
+        return {"snail_path": None, "geometry": None, "center": None}
 
     polygon = svc.snail_to_polygon(snail_path)
     center = polygon.centroid

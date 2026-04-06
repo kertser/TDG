@@ -268,6 +268,22 @@ const KGrid = (() => {
     // ── Public helpers
     async function getSnailAtPoint(lat, lon, depth = 2) {
         if (!sessionId) return null;
+        // Quick client-side bounds check — skip request if clearly outside grid
+        if (gridGeoJson && gridGeoJson.features && gridGeoJson.features.length > 0) {
+            let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+            gridGeoJson.features.forEach(f => {
+                if (!f.geometry || !f.geometry.coordinates) return;
+                f.geometry.coordinates[0].forEach(c => {
+                    if (c[1] < minLat) minLat = c[1];
+                    if (c[1] > maxLat) maxLat = c[1];
+                    if (c[0] < minLng) minLng = c[0];
+                    if (c[0] > maxLng) maxLng = c[0];
+                });
+            });
+            if (lat < minLat || lat > maxLat || lon < minLng || lon > maxLng) {
+                return null; // Outside grid — don't even call the API
+            }
+        }
         try {
             const resp = await fetch(
                 `/api/sessions/${sessionId}/grid/point-to-snail?lat=${lat}&lon=${lon}&depth=${depth}`
@@ -294,6 +310,11 @@ const KGrid = (() => {
                 }
             }, 400);
         });
+
+        map.on('mouseout', () => {
+            clearTimeout(debounceTimer);
+            display.textContent = '';
+        });
     }
 
     function getGridGeoJson() { return gridGeoJson; }
@@ -314,5 +335,18 @@ const KGrid = (() => {
 
     function isVisible() { return _visible; }
 
-    return { load, getSnailAtPoint, setupMouseTracker, getGridGeoJson, toggle, isVisible };
+    /** Clear all grid layers and data (used on logout). */
+    function clearAll() {
+        if (_map) {
+            _removeLayers(_map);
+            if (_zoomHandler) { _map.off('zoomend', _zoomHandler); _zoomHandler = null; }
+        }
+        gridGeoJson = null;
+        sessionId = null;
+        _subLines = null;
+        _subSubLines = null;
+        _subSubVisible = false;
+    }
+
+    return { load, getSnailAtPoint, setupMouseTracker, getGridGeoJson, toggle, isVisible, clearAll };
 })();

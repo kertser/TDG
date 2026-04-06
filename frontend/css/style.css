@@ -408,13 +408,13 @@ button:hover { background: #1a5276; }
 }
 #start-session-btn:hover { background: #2e7d32; }
 
-/* ── Tick Button ──────────────────────────────── */
-#tick-btn {
+/* ── Turn Button ──────────────────────────────── */
+#turn-btn {
     background: #e65100;
     color: #ffcc80;
     font-weight: 700;
 }
-#tick-btn:hover { background: #ef6c00; }
+#turn-btn:hover { background: #ef6c00; }
 
 /* ── Leaflet scale control styling ───────────── */
 .leaflet-control-scale {

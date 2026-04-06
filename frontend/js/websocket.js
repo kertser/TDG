@@ -8,9 +8,12 @@ const KWebSocket = (() => {
     let handlers = {};
     let reconnectTimer = null;
 
+    let _disconnecting = false;
+
     function connect(sessId, authToken) {
         sessionId = sessId;
         token = authToken;
+        _disconnecting = false;
 
         const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
         const url = `${protocol}://${location.host}/ws/${sessionId}?token=${token}`;
@@ -33,6 +36,7 @@ const KWebSocket = (() => {
         };
 
         ws.onclose = () => {
+            if (_disconnecting) return; // Don't reconnect if intentionally disconnected
             console.log('WebSocket closed, reconnecting in 3s...');
             reconnectTimer = setTimeout(() => connect(sessionId, token), 3000);
         };
@@ -53,8 +57,15 @@ const KWebSocket = (() => {
     }
 
     function disconnect() {
+        _disconnecting = true;
         clearTimeout(reconnectTimer);
-        if (ws) ws.close();
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        handlers = {};
+        sessionId = null;
+        token = null;
     }
 
     return { connect, send, on, disconnect };

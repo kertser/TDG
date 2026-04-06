@@ -85,7 +85,7 @@ const KMap = (() => {
                 container.innerHTML =
                     '<span class="game-clock-icon">🕐</span>' +
                     '<span id="game-clock-time" class="game-clock-time">--:--</span>' +
-                    '<span id="game-clock-tick" class="game-clock-tick">T0</span>';
+                    '<span id="game-clock-tick" class="game-clock-tick">Turn 0</span>';
                 L.DomEvent.disableClickPropagation(container);
                 return container;
             },
@@ -183,7 +183,7 @@ const KMap = (() => {
     function _updateClockDisplay() {
         if (!_clockEl) return;
         if (_clockEl.tick) {
-            _clockEl.tick.textContent = `T${_currentTick}`;
+            _clockEl.tick.textContent = `Turn ${_currentTick}`;
         }
         if (_clockEl.time) {
             if (_currentGameTime) {

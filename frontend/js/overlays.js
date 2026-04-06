@@ -726,9 +726,20 @@ const KOverlays = (() => {
         }
     }
 
+    /** Clear all overlays (used on logout). */
+    function clearAll() {
+        cancelDraw();
+        if (overlaysLayer) overlaysLayer.clearLayers();
+        overlayMap = {};
+        overlayDataMap = {};
+        sessionId = null;
+        token = null;
+    }
+
     return {
         init, setSession, startDraw, cancelDraw, isDrawing,
         loadFromServer, render, toggle, isVisible,
         onOverlayCreated, onOverlayUpdated, onOverlayDeleted,
+        clearAll,
     };
 })();
