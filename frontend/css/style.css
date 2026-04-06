@@ -206,30 +206,35 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     opacity: 0.6;
 }
 
-/* ── Game Clock Control (bottom-right, on map, overlaps attribution) ── */
+/* ── Game Clock Control (bottom-right, on map, covers attribution) ── */
 .game-clock-control {
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(16, 24, 48, 0.92);
+    background: rgba(16, 24, 48, 0.95);
     border: 1px solid rgba(79, 195, 247, 0.4);
     border-radius: 5px;
-    padding: 5px 12px;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    padding: 5px 28px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     pointer-events: auto;
-    margin-bottom: 0 !important;
+    margin-bottom: -16px !important;
+    min-width: 240px;
+    justify-content: center;
     position: relative;
-    z-index: 2;
+    z-index: 9999;
 }
-/* Shrink the Leaflet attribution so game clock can overlap */
+/* Push the Leaflet attribution behind the game clock */
 .leaflet-bottom.leaflet-right .leaflet-control-attribution {
-    margin-bottom: 2px;
+    position: relative;
+    z-index: 0;
+    margin-bottom: 0;
     margin-right: 10px;
-    font-size: 10px;
-    opacity: 0.6;
-    padding: 1px 5px;
+    font-size: 9px;
+    opacity: 0.4;
+    padding: 0 4px;
+    line-height: 1.3;
 }
 .game-clock-icon {
     font-size: 16px;
