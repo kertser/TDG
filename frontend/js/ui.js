@@ -89,7 +89,8 @@ const KUI = (() => {
         toggleBtn.addEventListener('click', () => {
             _groupVisible = !_groupVisible;
             groupsContainer.style.display = _groupVisible ? '' : 'none';
-            toggleBtn.innerHTML = _groupVisible ? '▼' : '▶';
+            toggleBtn.innerHTML = _groupVisible ? '▼' : '☰';
+            toggleBtn.classList.toggle('collapsed', !_groupVisible);
             toggleBtn.title = _groupVisible ? 'Hide map controls' : 'Show map controls';
         });
 

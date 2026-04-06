@@ -206,12 +206,12 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     opacity: 0.6;
 }
 
-/* ── Game Clock Control (bottom-right, on map) ── */
+/* ── Game Clock Control (bottom-right, on map, overlaps attribution) ── */
 .game-clock-control {
     display: flex;
     align-items: center;
     gap: 8px;
-    background: rgba(16, 24, 48, 0.85);
+    background: rgba(16, 24, 48, 0.92);
     border: 1px solid rgba(79, 195, 247, 0.4);
     border-radius: 5px;
     padding: 5px 12px;
@@ -219,6 +219,17 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     -webkit-backdrop-filter: blur(4px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
     pointer-events: auto;
+    margin-bottom: 0 !important;
+    position: relative;
+    z-index: 2;
+}
+/* Shrink the Leaflet attribution so game clock can overlap */
+.leaflet-bottom.leaflet-right .leaflet-control-attribution {
+    margin-bottom: 2px;
+    margin-right: 10px;
+    font-size: 10px;
+    opacity: 0.6;
+    padding: 1px 5px;
 }
 .game-clock-icon {
     font-size: 16px;
@@ -1649,7 +1660,7 @@ button:hover { background: #1a5276; }
     background: rgba(16, 24, 48, 0.75);
     color: #8eafc0;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all 0.2s ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1661,6 +1672,27 @@ button:hover { background: #1a5276; }
     background: rgba(26, 82, 118, 0.8);
     color: #fff;
     border-color: #4fc3f7;
+}
+/* ── Collapsed state: larger pill button ── */
+.map-ctrl-toggle-btn.collapsed {
+    width: auto;
+    min-width: 36px;
+    height: 30px;
+    padding: 0 14px;
+    font-size: 15px;
+    border-radius: 5px;
+    border: 1px solid rgba(79, 195, 247, 0.45);
+    background: rgba(16, 24, 48, 0.9);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    color: #4fc3f7;
+    gap: 6px;
+    margin-bottom: 0;
+}
+.map-ctrl-toggle-btn.collapsed:hover {
+    background: rgba(26, 82, 118, 0.9);
+    border-color: #4fc3f7;
+    color: #fff;
+    box-shadow: 0 2px 12px rgba(79, 195, 247, 0.25);
 }
 .map-ctrl-overlay {
     display: grid;
