@@ -7,10 +7,18 @@ const KSessionUI = (() => {
     let currentUserId = null;
     let currentUserName = null;
     let currentSessionId = null;
+    let _currentRole = null;       // user's role in current session
+    let _currentSide = null;       // user's side in current session
+    let _canAdvanceTurn = false;   // whether user can advance turns
+    let _scenarioTitle = null;
+    let _scenarioDescription = null;
 
     function getToken() { return currentToken; }
     function getUserId() { return currentUserId; }
     function getSessionId() { return currentSessionId; }
+    function getRole() { return _currentRole; }
+    function getSide() { return _currentSide; }
+    function canAdvanceTurn() { return _canAdvanceTurn; }
 
     async function init() {
         const registerBtn = document.getElementById('register-btn');
@@ -50,6 +58,20 @@ const KSessionUI = (() => {
 
 
 
+        // ── Clickable session name → show scenario description ──
+        const sessionInfoEl = document.getElementById('session-info');
+        if (sessionInfoEl) {
+            sessionInfoEl.addEventListener('click', _showScenarioDescription);
+        }
+
+        // ── Scenario description modal close ──
+        const descClose = document.getElementById('scenario-desc-close');
+        const descOk = document.getElementById('scenario-desc-ok');
+        const descModal = document.getElementById('scenario-desc-modal');
+        if (descClose) descClose.addEventListener('click', () => { if (descModal) descModal.style.display = 'none'; });
+        if (descOk) descOk.addEventListener('click', () => { if (descModal) descModal.style.display = 'none'; });
+        if (descModal) descModal.addEventListener('click', (e) => { if (e.target === descModal) descModal.style.display = 'none'; });
+
         if (startBtn) {
             startBtn.addEventListener('click', async () => {
                 if (!currentSessionId || !currentToken) return;
@@ -66,7 +88,7 @@ const KSessionUI = (() => {
                     const data = await resp.json();
                     KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
                     startBtn.style.display = 'none';
-                    if (turnBtn) turnBtn.style.display = 'block';
+                    if (turnBtn && _canAdvanceTurn) turnBtn.style.display = 'block';
 
                     // Reload grid + units + contacts after session start
                     // (grid & units are created on start from scenario data)
@@ -112,6 +134,11 @@ const KSessionUI = (() => {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${currentToken}` },
                     });
+                    if (!resp.ok) {
+                        const errData = await resp.json().catch(() => ({}));
+                        KGameLog.addEntry(`Turn failed: ${errData.detail || resp.status}`, 'error');
+                        return;
+                    }
                     const data = await resp.json();
                     KGameLog.addEntry(
                         `Turn ${data.tick}: ${data.events_count} events, ${data.units_alive} alive`,
@@ -129,6 +156,20 @@ const KSessionUI = (() => {
                 }
             });
         }
+    }
+
+    function _showScenarioDescription() {
+        if (!_scenarioDescription && !_scenarioTitle) return;
+        const modal = document.getElementById('scenario-desc-modal');
+        const titleEl = document.getElementById('scenario-desc-title');
+        const contentEl = document.getElementById('scenario-desc-content');
+        if (!modal) return;
+
+        if (titleEl) titleEl.textContent = `📋 ${_scenarioTitle || 'Scenario Briefing'}`;
+        if (contentEl) {
+            contentEl.textContent = _scenarioDescription || 'No description available.';
+        }
+        modal.style.display = 'flex';
     }
 
     async function _doLogin(name) {
@@ -178,6 +219,11 @@ const KSessionUI = (() => {
         currentUserId = null;
         currentUserName = null;
         currentSessionId = null;
+        _currentRole = null;
+        _currentSide = null;
+        _canAdvanceTurn = false;
+        _scenarioTitle = null;
+        _scenarioDescription = null;
 
         // Reset UI
         document.getElementById('user-info').textContent = '';
@@ -196,14 +242,8 @@ const KSessionUI = (() => {
         // Hide toolbar and session controls
         const drawToolbar = document.getElementById('draw-toolbar');
         if (drawToolbar) drawToolbar.style.display = 'none';
-        const centerBtn = document.getElementById('center-btn');
-        if (centerBtn) centerBtn.style.display = 'none';
-        const gridToggleBtn = document.getElementById('grid-toggle-btn');
-        if (gridToggleBtn) gridToggleBtn.style.display = 'none';
-        const unitsToggleBtn = document.getElementById('units-toggle-btn');
-        if (unitsToggleBtn) unitsToggleBtn.style.display = 'none';
-        const overlaysToggleBtn = document.getElementById('overlays-toggle-btn');
-        if (overlaysToggleBtn) overlaysToggleBtn.style.display = 'none';
+        const mapCtrl = document.getElementById('map-ctrl-topbar');
+        if (mapCtrl) mapCtrl.style.display = 'none';
 
         // Reset game clock
         KMap.setGameTime(0, null);
@@ -307,24 +347,60 @@ const KSessionUI = (() => {
         const displayName = (sessionData && sessionData.name) || sessionId.substring(0, 8) + '...';
         document.getElementById('session-info').textContent = `📋 ${displayName}`;
 
-        // Show session control buttons based on status
+        // Fetch user's role in this session
+        try {
+            const roleResp = await fetch(`/api/sessions/${sessionId}/my-role`, {
+                headers: { 'Authorization': `Bearer ${currentToken}` },
+            });
+            if (roleResp.ok) {
+                const roleData = await roleResp.json();
+                _currentRole = roleData.role;
+                _currentSide = roleData.side;
+                _canAdvanceTurn = roleData.can_advance_turn;
+            } else {
+                // Fallback: assume commander
+                _currentRole = 'commander';
+                _currentSide = 'blue';
+                _canAdvanceTurn = true;
+            }
+        } catch {
+            _currentRole = 'commander';
+            _canAdvanceTurn = true;
+        }
+
+        // Fetch scenario description
+        try {
+            const sessResp = await fetch(`/api/sessions/${sessionId}`, {
+                headers: { 'Authorization': `Bearer ${currentToken}` },
+            });
+            if (sessResp.ok) {
+                const sessData = await sessResp.json();
+                _scenarioTitle = sessData.scenario_title || sessData.name;
+                _scenarioDescription = sessData.scenario_description;
+            }
+        } catch {}
+
+        // Show session control buttons based on status AND role
         const startBtn = document.getElementById('start-session-btn');
         const turnBtn = document.getElementById('turn-btn');
         const status = sessionData && sessionData.status;
 
         if (status === 'running') {
-            // Already running — show only turn button
             if (startBtn) startBtn.style.display = 'none';
-            if (turnBtn) turnBtn.style.display = 'block';
+            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'block' : 'none';
         } else if (status === 'paused') {
-            // Paused — show start (to resume) and turn
-            if (startBtn) { startBtn.style.display = 'block'; startBtn.textContent = '▶ Resume Session'; }
-            if (turnBtn) turnBtn.style.display = 'block';
+            if (startBtn && _canAdvanceTurn) { startBtn.style.display = 'block'; startBtn.textContent = '▶ Resume Session'; }
+            else if (startBtn) startBtn.style.display = 'none';
+            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'block' : 'none';
         } else {
-            // Lobby or unknown — show start button
-            if (startBtn) { startBtn.style.display = 'block'; startBtn.textContent = 'Start Session'; }
+            if (startBtn && _canAdvanceTurn) { startBtn.style.display = 'block'; startBtn.textContent = 'Start Session'; }
+            else if (startBtn) startBtn.style.display = 'none';
             if (turnBtn) turnBtn.style.display = 'none';
         }
+
+        // Show map control buttons
+        const mapCtrl = document.getElementById('map-ctrl-topbar');
+        if (mapCtrl) mapCtrl.style.display = '';
 
         // Notify app to initialize map layers
         if (window.onSessionJoined) {
@@ -363,7 +439,8 @@ const KSessionUI = (() => {
         if (nameEl) nameEl.textContent = currentUserName || 'Unknown';
         if (sessionEl) {
             if (currentSessionId) {
-                sessionEl.textContent = '🟢 In session';
+                const roleInfo = _currentRole ? ` (${_currentRole})` : '';
+                sessionEl.textContent = `🟢 In session${roleInfo}`;
             } else {
                 sessionEl.textContent = '⚪ No session';
             }
@@ -454,5 +531,9 @@ const KSessionUI = (() => {
         return settings[key];
     }
 
-    return { init, getToken, getUserId, getUserName: () => currentUserName, getSessionId, loadSessions, joinAndEnter, getSetting };
+    return {
+        init, getToken, getUserId, getUserName: () => currentUserName,
+        getSessionId, getRole, getSide, canAdvanceTurn,
+        loadSessions, joinAndEnter, getSetting,
+    };
 })();

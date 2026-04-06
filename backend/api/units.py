@@ -4,6 +4,7 @@ hierarchy, split/merge, formation, movement commands."""
 from __future__ import annotations
 
 import uuid
+from math import radians, cos, sin, asin, sqrt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -25,6 +26,121 @@ from backend.models.session import SessionParticipant, Side
 router = APIRouter()
 
 
+# ══════════════════════════════════════════════════
+# ── Unit Size / Echelon Utilities ─────────────────
+# ══════════════════════════════════════════════════
+
+# SIDC positions 8-9 echelon codes (MIL-STD-2525D)
+ECHELON_HIERARCHY = ['11', '12', '13', '14', '15', '16', '17', '18']
+ECHELON_NAMES = {
+    '11': 'team', '12': 'squad', '13': 'section',
+    '14': 'platoon', '15': 'company', '16': 'battalion',
+    '17': 'regiment', '18': 'brigade',
+}
+ECHELON_TO_SUFFIX = {
+    '11': 'team', '12': 'squad', '13': 'section',
+    '14': 'platoon', '15': 'company', '16': 'battalion',
+}
+
+# Suffixes that indicate unit size in unit_type strings
+SIZE_SUFFIXES = [
+    '_battalion', '_company', '_battery', '_platoon',
+    '_section', '_squad', '_team', '_post', '_unit',
+]
+
+BASE_PERSONNEL = {
+    'headquarters': 20, 'command_post': 10,
+    'infantry_platoon': 30, 'infantry_company': 120,
+    'infantry_section': 15, 'infantry_team': 6,
+    'tank_company': 60, 'tank_platoon': 15,
+    'mech_company': 100, 'mech_platoon': 30,
+    'artillery_battery': 40, 'artillery_platoon': 20,
+    'mortar_section': 12, 'mortar_team': 6,
+    'at_team': 6, 'recon_team': 6, 'recon_section': 12,
+    'observation_post': 4, 'sniper_team': 2,
+    'engineer_platoon': 30, 'engineer_section': 15,
+    'logistics_unit': 20,
+}
+DEFAULT_PERSONNEL = 20
+
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Haversine distance in meters between two lat/lon points."""
+    R = 6_371_000
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    return 2 * R * asin(sqrt(a))
+
+
+def get_principal_type(unit_type: str) -> str:
+    """Extract principal/base type from unit_type (e.g. 'infantry_company' → 'infantry')."""
+    for suffix in SIZE_SUFFIXES:
+        if unit_type.endswith(suffix):
+            return unit_type[: -len(suffix)]
+    return unit_type
+
+
+def get_current_echelon(sidc: str | None) -> str:
+    """Extract echelon code (positions 8-9) from SIDC string."""
+    if sidc and len(sidc) >= 10:
+        return sidc[8:10]
+    return '14'  # default platoon
+
+
+def echelon_one_down(echelon: str) -> str:
+    """Return echelon one level below the given one."""
+    try:
+        idx = ECHELON_HIERARCHY.index(echelon)
+        return ECHELON_HIERARCHY[max(0, idx - 1)]
+    except ValueError:
+        return '14'
+
+
+def echelon_one_up(echelon: str) -> str:
+    """Return echelon one level above the given one."""
+    try:
+        idx = ECHELON_HIERARCHY.index(echelon)
+        return ECHELON_HIERARCHY[min(len(ECHELON_HIERARCHY) - 1, idx + 1)]
+    except ValueError:
+        return '15'
+
+
+def update_sidc_echelon(sidc: str | None, echelon_code: str) -> str | None:
+    """Return a new SIDC string with positions 8-9 updated to the given echelon."""
+    if not sidc or len(sidc) < 20:
+        return sidc
+    return sidc[:8] + echelon_code + sidc[10:]
+
+
+def make_unit_type(principal: str, echelon_code: str) -> str:
+    """Build a unit_type string from principal type and echelon code."""
+    # Special cases
+    if principal == 'artillery' and echelon_code == '15':
+        return 'artillery_battery'
+    if principal == 'observation':
+        return 'observation_post'
+    if principal == 'logistics':
+        return 'logistics_unit'
+    if principal in ('headquarters', 'command_post'):
+        return principal
+    suffix = ECHELON_TO_SUFFIX.get(echelon_code, 'platoon')
+    return f'{principal}_{suffix}'
+
+
+def get_unit_latlon(unit) -> tuple[float | None, float | None]:
+    """Extract lat/lon from a Unit model's PostGIS position."""
+    if unit.position is None:
+        return None, None
+    try:
+        from geoalchemy2.shape import to_shape
+        pt = to_shape(unit.position)
+        return pt.y, pt.x
+    except Exception:
+        return None, None
+
+
 class UnitAssignRequest(BaseModel):
     assigned_user_ids: list[str]
 
@@ -34,18 +150,18 @@ class UnitRenameRequest(BaseModel):
 
 
 class UnitFormationRequest(BaseModel):
-    formation: str  # column, line, wedge, vee, echelon_left, echelon_right, staggered, box, diamond, dispersed
+    formation: str
 
 
 class UnitMoveRequest(BaseModel):
     target_lat: float
     target_lon: float
-    speed: str = "average"  # slow, average, fast
+    speed: str = "average"
 
 
 class UnitSplitRequest(BaseModel):
-    ratio: float = 0.5  # fraction that goes to new unit (0.1–0.9)
-    new_name: str | None = None
+    ratio: float = 0.5
+    new_name: str | None = None  # optional override; auto-generated if not provided
 
 
 class UnitMergeRequest(BaseModel):
@@ -61,13 +177,9 @@ async def get_units(
     """Return units visible to the requester's side (fog-of-war filtered),
     enriched with commanding officer info."""
     side = participant.side.value
-    # Force fog-of-war for regular gameplay: only blue or red get filtered view.
-    # Admin/observer participants should use the admin god-view endpoint for all units.
-    # Here we give them the blue view by default so they don't accidentally leak intel.
     if side not in ("blue", "red"):
         side = "blue"
     units = await get_visible_units(session_id, side, db)
-    # Enrich with commanding user names for popups
     units = await enrich_units_with_command_info(units, session_id, db, requesting_side=side)
     return units
 
@@ -78,34 +190,19 @@ async def get_unit_hierarchy(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Return unit hierarchy with command info for the user's side.
-    Admin/observer sees all sides."""
+    """Return unit hierarchy with command info for the user's side."""
     side = participant.side.value
-
     if side in ("admin", "observer"):
-        # See all units
         result = await db.execute(
-            select(Unit).where(
-                Unit.session_id == session_id,
-                Unit.is_destroyed == False,
-            )
+            select(Unit).where(Unit.session_id == session_id, Unit.is_destroyed == False)
         )
     else:
-        # Own-side only
         result = await db.execute(
-            select(Unit).where(
-                Unit.session_id == session_id,
-                Unit.side == side,
-                Unit.is_destroyed == False,
-            )
+            select(Unit).where(Unit.session_id == session_id, Unit.side == side, Unit.is_destroyed == False)
         )
     units = result.scalars().all()
     serialized = [_serialize_unit(u) for u in units]
-
-    # Enrich with user names and commanding officer
-    enriched = await enrich_units_with_command_info(
-        serialized, session_id, db, requesting_side=side,
-    )
+    enriched = await enrich_units_with_command_info(serialized, session_id, db, requesting_side=side)
     return enriched
 
 
@@ -116,7 +213,6 @@ async def get_unit(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Return a single unit if visible to the requester."""
     side = participant.side.value
     units = await get_visible_units(session_id, side, db)
     for u in units:
@@ -133,18 +229,12 @@ async def rename_unit(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Rename a unit. Requires command authority over the unit."""
     side = participant.side.value
     user_id = str(participant.user_id)
-
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-
-    # Admin/observer can rename any unit
     if side not in ("admin", "observer"):
         if unit.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot rename units from other side")
@@ -153,11 +243,9 @@ async def rename_unit(
             has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
         if not has_authority:
             raise HTTPException(status_code=403, detail="No command authority over this unit")
-
     new_name = body.name.strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="Name cannot be empty")
-
     unit.name = new_name
     await db.flush()
     return {"id": str(unit.id), "name": unit.name}
@@ -171,51 +259,24 @@ async def assign_unit(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """
-    Assign users to a unit.
-
-    Permission rules:
-    - Admin or observer (referee) can assign any unit.
-    - A user who already owns the unit (in assigned_user_ids) can modify assignment.
-    - A user who commands an ancestor of the unit (chain of command) can assign it.
-    - If the unit is unassigned, a same-side participant can claim it.
-    - Otherwise, a user who does not own the unit cannot assign it.
-    """
     side = participant.side.value
     user_id = str(participant.user_id)
-
-    # Fetch the unit
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-
-    # Admin / observer (referee) can assign anything
     if side in ("admin", "observer"):
         pass
     else:
-        # Must be same side
         if unit.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot assign units from other side")
-
         current_owners = unit.assigned_user_ids or []
-
-        # Check if user has command authority via hierarchy (self or ancestor)
         has_authority = await check_command_authority(user_id, unit, session_id, db)
         if not has_authority:
             has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
-
         if not has_authority:
-            # Fall back to original rules: owner or unassigned
             if len(current_owners) > 0 and user_id not in current_owners:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Only commanders, the unit owner, admin, or referee can assign this unit",
-                )
-
-    # Validate: observers cannot be assigned to units
+                raise HTTPException(status_code=403, detail="Only commanders, the unit owner, admin, or referee can assign this unit")
     if body.assigned_user_ids:
         for uid_str in body.assigned_user_ids:
             try:
@@ -230,11 +291,7 @@ async def assign_unit(
             )
             part = part_result.scalar_one_or_none()
             if part and part.side == Side.observer:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Cannot assign observer to unit — observers do not control units",
-                )
-
+                raise HTTPException(status_code=400, detail="Cannot assign observer to unit")
     unit.assigned_user_ids = body.assigned_user_ids if body.assigned_user_ids else None
     await db.flush()
     return {"id": str(unit.id), "assigned_user_ids": unit.assigned_user_ids}
@@ -258,17 +315,12 @@ async def set_unit_formation(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Set unit formation. Requires command authority."""
     side = participant.side.value
     user_id = str(participant.user_id)
-
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-
     if side not in ("admin", "observer"):
         if unit.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot modify units from other side")
@@ -277,10 +329,8 @@ async def set_unit_formation(
             has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
         if not has_authority:
             raise HTTPException(status_code=403, detail="No command authority over this unit")
-
     if body.formation not in VALID_FORMATIONS:
         raise HTTPException(status_code=400, detail=f"Invalid formation. Valid: {', '.join(sorted(VALID_FORMATIONS))}")
-
     caps = unit.capabilities or {}
     caps["formation"] = body.formation
     unit.capabilities = caps
@@ -292,11 +342,7 @@ async def set_unit_formation(
 # ── Movement Command ──────────────────────────────
 # ══════════════════════════════════════════════════
 
-SPEED_VALUES = {
-    "slow": 1.5,
-    "average": 4.0,
-    "fast": 8.0,
-}
+SPEED_VALUES = {"slow": 1.5, "average": 4.0, "fast": 8.0}
 
 
 @router.put("/{session_id}/units/{unit_id}/move")
@@ -307,17 +353,12 @@ async def set_unit_move(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Set unit movement task with target and speed. Requires command authority or admin."""
     side = participant.side.value
     user_id = str(participant.user_id)
-
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-
     if side not in ("admin", "observer"):
         if unit.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot command units from other side")
@@ -326,11 +367,9 @@ async def set_unit_move(
             has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
         if not has_authority:
             raise HTTPException(status_code=403, detail="No command authority over this unit")
-
     speed_label = body.speed.lower()
     if speed_label not in SPEED_VALUES:
-        raise HTTPException(status_code=400, detail=f"Invalid speed. Valid: slow, average, fast")
-
+        raise HTTPException(status_code=400, detail="Invalid speed. Valid: slow, average, fast")
     unit.move_speed_mps = SPEED_VALUES[speed_label]
     unit.current_task = {
         "type": "move",
@@ -348,17 +387,12 @@ async def stop_unit(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Clear unit's current task (stop movement). Requires command authority."""
     side = participant.side.value
     user_id = str(participant.user_id)
-
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-
     if side not in ("admin", "observer"):
         if unit.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot command units from other side")
@@ -367,7 +401,6 @@ async def stop_unit(
             has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
         if not has_authority:
             raise HTTPException(status_code=403, detail="No command authority over this unit")
-
     unit.current_task = None
     await db.flush()
     return _serialize_unit(unit)
@@ -385,19 +418,15 @@ async def split_unit(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Split a unit into two units of the same type.
-    The original keeps (1-ratio) of strength, the new unit gets (ratio).
-    Ammo and morale are copied. Both remain under the same parent.
-    Requires command authority."""
+    """Split a unit into two. Auto-names and auto-updates echelon/SIDC.
+    The child units drop one echelon level (e.g. company→platoon)."""
     from geoalchemy2.shape import from_shape, to_shape
     from shapely.geometry import Point as ShapelyPoint
 
     side = participant.side.value
     user_id = str(participant.user_id)
 
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
@@ -413,34 +442,59 @@ async def split_unit(
 
     ratio = max(0.1, min(0.9, body.ratio))
 
-    # Determine names
+    # ── Auto-naming ──
     base_name = unit.name
-    # Auto-suffix: if the name already has /N, increment; else add /1 and /2
+    # Strip existing /N suffix
     if "/" in base_name:
         prefix = base_name.rsplit("/", 1)[0]
     else:
         prefix = base_name
-    name_a = f"{prefix}/1"
-    name_b = body.new_name or f"{prefix}/2"
 
-    # Copy position
+    # Find next available suffix numbers
+    existing_names = set()
+    siblings = await db.execute(
+        select(Unit.name).where(
+            Unit.session_id == session_id,
+            Unit.is_destroyed == False,
+            Unit.name.like(f"{prefix}/%"),
+        )
+    )
+    for (n,) in siblings:
+        existing_names.add(n)
+
+    num = 1
+    name_a = f"{prefix}/{num}"
+    while name_a in existing_names:
+        num += 1
+        name_a = f"{prefix}/{num}"
+    existing_names.add(name_a)
+    num += 1
+    name_b = body.new_name or f"{prefix}/{num}"
+
+    # ── Echelon update: split units drop one echelon level ──
+    current_echelon = get_current_echelon(unit.sidc)
+    new_echelon = echelon_one_down(current_echelon)
+    principal = get_principal_type(unit.unit_type)
+    new_unit_type = make_unit_type(principal, new_echelon)
+    new_sidc = update_sidc_echelon(unit.sidc, new_echelon)
+
+    # ── Copy position with slight offset ──
     position_copy = None
     if unit.position is not None:
         try:
             pt = to_shape(unit.position)
-            # Offset the new unit slightly (50m east) to avoid exact overlap
-            offset_lon = pt.x + 0.0005
+            offset_lon = pt.x + 0.0004  # ~35m east offset
             position_copy = from_shape(ShapelyPoint(offset_lon, pt.y), srid=4326)
         except Exception:
             pass
 
-    # Create new unit
+    # ── Create new unit ──
     new_unit = Unit(
         session_id=session_id,
         side=unit.side,
         name=name_b,
-        unit_type=unit.unit_type,
-        sidc=unit.sidc,
+        unit_type=new_unit_type,
+        sidc=new_sidc,
         parent_unit_id=unit.parent_unit_id,
         position=position_copy,
         heading_deg=unit.heading_deg,
@@ -456,9 +510,11 @@ async def split_unit(
     )
     db.add(new_unit)
 
-    # Update original
+    # ── Update original ──
     unit.name = name_a
     unit.strength = unit.strength * (1 - ratio)
+    unit.unit_type = new_unit_type
+    unit.sidc = new_sidc
 
     await db.flush()
     await db.refresh(new_unit)
@@ -477,16 +533,14 @@ async def merge_units(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Merge another unit into this one. Both must be the same type and side.
-    The surviving unit gains combined strength (capped at 1.0).
-    Ammo and morale are weighted averages. The merged unit is destroyed.
-    Requires command authority over both units."""
+    """Merge another unit into this one.
+    Units must share the same principal type (e.g. infantry) and side,
+    and be within 50 meters of each other.
+    The survivor gains combined strength and moves up one echelon."""
     side = participant.side.value
     user_id = str(participant.user_id)
 
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
     survivor = result.scalar_one_or_none()
     if survivor is None:
         raise HTTPException(status_code=404, detail="Surviving unit not found")
@@ -496,21 +550,36 @@ async def merge_units(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid merge_with_unit_id")
 
-    result2 = await db.execute(
-        select(Unit).where(Unit.id == merge_uid, Unit.session_id == session_id)
-    )
+    result2 = await db.execute(select(Unit).where(Unit.id == merge_uid, Unit.session_id == session_id))
     absorbed = result2.scalar_one_or_none()
     if absorbed is None:
         raise HTTPException(status_code=404, detail="Unit to merge not found")
 
-    # Validation
-    if survivor.unit_type != absorbed.unit_type:
-        raise HTTPException(status_code=400, detail="Cannot merge units of different types")
+    # ── Validation ──
+    surv_principal = get_principal_type(survivor.unit_type)
+    abs_principal = get_principal_type(absorbed.unit_type)
+    if surv_principal != abs_principal:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot merge different principal types ({surv_principal} vs {abs_principal})",
+        )
     if survivor.side != absorbed.side:
         raise HTTPException(status_code=400, detail="Cannot merge units from different sides")
     if str(survivor.id) == str(absorbed.id):
         raise HTTPException(status_code=400, detail="Cannot merge a unit with itself")
 
+    # ── Distance check (50m max) ──
+    surv_lat, surv_lon = get_unit_latlon(survivor)
+    abs_lat, abs_lon = get_unit_latlon(absorbed)
+    if surv_lat is not None and abs_lat is not None:
+        dist = haversine_m(surv_lat, surv_lon, abs_lat, abs_lon)
+        if dist > 50:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Units must be within 50m to merge (current distance: {dist:.0f}m)",
+            )
+
+    # ── Authority check ──
     if side not in ("admin", "observer"):
         if survivor.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot merge units from other side")
@@ -523,7 +592,7 @@ async def merge_units(
         if not auth1 or not auth2:
             raise HTTPException(status_code=403, detail="Need command authority over both units")
 
-    # Weighted combine
+    # ── Weighted combine ──
     total_str = survivor.strength + absorbed.strength
     if total_str > 0:
         w_surv = survivor.strength / total_str
@@ -537,22 +606,28 @@ async def merge_units(
     survivor.morale = min(1.0, survivor.morale * w_surv + absorbed.morale * w_abs)
     survivor.suppression = max(0.0, survivor.suppression * w_surv + absorbed.suppression * w_abs)
 
-    # Re-parent any children of the absorbed unit to the survivor
-    child_result = await db.execute(
-        select(Unit).where(Unit.parent_unit_id == absorbed.id)
-    )
+    # ── Re-parent children ──
+    child_result = await db.execute(select(Unit).where(Unit.parent_unit_id == absorbed.id))
     for child in child_result.scalars().all():
         child.parent_unit_id = survivor.id
 
-    # Remove the absorbed unit
+    # ── Destroy absorbed unit ──
     absorbed.is_destroyed = True
     absorbed.strength = 0.0
     absorbed.current_task = None
 
-    # Clean up name if it has /N suffixes from a previous split
-    if "/" in survivor.name:
-        prefix = survivor.name.rsplit("/", 1)[0]
-        survivor.name = prefix
+    # ── Auto-name: strip /N suffixes ──
+    name = survivor.name
+    if "/" in name:
+        name = name.rsplit("/", 1)[0]
+    survivor.name = name
+
+    # ── Echelon update: merged unit moves up one level ──
+    current_echelon = get_current_echelon(survivor.sidc)
+    new_echelon = echelon_one_up(current_echelon)
+    principal = get_principal_type(survivor.unit_type)
+    survivor.unit_type = make_unit_type(principal, new_echelon)
+    survivor.sidc = update_sidc_echelon(survivor.sidc, new_echelon)
 
     await db.flush()
 
@@ -568,7 +643,6 @@ async def get_contacts(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Return contacts visible to the requester's side."""
     side = participant.side.value
     if side not in ("blue", "red"):
         side = "blue"

@@ -38,7 +38,9 @@ class SessionRead(BaseModel):
     current_time: datetime | None = None
     participant_count: int = 0
     created_at: datetime
-    name: str | None = None  # session display name (usually from scenario title)
+    name: str | None = None
+    scenario_title: str | None = None
+    scenario_description: str | None = None
 
 
 class ParticipantRead(BaseModel):
@@ -169,6 +171,8 @@ async def get_session(session_id: uuid.UUID, db: DB):
         participant_count=len(s.participants),
         created_at=s.created_at,
         name=s.name or (s.scenario.title if s.scenario else None),
+        scenario_title=s.scenario.title if s.scenario else None,
+        scenario_description=s.scenario.description if s.scenario else None,
     )
 
 
@@ -248,6 +252,25 @@ async def list_session_participants(session_id: uuid.UUID, db: DB, user: Current
     ]
 
 
+@router.get("/{session_id}/my-role")
+async def get_my_role(session_id: uuid.UUID, db: DB, user: CurrentUser):
+    """Return the current user's side and role in this session."""
+    result = await db.execute(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.user_id == user.id,
+        )
+    )
+    participant = result.scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=404, detail="Not a participant")
+    return {
+        "side": participant.side.value,
+        "role": participant.role,
+        "can_advance_turn": participant.role in ("commander", "admin") or participant.side == Side.admin,
+    }
+
+
 @router.post("/{session_id}/start")
 async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     result = await db.execute(
@@ -296,8 +319,25 @@ async def pause_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
 @router.post("/{session_id}/tick")
 async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
-    """Advance one simulation tick — runs the full rules engine."""
+    """Advance one simulation tick — runs the full rules engine.
+    Only commanders and admins can advance turns."""
     from backend.engine.tick import run_tick
+
+    # Check that user is a commander or admin
+    part_result = await db.execute(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.user_id == user.id,
+        )
+    )
+    participant = part_result.scalar_one_or_none()
+    if participant is None:
+        raise HTTPException(status_code=403, detail="Not a participant in this session")
+    if participant.role not in ("commander", "admin") and participant.side not in (Side.admin,):
+        raise HTTPException(
+            status_code=403,
+            detail="Only commanders or admins can advance turns",
+        )
 
     try:
         result = await run_tick(session_id, db)

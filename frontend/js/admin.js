@@ -719,6 +719,7 @@ const KAdmin = (() => {
 
         const name = document.getElementById('wizard-session-name')?.value?.trim();
         const interval = parseInt(document.getElementById('wizard-turn-interval')?.value) || 1;
+        const opDatetime = document.getElementById('wizard-operation-datetime')?.value || '';
 
         const statusEl = document.getElementById('wizard-create-status');
         if (statusEl) { statusEl.textContent = '⏳ Creating session...'; statusEl.className = 'admin-info'; }
@@ -753,6 +754,16 @@ const KAdmin = (() => {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ tick_interval: interval * 60 }),
+                });
+            }
+
+            // 3b. Set operation datetime if provided
+            if (opDatetime) {
+                const isoTime = new Date(opDatetime).toISOString();
+                await fetch(`/api/admin/sessions/${sessionData.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ current_time: isoTime }),
                 });
             }
 
@@ -1369,6 +1380,7 @@ const KAdmin = (() => {
                 <td style="font-size:10px;">${u.comms_status || '—'}</td>
                 <td style="white-space:nowrap;">
                     <button class="admin-btn" onclick="KAdmin.editUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Edit unit settings">✏</button>
+                    <button class="admin-btn" onclick="KAdmin.adminSplitUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Split unit into two">✂</button>
                     <button class="admin-btn" onclick="KAdmin.focusUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Center map on unit">📍</button>
                     <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteUnit('${u.id}','${u.name.replace(/'/g, "\\'")}')" style="padding:1px 5px;font-size:9px;" title="Delete unit">✕</button>
                 </td>
@@ -1497,10 +1509,25 @@ const KAdmin = (() => {
         modal.style.display = 'flex';
     }
 
-    /** Show edit modal for a unit. */
+    /** Show edit modal for a unit. Also searches KUnits data if not in dashboard. */
     function editUnit(unitId) {
-        const unit = _dashboardUnits.find(u => u.id === unitId);
-        if (!unit) { alert('Unit not found'); return; }
+        let unit = _dashboardUnits.find(u => u.id === unitId);
+        // Fall back to map units if not found in dashboard
+        if (!unit && typeof KUnits !== 'undefined') {
+            try {
+                const mapUnits = KUnits.getAllUnits ? KUnits.getAllUnits() : [];
+                unit = mapUnits.find(u => u.id === unitId);
+            } catch(e) {}
+        }
+        if (!unit) {
+            // Try reloading dashboard first, then try again
+            _loadUnitDashboard().then(() => {
+                const u2 = _dashboardUnits.find(u => u.id === unitId);
+                if (u2) editUnit(unitId);
+                else alert('Unit not found — try reloading the dashboard');
+            });
+            return;
+        }
 
         const modal = document.getElementById('admin-unit-edit-modal');
         if (!modal) return;
@@ -2716,6 +2743,37 @@ const KAdmin = (() => {
 
     // ── Unit Edit Modal ──────────────────────────────
 
+    /** Admin split: splits a unit from the dashboard (no distance/auth check). */
+    async function adminSplitUnit(unitId) {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { alert('Select a session first'); return; }
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/units/${unitId}/split`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ ratio: 0.5 }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                KGameLog.addEntry(`Admin split: ${data.original.name} + ${data.new_unit.name}`, 'info');
+                // Refresh everything
+                await _loadUnitDashboard();
+                const userSid = _getUserSessionId();
+                if (userSid) {
+                    try {
+                        if (_godViewEnabled) await _refreshGodView();
+                        else await KUnits.load(userSid, token);
+                    } catch(e) {}
+                }
+                try { _loadChainOfCommand(); } catch(e) {}
+                try { loadPublicCoC(); } catch(e) {}
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Split failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
     function _initUnitEditModal() {
         _bind('admin-ue-save', 'click', _saveUnitEdit);
         _bind('admin-ue-cancel', 'click', () => {
@@ -2971,7 +3029,7 @@ const KAdmin = (() => {
         kickParticipant,
         renameUser, deleteUser, assignUserToSession,
         loadPublicCoC,
-        editUnit, focusUnit, deleteUnit, addUnit,
+        editUnit, focusUnit, deleteUnit, addUnit, adminSplitUnit,
         editUnitType, removeUnitType,
         wizardRemoveParticipant: _wizardRemoveParticipant,
     };

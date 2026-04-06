@@ -22,6 +22,37 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
 #user-info:hover { color: #4fc3f7; }
 #user-menu-wrapper { margin-left: auto; }
 
+/* ── Session info (clickable for scenario description) ── */
+.session-info-btn {
+    color: #4fc3f7;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    transition: all 0.15s;
+}
+.session-info-btn:hover {
+    background: rgba(79, 195, 247, 0.15);
+    color: #81d4fa;
+    text-decoration: underline;
+}
+.session-info-btn:empty {
+    display: none;
+}
+
+/* ── Map control buttons in topbar ──────────── */
+#map-ctrl-topbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 4px;
+    background: rgba(26, 26, 46, 0.6);
+    border: 1px solid #0f3460;
+    border-radius: 5px;
+    margin: 0 2px;
+}
+
 /* ── User Dropdown Menu ──────────────────────── */
 .user-dropdown {
     position: absolute;

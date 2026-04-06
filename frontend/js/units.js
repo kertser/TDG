@@ -793,11 +793,17 @@ const KUnits = (() => {
         }
         if (canSel) {
             html += `<div class="ctx-item" data-action="split">✂ Split Unit</div>`;
-            // Merge: only show if there are other units of the same type selected or nearby
-            const sameTypeUnits = allUnitsData.filter(ou =>
-                ou.id !== u.id && ou.unit_type === u.unit_type && ou.side === u.side && !ou.is_destroyed
-            );
-            if (sameTypeUnits.length > 0) {
+            // Merge: show if there are nearby units (<50m) of the same principal type
+            const principalType = _getPrincipalType(u.unit_type);
+            const nearbyMergeable = allUnitsData.filter(ou => {
+                if (ou.id === u.id || ou.side !== u.side || ou.is_destroyed) return false;
+                if (_getPrincipalType(ou.unit_type) !== principalType) return false;
+                // Distance check: only show units within 50m
+                if (u.lat == null || u.lon == null || ou.lat == null || ou.lon == null) return false;
+                const dist = _haversineDist(u.lat, u.lon, ou.lat, ou.lon);
+                return dist <= 50;
+            });
+            if (nearbyMergeable.length > 0) {
                 html += `<div class="ctx-item" data-action="merge">🔗 Merge Unit ▸</div>`;
             }
         }
@@ -1053,9 +1059,7 @@ const KUnits = (() => {
         if (isNaN(pct) || pct < 10 || pct > 90) { alert('Enter a number between 10 and 90'); return; }
         const ratio = pct / 100;
 
-        const newName = prompt('Name for new unit:', `${u.name}/2`);
-        if (!newName) return;
-
+        // Auto-naming: backend handles it
         const token = KSessionUI.getToken();
         const sessionId = KSessionUI.getSessionId();
         if (!token || !sessionId) return;
@@ -1064,7 +1068,7 @@ const KUnits = (() => {
             const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/split`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ ratio, new_name: newName.trim() }),
+                body: JSON.stringify({ ratio }),
             });
             if (resp.ok) {
                 const data = await resp.json();
@@ -1085,17 +1089,22 @@ const KUnits = (() => {
 
     function _showMergePicker(u, origEvent) {
         const menu = _createUnitContextMenu();
-        const sameType = allUnitsData.filter(ou =>
-            ou.id !== u.id && ou.unit_type === u.unit_type && ou.side === u.side && !ou.is_destroyed
-        );
+        const principalType = _getPrincipalType(u.unit_type);
+        const nearby = allUnitsData.filter(ou => {
+            if (ou.id === u.id || ou.side !== u.side || ou.is_destroyed) return false;
+            if (_getPrincipalType(ou.unit_type) !== principalType) return false;
+            if (u.lat == null || u.lon == null || ou.lat == null || ou.lon == null) return false;
+            return _haversineDist(u.lat, u.lon, ou.lat, ou.lon) <= 50;
+        });
 
         let html = '<div class="ctx-menu-header">Merge Into ' + u.name + '</div>';
-        if (sameType.length === 0) {
-            html += '<div style="padding:6px 12px;font-size:11px;color:#888;">No compatible units</div>';
+        if (nearby.length === 0) {
+            html += '<div style="padding:6px 12px;font-size:11px;color:#888;">No compatible units within 50m</div>';
         } else {
-            sameType.forEach(ou => {
+            nearby.forEach(ou => {
                 const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
-                html += `<div class="ctx-item" data-merge-id="${ou.id}">${ou.name} <span style="color:#888;font-size:10px;">(${strPct})</span></div>`;
+                const dist = _haversineDist(u.lat, u.lon, ou.lat, ou.lon);
+                html += `<div class="ctx-item" data-merge-id="${ou.id}">${ou.name} <span style="color:#888;font-size:10px;">(${strPct}, ${Math.round(dist)}m)</span></div>`;
             });
         }
 
@@ -1144,6 +1153,27 @@ const KUnits = (() => {
 
     function _fmtDist(m) {
         return m >= 1000 ? (m / 1000).toFixed(1) + 'km' : m + 'm';
+    }
+
+    // ── Principal type extraction ─────────────────
+    const SIZE_SUFFIXES = ['_battalion', '_company', '_battery', '_platoon', '_section', '_squad', '_team', '_post', '_unit'];
+
+    function _getPrincipalType(unitType) {
+        if (!unitType) return '';
+        for (const suffix of SIZE_SUFFIXES) {
+            if (unitType.endsWith(suffix)) return unitType.slice(0, -suffix.length);
+        }
+        return unitType;
+    }
+
+    // ── Haversine distance (meters) ────────────────
+    function _haversineDist(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const toRad = (d) => d * Math.PI / 180;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(a));
     }
 
     // ══════════════════════════════════════════════════

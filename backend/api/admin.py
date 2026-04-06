@@ -416,6 +416,7 @@ class AdminSessionCreate(BaseModel):
 
 class AdminSessionUpdate(BaseModel):
     name: str | None = None
+    current_time: str | None = None  # ISO datetime string for operation start time
 
 
 @router.post("/sessions")
@@ -463,6 +464,11 @@ async def admin_update_session(session_id: uuid.UUID, body: AdminSessionUpdate, 
         raise HTTPException(status_code=404, detail="Session not found")
     if body.name is not None:
         session.name = body.name.strip() if body.name.strip() else None
+    if body.current_time is not None:
+        try:
+            session.current_time = datetime.fromisoformat(body.current_time.replace('Z', '+00:00'))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid datetime format")
     await db.flush()
 
     # Resolve scenario title for response
