@@ -118,6 +118,10 @@ const KAdmin = (() => {
 
         // ── Public CoC tab refresh ──────────────────
         _bind('coc-refresh-btn', 'click', loadPublicCoC);
+
+        // ── Initialize modals ─────────────────────────
+        _initAssignModal();
+        _initCocPickerModal();
     }
 
     function _bind(id, evt, fn) {
@@ -487,16 +491,24 @@ const KAdmin = (() => {
         const rows = Math.max(1, Math.min(20, parseInt(document.getElementById('admin-grid-rows').value) || 8));
         const size = Math.max(100, Math.min(10000, parseInt(document.getElementById('admin-grid-size').value) || 1000));
         if (isNaN(lat) || isNaN(lon)) { _showInfo('admin-grid-status', 'Invalid origin coordinates', 'error'); return; }
+
+        const payload = JSON.stringify({
+            origin_lat: lat, origin_lon: lon,
+            columns: cols, rows: rows,
+            base_square_size_m: size,
+        });
+        const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
         try {
-            const resp = await fetch(`/api/admin/sessions/${sid}/grid`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({
-                    origin_lat: lat, origin_lon: lon,
-                    columns: cols, rows: rows,
-                    base_square_size_m: size,
-                }),
+            // Try PUT first, fall back to POST if 405
+            let resp = await fetch(`/api/admin/sessions/${sid}/grid`, {
+                method: 'PUT', headers, body: payload,
             });
+            if (resp.status === 405) {
+                resp = await fetch(`/api/admin/sessions/${sid}/grid`, {
+                    method: 'POST', headers, body: payload,
+                });
+            }
             if (resp.ok) {
                 _showInfo('admin-grid-status', '✓ Grid updated', 'success');
                 // Reload grid on map if this is the active session
@@ -927,38 +939,82 @@ const KAdmin = (() => {
 
     // ── Assign User to Session (from Users panel) ────
 
-    async function assignUserToSession(userId, displayName) {
+    let _assignPendingUserId = null;
+    let _assignPendingDisplayName = null;
+
+    function assignUserToSession(userId, displayName) {
         const sid = _getAdminSessionId();
         if (!sid) { alert('Select a session first in the admin session selector.'); return; }
 
-        const side = prompt(
-            `Assign "${displayName}" to session ${sid.substring(0, 8)}…\n\nSide (blue / red / observer / admin):`,
-            'blue'
-        );
-        if (!side) return;
-        if (!['blue', 'red', 'observer', 'admin'].includes(side.toLowerCase())) {
-            alert('Invalid side. Use: blue, red, observer, or admin');
-            return;
+        _assignPendingUserId = userId;
+        _assignPendingDisplayName = displayName;
+
+        // Populate modal
+        const label = document.getElementById('admin-assign-user-label');
+        if (label) label.textContent = `Assign "${displayName}" to session ${sid.substring(0, 8)}…`;
+
+        // Reset to defaults
+        const sideEl = document.getElementById('admin-assign-side');
+        const roleEl = document.getElementById('admin-assign-role');
+        if (sideEl) sideEl.value = 'blue';
+        if (roleEl) roleEl.value = 'commander';
+
+        const statusEl = document.getElementById('admin-assign-status');
+        if (statusEl) statusEl.textContent = '';
+
+        // Show modal
+        const modal = document.getElementById('admin-assign-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function _initAssignModal() {
+        _bind('admin-assign-confirm', 'click', _doAssignUser);
+        _bind('admin-assign-cancel', 'click', _closeAssignModal);
+        _bind('admin-assign-modal-close', 'click', _closeAssignModal);
+
+        // Close on overlay click
+        const overlay = document.getElementById('admin-assign-modal');
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) _closeAssignModal();
+            });
         }
+    }
 
-        const role = prompt('Role (e.g. commander, plt_commander, observer):', 'commander');
-        if (role === null) return;
+    function _closeAssignModal() {
+        const modal = document.getElementById('admin-assign-modal');
+        if (modal) modal.style.display = 'none';
+        _assignPendingUserId = null;
+        _assignPendingDisplayName = null;
+    }
 
+    async function _doAssignUser() {
+        if (!_assignPendingUserId) return;
+        const sid = _getAdminSessionId();
         const token = _getToken();
+        if (!sid || !token) return;
+
+        const side = document.getElementById('admin-assign-side').value;
+        const role = document.getElementById('admin-assign-role').value;
+        const statusEl = document.getElementById('admin-assign-status');
+
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/add-participant`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ user_id: userId, side: side.toLowerCase(), role: role || 'commander' }),
+                body: JSON.stringify({ user_id: _assignPendingUserId, side, role }),
             });
             if (resp.ok) {
-                alert(`✓ ${displayName} added to session as ${side} / ${role || 'commander'}`);
+                if (statusEl) { statusEl.textContent = `✓ ${_assignPendingDisplayName} added as ${side} / ${role}`; statusEl.className = 'admin-info admin-success'; }
                 _loadParticipants();
+                setTimeout(_closeAssignModal, 800);
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Failed to add participant');
+                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Failed'}`; statusEl.className = 'admin-info admin-error'; }
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) {
+            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
+        }
     }
 
     // ══════════════════════════════════════════════════
@@ -1173,6 +1229,8 @@ const KAdmin = (() => {
         return html;
     }
 
+    let _cocPickerPendingUnitId = null;
+
     function _showParentPicker(unitId, allUnits) {
         const unit = allUnits.find(u => u.id === unitId);
         if (!unit) return;
@@ -1186,16 +1244,64 @@ const KAdmin = (() => {
             return;
         }
 
-        const names = candidates.map((c, i) => `${i + 1}. ${c.name} (${c.unit_type})`).join('\n');
-        const choice = prompt(
-            `Assign "${unit.name}" to which commander?\n\n${names}\n\nEnter number (or 0 to cancel):`,
-            '0'
-        );
-        if (!choice || choice === '0') return;
-        const idx = parseInt(choice) - 1;
-        if (idx < 0 || idx >= candidates.length) { alert('Invalid choice'); return; }
+        _cocPickerPendingUnitId = unitId;
 
-        _setUnitParent(unitId, candidates[idx].id);
+        // Populate modal
+        const label = document.getElementById('admin-coc-picker-unit-label');
+        if (label) label.textContent = `Assign "${unit.name}" to which commander?`;
+
+        const sel = document.getElementById('admin-coc-picker-select');
+        if (sel) {
+            sel.innerHTML = '';
+            candidates.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                const sideIcon = c.side === 'blue' ? '🔵' : '🔴';
+                opt.textContent = `${sideIcon} ${c.name} (${c.unit_type})`;
+                sel.appendChild(opt);
+            });
+            if (candidates.length > 0) sel.value = candidates[0].id;
+        }
+
+        // Show modal
+        const modal = document.getElementById('admin-coc-picker-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function _initCocPickerModal() {
+        _bind('admin-coc-picker-confirm', 'click', () => {
+            const sel = document.getElementById('admin-coc-picker-select');
+            if (!sel || !sel.value || !_cocPickerPendingUnitId) return;
+            _setUnitParent(_cocPickerPendingUnitId, sel.value);
+            _closeCocPickerModal();
+        });
+        _bind('admin-coc-picker-cancel', 'click', _closeCocPickerModal);
+        _bind('admin-coc-picker-close', 'click', _closeCocPickerModal);
+
+        // Close on overlay click
+        const overlay = document.getElementById('admin-coc-picker-modal');
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) _closeCocPickerModal();
+            });
+        }
+
+        // Double-click to confirm
+        const sel = document.getElementById('admin-coc-picker-select');
+        if (sel) {
+            sel.addEventListener('dblclick', () => {
+                if (sel.value && _cocPickerPendingUnitId) {
+                    _setUnitParent(_cocPickerPendingUnitId, sel.value);
+                    _closeCocPickerModal();
+                }
+            });
+        }
+    }
+
+    function _closeCocPickerModal() {
+        const modal = document.getElementById('admin-coc-picker-modal');
+        if (modal) modal.style.display = 'none';
+        _cocPickerPendingUnitId = null;
     }
 
     async function _setUnitParent(unitId, parentId) {

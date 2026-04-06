@@ -1033,3 +1033,102 @@ button:hover { background: #1a5276; }
     cursor: default;
 }
 
+/* ── Admin Modal Overlay & Dialog ────────────── */
+.admin-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+.admin-modal {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    min-width: 320px;
+    max-width: 440px;
+    width: 90%;
+    overflow: hidden;
+    animation: adminModalIn 0.15s ease-out;
+}
+@keyframes adminModalIn {
+    from { transform: translateY(-20px) scale(0.97); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+.admin-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: #0f1b38;
+    border-bottom: 1px solid #0f3460;
+    font-size: 13px;
+    font-weight: 700;
+    color: #ff9800;
+}
+.admin-modal-close {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 14px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #888;
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.admin-modal-close:hover { background: #5a2020; color: #ef9a9a; border-color: #e53935; }
+.admin-modal-body {
+    padding: 14px;
+}
+.admin-modal-row {
+    margin-bottom: 10px;
+}
+.admin-modal-row label {
+    display: block;
+    font-size: 11px;
+    color: #90caf9;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    font-weight: 600;
+}
+.admin-modal-select {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    outline: none;
+    cursor: pointer;
+}
+.admin-modal-select:focus {
+    border-color: #4fc3f7;
+}
+.admin-modal-select option {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    padding: 6px;
+}
+.admin-modal-select option:checked {
+    background: #0f3460;
+    color: #4fc3f7;
+}
+.admin-modal-footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid #0f3460;
+    background: rgba(15, 20, 40, 0.3);
+}
+

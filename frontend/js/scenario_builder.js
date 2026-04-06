@@ -18,6 +18,7 @@ const KScenarioBuilder = (() => {
     let _ctxIdx = -1;        // index of unit in context menu
     let _rangePreviewLayer = null; // range preview layer for builder
     let _gridPreviewLayer = null;  // grid preview layer for builder
+    let _sessionGridWasVisible = false; // track session grid visibility to restore later
 
     // ── Unit type registry ──────────────────────────────
     const UNIT_TYPES = {
@@ -59,6 +60,10 @@ const KScenarioBuilder = (() => {
         if (!_map.hasLayer(_rangePreviewLayer)) _rangePreviewLayer.addTo(_map);
         if (!_map.hasLayer(_gridPreviewLayer)) _gridPreviewLayer.addTo(_map);
 
+        // Hide the session grid so only the builder preview grid is shown
+        _sessionGridWasVisible = KGrid.isVisible();
+        if (_sessionGridWasVisible) KGrid.toggle();
+
         // Install map click handler
         _map.on('click', _onMapClick);
 
@@ -93,6 +98,9 @@ const KScenarioBuilder = (() => {
         if (_map.hasLayer(_stagedLayer)) _map.removeLayer(_stagedLayer);
         if (_map.hasLayer(_rangePreviewLayer)) _map.removeLayer(_rangePreviewLayer);
         if (_map.hasLayer(_gridPreviewLayer)) _map.removeLayer(_gridPreviewLayer);
+
+        // Restore session grid if it was visible before builder was activated
+        if (_sessionGridWasVisible && !KGrid.isVisible()) KGrid.toggle();
 
         _map.off('click', _onMapClick);
         document.removeEventListener('click', _dismissCtxMenu);

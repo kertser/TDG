@@ -208,7 +208,7 @@ class AdminAddParticipant(BaseModel):
     role: str = "commander"
 
 
-@router.post("/sessions/{session_id}/add-participant")
+@router.api_route("/sessions/{session_id}/add-participant", methods=["POST", "PUT"])
 async def admin_add_participant(
     session_id: uuid.UUID, body: AdminAddParticipant, db: DB,
 ):
@@ -770,7 +770,7 @@ class AdminGridUpdate(BaseModel):
     labeling_scheme: str = "alphanumeric"
 
 
-@router.put("/sessions/{session_id}/grid")
+@router.api_route("/sessions/{session_id}/grid", methods=["PUT", "POST"])
 async def admin_update_grid(
     session_id: uuid.UUID, body: AdminGridUpdate, db: DB, user: CurrentUser,
 ):
