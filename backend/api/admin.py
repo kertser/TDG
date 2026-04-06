@@ -792,7 +792,7 @@ async def admin_split_unit(session_id: uuid.UUID, unit_id: uuid.UUID, body: Admi
 
 @router.post("/sessions/{session_id}/units/{unit_id}/merge")
 async def admin_merge_unit(session_id: uuid.UUID, unit_id: uuid.UUID, body: AdminMergeRequest, db: DB, user: CurrentUser):
-    """Admin: merge two units without authority check. Units must be same side/type and within 50m."""
+    """Admin: merge two units without authority/distance check. Units must be same side/type."""
     from backend.api.units import (
         get_current_echelon, echelon_one_up, get_principal_type,
         make_unit_type, update_sidc_echelon, get_unit_latlon, haversine_m,
@@ -823,12 +823,7 @@ async def admin_merge_unit(session_id: uuid.UUID, unit_id: uuid.UUID, body: Admi
     if str(survivor.id) == str(absorbed.id):
         raise HTTPException(status_code=400, detail="Cannot merge a unit with itself")
 
-    surv_lat, surv_lon = get_unit_latlon(survivor)
-    abs_lat, abs_lon = get_unit_latlon(absorbed)
-    if surv_lat is not None and abs_lat is not None:
-        dist = haversine_m(surv_lat, surv_lon, abs_lat, abs_lon)
-        if dist > 50:
-            raise HTTPException(status_code=400, detail=f"Units must be within 50m (current: {dist:.0f}m)")
+    # No distance restriction for admin merge
 
     total_str = survivor.strength + absorbed.strength
     w_surv = survivor.strength / total_str if total_str > 0 else 0.5
@@ -1174,102 +1169,6 @@ async def admin_update_grid(
         "base_square_size_m": base_square_size_m,
     }
 
-
-# ══════════════════════════════════════════════════════
-# ── Admin Merge Unit ─────────────────────────────────
-# ══════════════════════════════════════════════════════
-
-class AdminMergeRequest(BaseModel):
-    merge_with_unit_id: str
-
-
-@router.post("/sessions/{session_id}/units/{unit_id}/merge")
-async def admin_merge_units(
-    session_id: uuid.UUID, unit_id: uuid.UUID,
-    body: AdminMergeRequest, db: DB, user: CurrentUser,
-):
-    """Admin: merge another unit into this one (no distance/authority restrictions)."""
-    from backend.api.units import (
-        get_principal_type, get_current_echelon, echelon_one_up,
-        make_unit_type, update_sidc_echelon,
-    )
-
-    result = await db.execute(
-        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
-    )
-    survivor = result.scalar_one_or_none()
-    if survivor is None:
-        raise HTTPException(status_code=404, detail="Surviving unit not found")
-
-    try:
-        merge_uid = uuid.UUID(body.merge_with_unit_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid merge_with_unit_id")
-
-    result2 = await db.execute(
-        select(Unit).where(Unit.id == merge_uid, Unit.session_id == session_id)
-    )
-    absorbed = result2.scalar_one_or_none()
-    if absorbed is None:
-        raise HTTPException(status_code=404, detail="Unit to merge not found")
-
-    # Validation
-    surv_principal = get_principal_type(survivor.unit_type)
-    abs_principal = get_principal_type(absorbed.unit_type)
-    if surv_principal != abs_principal:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot merge different principal types ({surv_principal} vs {abs_principal})",
-        )
-    if survivor.side != absorbed.side:
-        raise HTTPException(status_code=400, detail="Cannot merge units from different sides")
-    if str(survivor.id) == str(absorbed.id):
-        raise HTTPException(status_code=400, detail="Cannot merge a unit with itself")
-
-    # Weighted combine
-    total_str = survivor.strength + absorbed.strength
-    if total_str > 0:
-        w_surv = survivor.strength / total_str
-        w_abs = absorbed.strength / total_str
-    else:
-        w_surv = 0.5
-        w_abs = 0.5
-
-    survivor.strength = min(1.0, total_str)
-    survivor.ammo = min(1.0, survivor.ammo * w_surv + absorbed.ammo * w_abs)
-    survivor.morale = min(1.0, survivor.morale * w_surv + absorbed.morale * w_abs)
-    survivor.suppression = max(0.0, survivor.suppression * w_surv + absorbed.suppression * w_abs)
-
-    # Re-parent children
-    child_result = await db.execute(select(Unit).where(Unit.parent_unit_id == absorbed.id))
-    for child in child_result.scalars().all():
-        child.parent_unit_id = survivor.id
-
-    # Destroy absorbed unit
-    absorbed.is_destroyed = True
-    absorbed.strength = 0.0
-    absorbed.current_task = None
-
-    # Auto-name: strip /N suffixes
-    name = survivor.name
-    if "/" in name:
-        name = name.rsplit("/", 1)[0]
-    survivor.name = name
-
-    # Echelon update: merged unit moves up one level
-    current_echelon = get_current_echelon(survivor.sidc)
-    new_echelon = echelon_one_up(current_echelon)
-    principal = get_principal_type(survivor.unit_type)
-    survivor.unit_type = make_unit_type(principal, new_echelon)
-    survivor.sidc = update_sidc_echelon(survivor.sidc, new_echelon)
-
-    await db.flush()
-
-    from backend.services.visibility_service import _serialize_unit
-    return {
-        "survivor": _serialize_unit(survivor),
-        "absorbed_id": str(absorbed.id),
-    }
 
 
 # ══════════════════════════════════════════════════════

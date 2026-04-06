@@ -177,10 +177,16 @@ async def get_units(
     """Return units visible to the requester's side (fog-of-war filtered),
     enriched with commanding officer info."""
     side = participant.side.value
-    if side not in ("blue", "red"):
-        side = "blue"
-    units = await get_visible_units(session_id, side, db)
-    units = await enrich_units_with_command_info(units, session_id, db, requesting_side=side)
+    role = getattr(participant, 'role', None)
+    # Observer and admin see everything
+    if side in ("admin", "observer") or role == "observer":
+        vis_side = "observer"
+    elif side in ("blue", "red"):
+        vis_side = side
+    else:
+        vis_side = "blue"
+    units = await get_visible_units(session_id, vis_side, db)
+    units = await enrich_units_with_command_info(units, session_id, db, requesting_side=vis_side)
     return units
 
 
@@ -646,6 +652,12 @@ async def get_contacts(
     participant=Depends(get_session_participant),
 ):
     side = participant.side.value
-    if side not in ("blue", "red"):
-        side = "blue"
-    return await get_visible_contacts(session_id, side, db)
+    role = getattr(participant, 'role', None)
+    # Observer and admin see all contacts
+    if side in ("admin", "observer") or role == "observer":
+        vis_side = "observer"
+    elif side in ("blue", "red"):
+        vis_side = side
+    else:
+        vis_side = "blue"
+    return await get_visible_contacts(session_id, vis_side, db)

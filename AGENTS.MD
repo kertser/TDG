@@ -937,7 +937,87 @@ if unit.ammo <= 0:
 
 ---
 
-## Appendix: File Tree Summary
+## Appendix A: Implementation Status
+
+> Last updated: 2026-04-06
+
+### Phases Completed / In Progress
+
+| Phase | Status | Notes |
+|---|---|---|
+| **Phase 1: Project Skeleton** | ✅ Complete | FastAPI app, DB, models, migrations, Docker, config |
+| **Phase 2: Grid / Snail System** | ✅ Complete | GridService, API endpoints, frontend rendering |
+| **Phase 3: Session & User Management** | ✅ Complete | Auth (JWT), session CRUD, join, start/pause/tick, participants |
+| **Phase 4: Map — Units, Fog of War** | ✅ Complete | milsymbol rendering, fog-of-war via PostGIS `ST_DWithin`, detection range filtering |
+| **Phase 5: Collaborative Overlays** | ✅ Complete | Drawing tools (arrow, polyline, rect, marker, ellipse, measure), WebSocket sync, overlay context menu (color/width/label/delete) |
+| **Phase 6: Order Entry** | ⚠ Partial | Text order submission, parsed_order for direct task (move), unit selection UI. LLM parsing/intent not yet wired. |
+| **Phase 7: Rules Engine** | ✅ Complete | Tick processing: movement, detection, combat, morale, comms, suppression, ammo, contacts, events |
+| **Phase 8: Red AI** | ❌ Not started | RedAgent model exists, but AI decision loop not implemented |
+| **Phase 9: Reports, Events, Log** | ⚠ Partial | Events endpoint + frontend panel. Reports endpoint exists. AI-generated reports not wired. |
+| **Phase 10: Polish & Deployment** | ⚠ Partial | Dev workflow works. Dockerfile/nginx not yet tested in production. |
+
+### Features Implemented Beyond Original Plan
+
+| Feature | Files | Description |
+|---|---|---|
+| **Admin Panel** | `admin.js`, `admin.py` | Floating admin window with password gate, sub-tabs (Session, Monitor, Builder, CoC, Users, Types). Session wizard for guided setup. |
+| **Scenario Builder** | `scenario_builder.js`, `admin.js` | Interactive map-click unit placement, grid configuration, save/load scenarios. |
+| **God View** | `admin.js`, `admin.py` | Admin toggle to see all units from both sides (bypasses fog-of-war). |
+| **Unit Dashboard** | `admin.js` | Admin table of all units with focus, edit, delete, split, merge buttons. |
+| **Chain of Command (Public CoC)** | `admin.js` (sidebar CoC tab) | Sidebar CoC tree visible to all players. Commanders can reassign subordinate units. |
+| **Chain of Command (Admin CoC)** | `admin.js` (admin CoC sub-tab) | Admin-only full hierarchy editor with parent picker and bulk assign/unassign. |
+| **Unit Split / Merge** | `units.py`, `admin.py`, `units.js`, `admin.js` | Split: auto-naming, echelon drop. Merge: combine strength, echelon up, re-parent children. Admin merge has no distance restriction. |
+| **Unit Formations** | `units.py`, `units.js` | 10 formation types (column, line, wedge, vee, etc.), set via context menu. |
+| **Unit Movement** | `units.py`, `units.js`, `engine/movement.py` | Set move target via map click, 3 speed presets, movement arrows on map, tick-based movement. |
+| **Rubber-band Selection** | `units.js` | Left-drag on map for mass unit selection. Shift+click for additive selection. |
+| **Unit Context Menu** | `units.js` | Right-click context menu: select, rename, formation, move, stop, split, merge, assign. |
+| **Unit Status Icons** | `units.js` | Status derived from task/morale/suppression, shown in tooltip and CoC tree. |
+| **Zoom-scaled Markers** | `symbols.js`, `units.js` | milsymbol markers scale with zoom level. |
+| **Game Clock** | `map.js` | Top-right map overlay showing turn number and in-game date/time. |
+| **Measurement Tool** | `overlays.js`, `map.js` | Polyline measurement with cumulative distance display. |
+| **User Settings** | `session_ui.js` | Settings modal: toggle coords/snail/zoom display, tooltips, range circles, sounds. |
+| **User Dropdown** | `session_ui.js` | User menu with rename, settings, logout. |
+| **Scenario Description** | `session_ui.js` | Click session name to view scenario briefing modal. |
+| **Favicon** | `main.py`, `favicon.svg` | Custom SVG favicon with fallback route. |
+| **Credits** | `index.html`, `style.css` | Bottom sidebar credits bar. |
+
+### Permission / Authority System
+
+| Rule | Where Enforced |
+|---|---|
+| Observers cannot select/command units | `units.js: _canSelect`, `_canAssign` — checks both `side` and `role` |
+| Observers cannot submit orders | `orders.py: submit_order` — 403 if side or role is observer |
+| Observers cannot be assigned to units | `units.py: assign_unit`, `admin.py: PATCH unit` — validates target user |
+| Observers cannot assign units | `units.py: assign_unit` — 403 if caller is observer |
+| Side check: blue can't command red | `units.js: _canSelect` — rejects cross-side selection |
+| Side check: blue can't order red units | `orders.py: submit_order` — validates unit side matches order side |
+| Command authority via hierarchy | `visibility_service.py: check_command_authority` — walks parent chain |
+| Implicit authority when no CoC | `visibility_service.py` — if no same-side units have assigned users, all same-side players have authority |
+| Subordinate user authority | `visibility_service.py: check_subordinate_authority` — user A has authority if target is assigned to a subordinate of A |
+| CoC tree assign buttons | `admin.js: _userCanAssign` — mirrors backend logic, includes "no CoC" fallback |
+
+### Fog-of-War Implementation
+
+- **Backend**: `visibility_service.py: get_visible_units()` uses PostGIS `ST_DWithin` to check if enemy units are within detection range of any friendly unit.
+- **Own-side units**: Always fully visible with all stats.
+- **Enemy units in range**: Visible but with reduced detail (no ammo/morale/suppression/comms/task info).
+- **Default detection range**: 1500m if `detection_range_m` is NULL.
+- **Admin/observer**: See all units from both sides.
+- **Contacts**: Filtered by observing_side.
+
+### Key Architecture Decisions Made
+
+1. **Server-authoritative**: All mutations go through backend. Frontend never modifies game state directly.
+2. **Deterministic tick**: Rules engine uses no randomness (deterministic hash for detection). Enables replay.
+3. **No CoC = open authority**: When no units on a side have assigned users, any same-side player can command any unit. Authority restrictions activate only once assignments begin.
+4. **Admin bypass**: Admin endpoints (`/api/admin/...`) skip authority and distance checks.
+5. **Side + role dual observer check**: Observer restriction checks both `participant.side == 'observer'` and `participant.role == 'observer'` to handle blue/red-side observers.
+6. **Append-only events**: Event table is never updated/deleted. Supports replay.
+7. **JSONB for flexibility**: Unit tasks, capabilities, order payloads, scenario config use JSONB columns.
+
+---
+
+## Appendix B: File Tree Summary
 
 ```
 KShU/
@@ -945,17 +1025,14 @@ KShU/
 ├── README.md
 ├── Task.MD
 ├── requirements.txt
-├── .env.example
 ├── docker-compose.yml
-├── docker-compose.prod.yml
-├── Dockerfile
-├── nginx.conf
 ├── alembic.ini
 ├── alembic/
 │   ├── env.py
+│   ├── script.py.mako
 │   └── versions/
-│       └── 001_initial.py
 ├── backend/
+│   ├── __init__.py
 │   ├── main.py
 │   ├── config.py
 │   ├── database.py
@@ -972,47 +1049,29 @@ KShU/
 │   │   ├── report.py
 │   │   ├── red_agent.py
 │   │   └── grid.py
-│   ├── schemas/
-│   │   ├── auth.py
-│   │   ├── session.py
-│   │   ├── unit.py
-│   │   ├── order.py
-│   │   ├── overlay.py
-│   │   ├── grid.py
-│   │   └── red_agent.py
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py
 │   │   ├── auth.py
+│   │   ├── admin.py              ← Admin endpoints (session mgmt, god view, unit CRUD, CoC, users)
 │   │   ├── sessions.py
-│   │   ├── units.py
+│   │   ├── units.py              ← Unit endpoints (fog-of-war, assign, split/merge, move, formation)
 │   │   ├── orders.py
 │   │   ├── overlays.py
 │   │   ├── grid.py
 │   │   ├── locations.py
 │   │   ├── events.py
 │   │   ├── reports.py
+│   │   ├── scenarios.py
 │   │   └── websocket.py
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── auth_service.py
 │   │   ├── session_service.py
 │   │   ├── grid_service.py
-│   │   ├── visibility_service.py
+│   │   ├── visibility_service.py ← Fog-of-war, command authority, unit serialization
 │   │   ├── overlay_service.py
-│   │   ├── order_service.py
-│   │   ├── order_parser.py
-│   │   ├── intent_interpreter.py
-│   │   ├── location_resolver.py
-│   │   ├── report_generator.py
 │   │   ├── ws_manager.py
-│   │   ├── tick_scheduler.py
-│   │   └── red_ai/
-│   │       ├── __init__.py
-│   │       ├── agent.py
-│   │       ├── knowledge.py
-│   │       ├── doctrine.py
-│   │       └── runner.py
+│   │   └── tick_scheduler.py
 │   ├── engine/
 │   │   ├── __init__.py
 │   │   ├── tick.py
@@ -1024,43 +1083,44 @@ KShU/
 │   │   ├── contacts.py
 │   │   ├── events.py
 │   │   ├── ammo.py
+│   │   ├── suppression.py
 │   │   └── terrain.py
-│   ├── prompts/
-│   │   ├── order_parser.py
-│   │   ├── intent_interpreter.py
-│   │   ├── red_commander.py
-│   │   └── report_generator.py
 │   └── tests/
-│       ├── conftest.py
+│       ├── __init__.py
 │       ├── test_grid_service.py
-│       ├── test_sessions.py
 │       ├── test_movement.py
 │       ├── test_detection.py
-│       ├── test_combat.py
-│       ├── test_red_ai.py
-│       ├── test_fog_of_war.py
-│       ├── test_websocket.py
-│       └── test_e2e_game.py
+│       └── test_combat.py
 ├── frontend/
 │   ├── index.html
+│   ├── favicon.svg
 │   ├── css/
 │   │   └── style.css
 │   └── js/
-│       ├── app.js
-│       ├── map.js
-│       ├── grid.js
-│       ├── units.js
-│       ├── symbols.js
-│       ├── contacts.js
-│       ├── overlays.js
-│       ├── orders.js
-│       ├── websocket.js
-│       ├── events.js
-│       ├── reports.js
-│       ├── gamelog.js
-│       ├── session_ui.js
-│       └── ui.js
+│       ├── app.js                ← Main entry, session join callback, WS handlers
+│       ├── map.js                ← Leaflet map init, game clock, measurement, middle-button pan
+│       ├── grid.js               ← Grid GeoJSON overlay, snail address tracking
+│       ├── symbols.js            ← milsymbol.js wrapper, zoom-scaled icons
+│       ├── units.js              ← Unit rendering, selection, context menu, split/merge/move/formation
+│       ├── contacts.js           ← Contact rendering (enemy detections)
+│       ├── overlays.js           ← Drawing tools (arrow, polyline, rect, marker, ellipse, measure)
+│       ├── websocket.js          ← WebSocket client with reconnect
+│       ├── orders.js             ← Order submission panel
+│       ├── events.js             ← Events timeline panel
+│       ├── reports.js            ← Reports panel
+│       ├── gamelog.js            ← Unified game log
+│       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu
+│       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
+│       ├── admin.js              ← Admin panel (3200+ lines): dashboard, CoC, wizard, god view, users, types
+│       └── ui.js                 ← Map control overlay (2×2 buttons), sidebar tab switching
 └── scripts/
+    ├── __init__.py
     ├── seed_scenario.py
-    └── run_dev.py
+    ├── test_api_quick.py
+    ├── test_flow.py
+    ├── test_grid_quick.py
+    ├── test_simulation.py
+    ├── test_tick.py
+    ├── test_viewport.py
+    └── verify_system.py
 ```

@@ -2180,6 +2180,20 @@ const KAdmin = (() => {
     function _userCanAssign(unit, allUnitMap) {
         const userId = KSessionUI.getUserId();
         if (!userId) return false;
+        const mySide = KSessionUI.getSide();
+        const myRole = KSessionUI.getRole();
+        // Observers cannot assign
+        if (mySide === 'observer' || myRole === 'observer') return false;
+
+        // Case 0: If no units on the same side have any assigned_user_ids,
+        // any same-side player has implicit authority (no CoC configured yet)
+        const sameSideUnits = Object.values(allUnitMap).filter(u => u.side === unit.side);
+        const anyAssigned = sameSideUnits.some(u => u.assigned_user_ids && u.assigned_user_ids.length > 0);
+        if (!anyAssigned) {
+            // Any same-side user (or admin) can assign when no CoC is set up
+            if (mySide === 'admin' || mySide === unit.side) return true;
+            return false;
+        }
 
         // Case 1: User is directly assigned to this unit (can manage/reassign)
         if (unit.assigned_user_ids && unit.assigned_user_ids.includes(userId)) {
@@ -2855,17 +2869,16 @@ const KAdmin = (() => {
         const unit = _dashboardUnits.find(u => u.id === unitId);
         if (!unit) { alert('Unit not found in dashboard'); return; }
 
-        // Find nearby mergeable units (same principal type, same side, within 50m)
+        // Find mergeable units (same principal type, same side — no distance restriction for admin)
         const principalType = _getPrincipalType(unit.unit_type);
         const nearby = _dashboardUnits.filter(ou => {
             if (ou.id === unit.id || ou.side !== unit.side || ou.is_destroyed) return false;
             if (_getPrincipalType(ou.unit_type) !== principalType) return false;
-            if (unit.lat == null || unit.lon == null || ou.lat == null || ou.lon == null) return false;
-            return _haversineDist(unit.lat, unit.lon, ou.lat, ou.lon) <= 50;
+            return true;
         });
 
         if (nearby.length === 0) {
-            alert(`No compatible units within 50m of "${unit.name}" (type: ${principalType})`);
+            alert(`No compatible units for "${unit.name}" (type: ${principalType})`);
             return;
         }
 
@@ -2873,8 +2886,12 @@ const KAdmin = (() => {
         let msg = `Merge into "${unit.name}".\nSelect unit to absorb:\n\n`;
         nearby.forEach((ou, i) => {
             const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
-            const dist = Math.round(_haversineDist(unit.lat, unit.lon, ou.lat, ou.lon));
-            msg += `${i + 1}. ${ou.name} (${strPct}, ${dist}m)\n`;
+            let distInfo = '';
+            if (unit.lat != null && ou.lat != null) {
+                const dist = Math.round(_haversineDist(unit.lat, unit.lon, ou.lat, ou.lon));
+                distInfo = `, ${dist}m`;
+            }
+            msg += `${i + 1}. ${ou.name} (${strPct}${distInfo})\n`;
         });
         msg += '\nEnter number (1-' + nearby.length + '):';
         const choice = prompt(msg);

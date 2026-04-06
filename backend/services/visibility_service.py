@@ -165,10 +165,11 @@ async def get_visible_units(
     # Fog-of-war: find enemy units within detection range of any own unit
     # Using PostGIS ST_DWithin with geography cast for meter-based distance
     # Subquery: all own unit positions with their detection ranges
+    # Default detection range of 1500m if not set
     own_observer = (
         select(
             Unit.position.label("obs_pos"),
-            Unit.detection_range_m.label("det_range"),
+            func.coalesce(Unit.detection_range_m, 1500.0).label("det_range"),
         )
         .where(
             Unit.session_id == session_id,
