@@ -55,7 +55,7 @@ const KAdmin = (() => {
                 if (panelId === 'admin-users-panel') _loadUsers();
                 else if (panelId === 'admin-coc-panel') _loadChainOfCommand();
                 else if (panelId === 'admin-monitor-panel') _loadUnitDashboard();
-                else if (panelId === 'admin-session-panel') { _refreshSessions(); _loadParticipants(); }
+                else if (panelId === 'admin-session-panel') { _refreshSessions(); _loadParticipants(); _populateSessionScenarioDropdown(); }
                 else if (panelId === 'admin-builder-panel') refreshScenarioList();
                 else if (panelId === 'admin-types-panel') _renderUnitTypes();
             });
@@ -103,6 +103,9 @@ const KAdmin = (() => {
         _bind('admin-apply-grid', 'click', _applyGrid);
         _bind('admin-grid-from-session', 'click', _loadGridFromSession);
         _bind('admin-grid-pick-map', 'click', _pickGridFromMap);
+
+        // ── Scenario selection for active session ────
+        _bind('admin-apply-scenario', 'click', _applyScenarioToSession);
 
         // ── Monitor sub-tab ─────────────────────────
         _bind('admin-god-view-toggle', 'click', _toggleGodView);
@@ -996,6 +999,63 @@ const KAdmin = (() => {
 
     // ── Grid Management ─────────────────────────────
 
+    // ── Scenario Selection for Active Session ────────
+
+    async function _populateSessionScenarioDropdown() {
+        const sel = document.getElementById('admin-session-scenario');
+        if (!sel) return;
+        const token = _getToken();
+        if (!token) return;
+        try {
+            const resp = await fetch('/api/scenarios', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) return;
+            const scenarios = await resp.json();
+            // Preserve first "current" option
+            sel.innerHTML = '<option value="">— current —</option>';
+            scenarios.forEach(sc => {
+                const opt = document.createElement('option');
+                opt.value = sc.id;
+                opt.textContent = sc.title || sc.id.substring(0, 8);
+                sel.appendChild(opt);
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    async function _applyScenarioToSession() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-scenario-change-status', 'Select a session first', 'error'); return; }
+        const scenarioId = document.getElementById('admin-session-scenario').value;
+        if (!scenarioId) { _showInfo('admin-scenario-change-status', 'Select a scenario first', 'error'); return; }
+
+        if (!confirm('⚠ Change scenario for this session?\nThis will RESET all units and grid to the selected scenario.\nAll current progress will be lost.')) return;
+
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/apply-scenario`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ scenario_id: scenarioId }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                _showInfo('admin-scenario-change-status', `✓ ${data.message || 'Scenario applied'}`, 'success');
+                KGameLog.addEntry('Scenario changed (admin)', 'info');
+                // Reload grid and units on the map
+                const userSid = _getUserSessionId();
+                if (sid === userSid) {
+                    const map = KMap.getMap();
+                    try { await KGrid.load(map, userSid); } catch(e) {}
+                    try { await KUnits.load(userSid, token); } catch(e) {}
+                }
+                await _loadUnitDashboard();
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                _showInfo('admin-scenario-change-status', `✗ ${d.detail || 'Failed'}`, 'error');
+            }
+        } catch (err) {
+            _showInfo('admin-scenario-change-status', `✗ ${err.message}`, 'error');
+        }
+    }
+
     async function _applyGrid() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-grid-status', 'Select a session first', 'error'); return; }
@@ -1371,7 +1431,7 @@ const KAdmin = (() => {
             const statusIcon = statusIcons[status] || '•';
 
             html += `<tr>
-                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${u.name}">${u.name}</td>
+                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><span class="dashboard-unit-name" data-unit-id="${u.id}" data-lat="${u.lat || ''}" data-lon="${u.lon || ''}" title="${u.name} — click to center map">${u.name}</span></td>
                 <td style="color:${sideClr};font-weight:700;">${u.side}</td>
                 <td style="font-size:10px;" title="${status}">${statusIcon} ${status}</td>
                 <td><span style="color:${strClr}">${strPct}%</span></td>
@@ -1381,6 +1441,7 @@ const KAdmin = (() => {
                 <td style="white-space:nowrap;">
                     <button class="admin-btn" onclick="KAdmin.editUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Edit unit settings">✏</button>
                     <button class="admin-btn" onclick="KAdmin.adminSplitUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Split unit into two">✂</button>
+                    <button class="admin-btn" onclick="KAdmin.adminMergeUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Merge with nearby same-type unit">🔗</button>
                     <button class="admin-btn" onclick="KAdmin.focusUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Center map on unit">📍</button>
                     <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteUnit('${u.id}','${u.name.replace(/'/g, "\\'")}')" style="padding:1px 5px;font-size:9px;" title="Delete unit">✕</button>
                 </td>
@@ -1392,6 +1453,18 @@ const KAdmin = (() => {
         // Bind sort header clicks
         el.querySelectorAll('th.sortable').forEach(th => {
             th.addEventListener('click', () => _setDashboardSort(th.dataset.sort));
+        });
+
+        // Bind unit name clicks → center map
+        el.querySelectorAll('.dashboard-unit-name').forEach(nameEl => {
+            nameEl.addEventListener('click', () => {
+                const lat = parseFloat(nameEl.dataset.lat);
+                const lon = parseFloat(nameEl.dataset.lon);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    const map = KMap.getMap();
+                    if (map) map.setView([lat, lon], Math.max(map.getZoom(), 14));
+                }
+            });
         });
     }
 
@@ -2350,7 +2423,7 @@ const KAdmin = (() => {
         // User-assign button: shown if current user can manage this unit
         const canUserAssign = _adminUnlocked || _userCanAssign(unit, allUnitMap);
         if (canUserAssign) {
-            html += `<button class="coc-user-assign-btn" data-unit-id="${unit.id}" title="Assign a commander to this unit" style="color:#81c784;">👤</button>`;
+            html += `<button class="coc-user-assign-btn" data-unit-id="${unit.id}" title="Assign a commander to this unit"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;"><circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 14c0-3 2.5-5 5-5s5 2 5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11 3l2-1.5v3L11 3z" fill="currentColor" opacity="0.7"/></svg></button>`;
         }
 
         // Admin-only: parent hierarchy buttons
@@ -2743,12 +2816,12 @@ const KAdmin = (() => {
 
     // ── Unit Edit Modal ──────────────────────────────
 
-    /** Admin split: splits a unit from the dashboard (no distance/auth check). */
+    /** Admin split: splits a unit from the dashboard (via admin endpoint, no auth check). */
     async function adminSplitUnit(unitId) {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { alert('Select a session first'); return; }
         try {
-            const resp = await fetch(`/api/sessions/${sid}/units/${unitId}/split`, {
+            const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}/split`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ ratio: 0.5 }),
@@ -2772,6 +2845,90 @@ const KAdmin = (() => {
                 alert(d.detail || 'Split failed');
             }
         } catch (err) { alert(err.message); }
+    }
+
+    /** Admin merge: show picker of nearby same-type units and merge. */
+    async function adminMergeUnit(unitId) {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { alert('Select a session first'); return; }
+
+        const unit = _dashboardUnits.find(u => u.id === unitId);
+        if (!unit) { alert('Unit not found in dashboard'); return; }
+
+        // Find nearby mergeable units (same principal type, same side, within 50m)
+        const principalType = _getPrincipalType(unit.unit_type);
+        const nearby = _dashboardUnits.filter(ou => {
+            if (ou.id === unit.id || ou.side !== unit.side || ou.is_destroyed) return false;
+            if (_getPrincipalType(ou.unit_type) !== principalType) return false;
+            if (unit.lat == null || unit.lon == null || ou.lat == null || ou.lon == null) return false;
+            return _haversineDist(unit.lat, unit.lon, ou.lat, ou.lon) <= 50;
+        });
+
+        if (nearby.length === 0) {
+            alert(`No compatible units within 50m of "${unit.name}" (type: ${principalType})`);
+            return;
+        }
+
+        // Show a simple selection prompt
+        let msg = `Merge into "${unit.name}".\nSelect unit to absorb:\n\n`;
+        nearby.forEach((ou, i) => {
+            const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
+            const dist = Math.round(_haversineDist(unit.lat, unit.lon, ou.lat, ou.lon));
+            msg += `${i + 1}. ${ou.name} (${strPct}, ${dist}m)\n`;
+        });
+        msg += '\nEnter number (1-' + nearby.length + '):';
+        const choice = prompt(msg);
+        if (!choice) return;
+        const idx = parseInt(choice) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= nearby.length) { alert('Invalid choice'); return; }
+
+        const mergeTarget = nearby[idx];
+        if (!confirm(`Merge "${mergeTarget.name}" into "${unit.name}"?\nThe merged unit will be removed.`)) return;
+
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}/merge`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ merge_with_unit_id: mergeTarget.id }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                KGameLog.addEntry(`Admin merge: ${mergeTarget.name} → ${unit.name}`, 'info');
+                await _loadUnitDashboard();
+                const userSid = _getUserSessionId();
+                if (userSid) {
+                    try {
+                        if (_godViewEnabled) await _refreshGodView();
+                        else await KUnits.load(userSid, token);
+                    } catch(e) {}
+                }
+                try { _loadChainOfCommand(); } catch(e) {}
+                try { loadPublicCoC(); } catch(e) {}
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Merge failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    /** Extract principal type from unit_type by stripping size suffixes. */
+    function _getPrincipalType(unitType) {
+        if (!unitType) return '';
+        const suffixes = ['_battalion', '_company', '_battery', '_platoon', '_section', '_squad', '_team', '_post', '_unit'];
+        for (const s of suffixes) {
+            if (unitType.endsWith(s)) return unitType.slice(0, -s.length);
+        }
+        return unitType;
+    }
+
+    /** Haversine distance in meters. */
+    function _haversineDist(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const toRad = (d) => d * Math.PI / 180;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(a));
     }
 
     function _initUnitEditModal() {
@@ -3029,7 +3186,7 @@ const KAdmin = (() => {
         kickParticipant,
         renameUser, deleteUser, assignUserToSession,
         loadPublicCoC,
-        editUnit, focusUnit, deleteUnit, addUnit, adminSplitUnit,
+        editUnit, focusUnit, deleteUnit, addUnit, adminSplitUnit, adminMergeUnit,
         editUnitType, removeUnitType,
         wizardRemoveParticipant: _wizardRemoveParticipant,
     };

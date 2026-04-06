@@ -344,6 +344,9 @@ async def check_command_authority(
 
     A user has authority if they are assigned to the unit itself
     OR to any proper ancestor in the parent chain.
+
+    Special case: if NO units in the session have any assigned_user_ids,
+    then any player on the correct side has implicit authority (no CoC setup).
     """
     # Check self first
     if unit.assigned_user_ids and user_id in unit.assigned_user_ids:
@@ -356,6 +359,13 @@ async def check_command_authority(
         )
     )
     rows = result.all()
+
+    # If no units in the session have any assigned_user_ids at all,
+    # grant implicit authority to any player (no CoC configured yet)
+    any_assigned = any(r[2] for r in rows)
+    if not any_assigned:
+        return True
+
     unit_info = {
         str(r[0]): (str(r[1]) if r[1] else None, r[2])
         for r in rows

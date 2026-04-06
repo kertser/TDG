@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.config import settings
@@ -83,9 +84,21 @@ def create_app() -> FastAPI:
     from backend.api import websocket as ws_router
     app.include_router(ws_router.router)
 
-    # ── Serve frontend static files ───────────────────
+    # ── Serve favicon.ico (browsers auto-request it) ──
     import pathlib
     frontend_dir = pathlib.Path(__file__).resolve().parent.parent / "frontend"
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon_ico():
+        svg_path = frontend_dir / "favicon.svg"
+        if svg_path.exists():
+            return FileResponse(str(svg_path), media_type="image/svg+xml")
+        ico_path = frontend_dir / "favicon.ico"
+        if ico_path.exists():
+            return FileResponse(str(ico_path), media_type="image/x-icon")
+        return Response(status_code=204)
+
+    # ── Serve frontend static files ───────────────────
     if frontend_dir.exists():
         app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
 

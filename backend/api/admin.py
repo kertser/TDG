@@ -705,6 +705,163 @@ async def admin_delete_unit(session_id: uuid.UUID, unit_id: uuid.UUID, db: DB, u
     await db.flush()
 
 
+class AdminSplitRequest(BaseModel):
+    ratio: float = 0.5
+
+
+class AdminMergeRequest(BaseModel):
+    merge_with_unit_id: str
+
+
+@router.post("/sessions/{session_id}/units/{unit_id}/split")
+async def admin_split_unit(session_id: uuid.UUID, unit_id: uuid.UUID, body: AdminSplitRequest, db: DB, user: CurrentUser):
+    """Admin: split a unit without authority check."""
+    from backend.api.units import (
+        get_current_echelon, echelon_one_down, get_principal_type,
+        make_unit_type, update_sidc_echelon,
+    )
+    from backend.services.visibility_service import _serialize_unit
+    from geoalchemy2.shape import to_shape, from_shape
+    from shapely.geometry import Point as ShapelyPoint
+
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
+    unit = result.scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+
+    ratio = max(0.1, min(0.9, body.ratio))
+    base_name = unit.name
+    if "/" in base_name:
+        base_name = base_name.rsplit("/", 1)[0]
+
+    # Find next available suffix numbers
+    existing_names = set()
+    siblings = await db.execute(
+        select(Unit.name).where(
+            Unit.session_id == session_id, Unit.is_destroyed == False,
+            Unit.name.like(f"{base_name}/%"),
+        )
+    )
+    for (n,) in siblings:
+        existing_names.add(n)
+
+    num = 1
+    name_a = f"{base_name}/{num}"
+    while name_a in existing_names:
+        num += 1
+        name_a = f"{base_name}/{num}"
+    existing_names.add(name_a)
+    num += 1
+    name_b = f"{base_name}/{num}"
+
+    current_echelon = get_current_echelon(unit.sidc)
+    new_echelon = echelon_one_down(current_echelon)
+    principal = get_principal_type(unit.unit_type)
+    new_unit_type = make_unit_type(principal, new_echelon)
+    new_sidc = update_sidc_echelon(unit.sidc, new_echelon)
+
+    position_copy = None
+    if unit.position is not None:
+        try:
+            pt = to_shape(unit.position)
+            position_copy = from_shape(ShapelyPoint(pt.x + 0.0004, pt.y), srid=4326)
+        except Exception:
+            pass
+
+    new_unit = Unit(
+        session_id=session_id, side=unit.side, name=name_b,
+        unit_type=new_unit_type, sidc=new_sidc, parent_unit_id=unit.parent_unit_id,
+        position=position_copy, heading_deg=unit.heading_deg,
+        strength=unit.strength * ratio, ammo=unit.ammo, morale=unit.morale,
+        suppression=unit.suppression, comms_status=unit.comms_status,
+        capabilities=dict(unit.capabilities) if unit.capabilities else None,
+        move_speed_mps=unit.move_speed_mps, detection_range_m=unit.detection_range_m,
+        assigned_user_ids=list(unit.assigned_user_ids) if unit.assigned_user_ids else None,
+    )
+    db.add(new_unit)
+
+    unit.name = name_a
+    unit.strength = unit.strength * (1 - ratio)
+    unit.unit_type = new_unit_type
+    unit.sidc = new_sidc
+
+    await db.flush()
+    await db.refresh(new_unit)
+    return {"original": _serialize_unit(unit), "new_unit": _serialize_unit(new_unit)}
+
+
+@router.post("/sessions/{session_id}/units/{unit_id}/merge")
+async def admin_merge_unit(session_id: uuid.UUID, unit_id: uuid.UUID, body: AdminMergeRequest, db: DB, user: CurrentUser):
+    """Admin: merge two units without authority check. Units must be same side/type and within 50m."""
+    from backend.api.units import (
+        get_current_echelon, echelon_one_up, get_principal_type,
+        make_unit_type, update_sidc_echelon, get_unit_latlon, haversine_m,
+    )
+    from backend.services.visibility_service import _serialize_unit
+
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
+    survivor = result.scalar_one_or_none()
+    if survivor is None:
+        raise HTTPException(status_code=404, detail="Surviving unit not found")
+
+    try:
+        merge_uid = uuid.UUID(body.merge_with_unit_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid merge_with_unit_id")
+
+    result2 = await db.execute(select(Unit).where(Unit.id == merge_uid, Unit.session_id == session_id))
+    absorbed = result2.scalar_one_or_none()
+    if absorbed is None:
+        raise HTTPException(status_code=404, detail="Unit to merge not found")
+
+    surv_principal = get_principal_type(survivor.unit_type)
+    abs_principal = get_principal_type(absorbed.unit_type)
+    if surv_principal != abs_principal:
+        raise HTTPException(status_code=400, detail=f"Cannot merge different types ({surv_principal} vs {abs_principal})")
+    if survivor.side != absorbed.side:
+        raise HTTPException(status_code=400, detail="Cannot merge units from different sides")
+    if str(survivor.id) == str(absorbed.id):
+        raise HTTPException(status_code=400, detail="Cannot merge a unit with itself")
+
+    surv_lat, surv_lon = get_unit_latlon(survivor)
+    abs_lat, abs_lon = get_unit_latlon(absorbed)
+    if surv_lat is not None and abs_lat is not None:
+        dist = haversine_m(surv_lat, surv_lon, abs_lat, abs_lon)
+        if dist > 50:
+            raise HTTPException(status_code=400, detail=f"Units must be within 50m (current: {dist:.0f}m)")
+
+    total_str = survivor.strength + absorbed.strength
+    w_surv = survivor.strength / total_str if total_str > 0 else 0.5
+    w_abs = absorbed.strength / total_str if total_str > 0 else 0.5
+
+    survivor.strength = min(1.0, total_str)
+    survivor.ammo = min(1.0, survivor.ammo * w_surv + absorbed.ammo * w_abs)
+    survivor.morale = min(1.0, survivor.morale * w_surv + absorbed.morale * w_abs)
+    survivor.suppression = max(0.0, survivor.suppression * w_surv + absorbed.suppression * w_abs)
+
+    child_result = await db.execute(select(Unit).where(Unit.parent_unit_id == absorbed.id))
+    for child in child_result.scalars().all():
+        child.parent_unit_id = survivor.id
+
+    absorbed.is_destroyed = True
+    absorbed.strength = 0.0
+    absorbed.current_task = None
+
+    name = survivor.name
+    if "/" in name:
+        name = name.rsplit("/", 1)[0]
+    survivor.name = name
+
+    current_echelon = get_current_echelon(survivor.sidc)
+    new_echelon = echelon_one_up(current_echelon)
+    principal = get_principal_type(survivor.unit_type)
+    survivor.unit_type = make_unit_type(principal, new_echelon)
+    survivor.sidc = update_sidc_echelon(survivor.sidc, new_echelon)
+
+    await db.flush()
+    return {"survivor": _serialize_unit(survivor), "absorbed_id": str(absorbed.id)}
+
+
 # ══════════════════════════════════════════════════════
 # ── Participants Management ──────────────────────────
 # ══════════════════════════════════════════════════════
@@ -833,6 +990,59 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     await initialize_session_from_scenario(session, session.scenario, db)
 
     return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0"}
+
+
+class ApplyScenarioRequest(BaseModel):
+    scenario_id: str
+
+
+@router.post("/sessions/{session_id}/apply-scenario")
+async def admin_apply_scenario(session_id: uuid.UUID, body: ApplyScenarioRequest, db: DB, user: CurrentUser):
+    """Admin: change the scenario for an active session. Resets units/grid."""
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        scenario_uuid = uuid.UUID(body.scenario_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scenario_id")
+
+    sc_result = await db.execute(select(Scenario).where(Scenario.id == scenario_uuid))
+    scenario = sc_result.scalar_one_or_none()
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    # Delete all existing game-state data for this session
+    await db.execute(sa_delete(LocationReference).where(LocationReference.session_id == session_id))
+    await db.execute(sa_delete(Event).where(Event.session_id == session_id))
+    await db.execute(sa_delete(Report).where(Report.session_id == session_id))
+    await db.execute(sa_delete(Contact).where(Contact.session_id == session_id))
+    await db.execute(sa_delete(Order).where(Order.session_id == session_id))
+    await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.session_id == session_id))
+    await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
+    await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
+
+    # Update session to point to new scenario
+    session.scenario_id = scenario_uuid
+    session.tick = 0
+    session.status = SessionStatus.lobby
+    session.current_time = datetime.now(timezone.utc)
+    await db.flush()
+
+    # Re-initialize from new scenario
+    from backend.services.session_service import initialize_session_from_scenario
+    await initialize_session_from_scenario(session, scenario, db)
+
+    return {
+        "status": session.status.value,
+        "tick": 0,
+        "scenario_id": str(scenario_uuid),
+        "scenario_title": scenario.title,
+        "message": f"Scenario changed to '{scenario.title}'. Session reset to turn 0.",
+    }
 
 
 # ══════════════════════════════════════════════════════
@@ -965,3 +1175,158 @@ async def admin_update_grid(
     }
 
 
+# ══════════════════════════════════════════════════════
+# ── Admin Merge Unit ─────────────────────────────────
+# ══════════════════════════════════════════════════════
+
+class AdminMergeRequest(BaseModel):
+    merge_with_unit_id: str
+
+
+@router.post("/sessions/{session_id}/units/{unit_id}/merge")
+async def admin_merge_units(
+    session_id: uuid.UUID, unit_id: uuid.UUID,
+    body: AdminMergeRequest, db: DB, user: CurrentUser,
+):
+    """Admin: merge another unit into this one (no distance/authority restrictions)."""
+    from backend.api.units import (
+        get_principal_type, get_current_echelon, echelon_one_up,
+        make_unit_type, update_sidc_echelon,
+    )
+
+    result = await db.execute(
+        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
+    )
+    survivor = result.scalar_one_or_none()
+    if survivor is None:
+        raise HTTPException(status_code=404, detail="Surviving unit not found")
+
+    try:
+        merge_uid = uuid.UUID(body.merge_with_unit_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid merge_with_unit_id")
+
+    result2 = await db.execute(
+        select(Unit).where(Unit.id == merge_uid, Unit.session_id == session_id)
+    )
+    absorbed = result2.scalar_one_or_none()
+    if absorbed is None:
+        raise HTTPException(status_code=404, detail="Unit to merge not found")
+
+    # Validation
+    surv_principal = get_principal_type(survivor.unit_type)
+    abs_principal = get_principal_type(absorbed.unit_type)
+    if surv_principal != abs_principal:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot merge different principal types ({surv_principal} vs {abs_principal})",
+        )
+    if survivor.side != absorbed.side:
+        raise HTTPException(status_code=400, detail="Cannot merge units from different sides")
+    if str(survivor.id) == str(absorbed.id):
+        raise HTTPException(status_code=400, detail="Cannot merge a unit with itself")
+
+    # Weighted combine
+    total_str = survivor.strength + absorbed.strength
+    if total_str > 0:
+        w_surv = survivor.strength / total_str
+        w_abs = absorbed.strength / total_str
+    else:
+        w_surv = 0.5
+        w_abs = 0.5
+
+    survivor.strength = min(1.0, total_str)
+    survivor.ammo = min(1.0, survivor.ammo * w_surv + absorbed.ammo * w_abs)
+    survivor.morale = min(1.0, survivor.morale * w_surv + absorbed.morale * w_abs)
+    survivor.suppression = max(0.0, survivor.suppression * w_surv + absorbed.suppression * w_abs)
+
+    # Re-parent children
+    child_result = await db.execute(select(Unit).where(Unit.parent_unit_id == absorbed.id))
+    for child in child_result.scalars().all():
+        child.parent_unit_id = survivor.id
+
+    # Destroy absorbed unit
+    absorbed.is_destroyed = True
+    absorbed.strength = 0.0
+    absorbed.current_task = None
+
+    # Auto-name: strip /N suffixes
+    name = survivor.name
+    if "/" in name:
+        name = name.rsplit("/", 1)[0]
+    survivor.name = name
+
+    # Echelon update: merged unit moves up one level
+    current_echelon = get_current_echelon(survivor.sidc)
+    new_echelon = echelon_one_up(current_echelon)
+    principal = get_principal_type(survivor.unit_type)
+    survivor.unit_type = make_unit_type(principal, new_echelon)
+    survivor.sidc = update_sidc_echelon(survivor.sidc, new_echelon)
+
+    await db.flush()
+
+    from backend.services.visibility_service import _serialize_unit
+    return {
+        "survivor": _serialize_unit(survivor),
+        "absorbed_id": str(absorbed.id),
+    }
+
+
+# ══════════════════════════════════════════════════════
+# ── Admin Change Scenario for Session ────────────────
+# ══════════════════════════════════════════════════════
+
+class AdminChangeScenario(BaseModel):
+    scenario_id: str
+
+
+@router.post("/sessions/{session_id}/change-scenario")
+async def admin_change_scenario(
+    session_id: uuid.UUID, body: AdminChangeScenario, db: DB, user: CurrentUser,
+):
+    """Admin: change the scenario for a session, resetting units and grid."""
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        scenario_uid = uuid.UUID(body.scenario_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid scenario_id")
+
+    result2 = await db.execute(select(Scenario).where(Scenario.id == scenario_uid))
+    scenario = result2.scalar_one_or_none()
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    # Delete existing game-state data (units, grid, orders, etc.)
+    await db.execute(sa_delete(LocationReference).where(LocationReference.session_id == session_id))
+    await db.execute(sa_delete(Event).where(Event.session_id == session_id))
+    await db.execute(sa_delete(Report).where(Report.session_id == session_id))
+    await db.execute(sa_delete(Contact).where(Contact.session_id == session_id))
+    await db.execute(sa_delete(Order).where(Order.session_id == session_id))
+    await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.session_id == session_id))
+    await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
+    await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
+
+    # Update session
+    session.scenario_id = scenario_uid
+    session.tick = 0
+    session.status = SessionStatus.lobby
+    session.current_time = datetime.now(timezone.utc)
+    session.name = scenario.title
+    await db.flush()
+
+    # Re-initialize from new scenario
+    from backend.services.session_service import initialize_session_from_scenario
+    await initialize_session_from_scenario(session, scenario, db)
+
+    return {
+        "status": session.status.value,
+        "tick": 0,
+        "scenario_id": str(scenario_uid),
+        "name": session.name,
+        "message": "Scenario changed, units and grid reset",
+    }

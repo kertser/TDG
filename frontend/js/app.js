@@ -9,6 +9,7 @@
 
     // Initialize UI
     KUI.init();
+    KUI.addMapControls(map);
     KSessionUI.init();
     KScenarioBuilder.init(map);
     KAdmin.init();

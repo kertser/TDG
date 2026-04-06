@@ -242,8 +242,6 @@ const KSessionUI = (() => {
         // Hide toolbar and session controls
         const drawToolbar = document.getElementById('draw-toolbar');
         if (drawToolbar) drawToolbar.style.display = 'none';
-        const mapCtrl = document.getElementById('map-ctrl-topbar');
-        if (mapCtrl) mapCtrl.style.display = 'none';
 
         // Reset game clock
         KMap.setGameTime(0, null);
@@ -398,9 +396,8 @@ const KSessionUI = (() => {
             if (turnBtn) turnBtn.style.display = 'none';
         }
 
-        // Show map control buttons
-        const mapCtrl = document.getElementById('map-ctrl-topbar');
-        if (mapCtrl) mapCtrl.style.display = '';
+        // Show map control buttons are now always visible on the map
+        // (rendered as a Leaflet control in top-right corner)
 
         // Notify app to initialize map layers
         if (window.onSessionJoined) {
