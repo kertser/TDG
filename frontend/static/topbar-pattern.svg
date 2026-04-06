@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="40" viewBox="0 0 600 40" preserveAspectRatio="none">
+  <!-- Topographic contour lines (seamless horizontal tiling) -->
+  <path d="M0,35 C25,32 55,28 90,30 C130,33 175,25 220,23 C265,21 310,28 360,26
+           C400,24 440,30 490,28 C530,26 570,33 600,35"
+        fill="none" stroke="#4fc3f7" stroke-width="0.8" opacity="0.18"/>
+  <path d="M0,24 C35,20 75,17 120,19 C170,22 215,14 260,12 C310,10 350,18 400,16
+           C445,14 485,20 535,18 C565,17 590,23 600,24"
+        fill="none" stroke="#4fc3f7" stroke-width="0.6" opacity="0.12"/>
+  <path d="M0,14 C40,11 85,7 130,9 C175,12 220,5 270,7 C320,9 365,3 410,6
+           C455,9 500,4 545,8 C575,11 595,14 600,14"
+        fill="none" stroke="#4fc3f7" stroke-width="0.5" opacity="0.08"/>
+  <!-- Faint secondary contour (dashed) -->
+  <path d="M0,29 C50,26 100,23 150,25 C200,27 250,20 300,18 C350,16 400,23 450,21
+           C500,19 550,25 600,29"
+        fill="none" stroke="#4fc3f7" stroke-width="0.4" opacity="0.06"
+        stroke-dasharray="8,12"/>
+
+  <!-- Grid tick marks — top edge -->
+  <line x1="100" y1="0" x2="100" y2="5" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="200" y1="0" x2="200" y2="5" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="300" y1="0" x2="300" y2="5" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="400" y1="0" x2="400" y2="5" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="500" y1="0" x2="500" y2="5" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <!-- Minor top ticks -->
+  <line x1="50"  y1="0" x2="50"  y2="2.5" stroke="#4fc3f7" stroke-width="0.3" opacity="0.08"/>
+  <line x1="150" y1="0" x2="150" y2="2.5" stroke="#4fc3f7" stroke-width="0.3" opacity="0.08"/>
+  <line x1="250" y1="0" x2="250" y2="2.5" stroke="#4fc3f7" stroke-width="0.3" opacity="0.08"/>
+  <line x1="350" y1="0" x2="350" y2="2.5" stroke="#4fc3f7" stroke-width="0.3" opacity="0.08"/>
+  <line x1="450" y1="0" x2="450" y2="2.5" stroke="#4fc3f7" stroke-width="0.3" opacity="0.08"/>
+  <line x1="550" y1="0" x2="550" y2="2.5" stroke="#4fc3f7" stroke-width="0.3" opacity="0.08"/>
+
+  <!-- Grid tick marks — bottom edge -->
+  <line x1="100" y1="40" x2="100" y2="35" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="200" y1="40" x2="200" y2="35" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="300" y1="40" x2="300" y2="35" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="400" y1="40" x2="400" y2="35" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+  <line x1="500" y1="40" x2="500" y2="35" stroke="#4fc3f7" stroke-width="0.5" opacity="0.15"/>
+
+  <!-- Crosshair element (right third) -->
+  <g opacity="0.10">
+    <line x1="460" y1="20" x2="472" y2="20" stroke="#4fc3f7" stroke-width="0.6"/>
+    <line x1="466" y1="14" x2="466" y2="26" stroke="#4fc3f7" stroke-width="0.6"/>
+    <circle cx="466" cy="20" r="6" fill="none" stroke="#4fc3f7" stroke-width="0.4"/>
+    <circle cx="466" cy="20" r="10" fill="none" stroke="#4fc3f7" stroke-width="0.3"
+            stroke-dasharray="2,4"/>
+  </g>
+
+  <!-- Range arc element (left area) -->
+  <g opacity="0.06">
+    <path d="M120,38 A30,30 0 0,1 120,-2" fill="none" stroke="#4fc3f7" stroke-width="0.4"
+          stroke-dasharray="3,5"/>
+  </g>
+
+  <!-- Bearing line (diagonal, very faint) -->
+  <line x1="280" y1="38" x2="320" y2="2" stroke="#4fc3f7" stroke-width="0.3" opacity="0.05"
+        stroke-dasharray="4,8"/>
+
+  <!-- Tiny reference dots -->
+  <circle cx="100" cy="20" r="1" fill="#4fc3f7" opacity="0.08"/>
+  <circle cx="200" cy="20" r="1" fill="#4fc3f7" opacity="0.08"/>
+  <circle cx="300" cy="20" r="1" fill="#4fc3f7" opacity="0.08"/>
+  <circle cx="400" cy="20" r="1" fill="#4fc3f7" opacity="0.08"/>
+  <circle cx="500" cy="20" r="1" fill="#4fc3f7" opacity="0.08"/>
+</svg>
+

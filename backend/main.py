@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
-        version="0.1.0",
+        version=settings.APP_VERSION,
         lifespan=lifespan,
     )
 
@@ -83,6 +83,11 @@ def create_app() -> FastAPI:
     # WebSocket
     from backend.api import websocket as ws_router
     app.include_router(ws_router.router)
+
+    # ── Version endpoint ───────────────────────────────
+    @app.get("/api/version", tags=["meta"])
+    async def get_version():
+        return {"version": settings.APP_VERSION, "name": settings.APP_NAME}
 
     # ── Serve favicon.ico (browsers auto-request it) ──
     import pathlib

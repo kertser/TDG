@@ -973,7 +973,8 @@ if unit.ammo <= 0:
 | **Unit Context Menu** | `units.js` | Right-click context menu: select, rename, formation, move, stop, split, merge, assign. |
 | **Unit Status Icons** | `units.js` | Status derived from task/morale/suppression, shown in tooltip and CoC tree. |
 | **Zoom-scaled Markers** | `symbols.js`, `units.js` | milsymbol markers scale with zoom level. |
-| **Game Clock** | `map.js` | Top-right map overlay showing turn number and in-game date/time. |
+| **Game Clock** | `map.js`, `style.css` | Bottom-right map overlay showing turn number and in-game date/time. Covers Leaflet attribution with high z-index. |
+| **Map Control Panel** | `ui.js`, `style.css` | Two stacked 3×2 button grids in top-right Leaflet control: drawing tools (arrow, polyline, rect, marker, ellipse, measure) + map toggles (center, grid, units, overlays, contacts, labels). Show/hide toggle with collapsed pill-button state. |
 | **Measurement Tool** | `overlays.js`, `map.js` | Polyline measurement with cumulative distance display. |
 | **User Settings** | `session_ui.js` | Settings modal: toggle coords/snail/zoom display, tooltips, range circles, sounds. |
 | **User Dropdown** | `session_ui.js` | User menu with rename, settings, logout. |
@@ -1112,7 +1113,7 @@ KShU/
 │       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu
 │       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
 │       ├── admin.js              ← Admin panel (3200+ lines): dashboard, CoC, wizard, god view, users, types
-│       └── ui.js                 ← Map control overlay (2×2 buttons), sidebar tab switching
+│       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 └── scripts/
     ├── __init__.py
     ├── seed_scenario.py

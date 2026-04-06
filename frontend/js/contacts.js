@@ -81,18 +81,21 @@ const KContacts = (() => {
             contactsLayer.addLayer(circle);
             contactsLayer.addLayer(marker);
         });
+
+        // If currently hidden, ensure the layer stays off the map
+        if (!_visible && _map && _map.hasLayer(contactsLayer)) {
+            _map.removeLayer(contactsLayer);
+        }
     }
 
     /** Toggle contacts layer visibility. Returns new state. */
     function toggle() {
+        if (!_map || !contactsLayer) return _visible;
         _visible = !_visible;
-        if (_map || (contactsLayer && contactsLayer._map)) {
-            const m = _map || contactsLayer._map;
-            if (_visible) {
-                if (contactsLayer && !m.hasLayer(contactsLayer)) m.addLayer(contactsLayer);
-            } else {
-                if (contactsLayer && m.hasLayer(contactsLayer)) m.removeLayer(contactsLayer);
-            }
+        if (_visible) {
+            if (!_map.hasLayer(contactsLayer)) _map.addLayer(contactsLayer);
+        } else {
+            if (_map.hasLayer(contactsLayer)) _map.removeLayer(contactsLayer);
         }
         return _visible;
     }
@@ -100,6 +103,11 @@ const KContacts = (() => {
     /** Clear all contacts from map (used on logout). */
     function clearAll() {
         if (contactsLayer) contactsLayer.clearLayers();
+        _visible = true;
+        // Re-add layer to map if it was removed
+        if (_map && contactsLayer && !_map.hasLayer(contactsLayer)) {
+            _map.addLayer(contactsLayer);
+        }
     }
 
     return { init, load, render, clearAll, toggle };

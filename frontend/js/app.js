@@ -19,6 +19,12 @@
     KContacts.init(map);
     KOverlays.init(map);
 
+    // Fetch and display app version
+    fetch('/api/version').then(r => r.json()).then(data => {
+        const vEl = document.getElementById('app-version');
+        if (vEl && data.version) vEl.textContent = `v${data.version}`;
+    }).catch(() => {});
+
     // Callback when user joins a session
     window.onSessionJoined = async (sessionId, token) => {
         console.log('Joined session:', sessionId);

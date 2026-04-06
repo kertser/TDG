@@ -30,9 +30,6 @@ const KUI = (() => {
     function addMapControls(map) {
         if (_mapCtrlControl) return;
 
-        // Hide old draw toolbar in topbar (replaced by map control group)
-        const oldDrawToolbar = document.getElementById('draw-toolbar');
-        if (oldDrawToolbar) oldDrawToolbar.style.display = 'none';
 
         const MapCtrl = L.Control.extend({
             options: { position: 'topright' },
