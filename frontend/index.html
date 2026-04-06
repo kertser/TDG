@@ -422,6 +422,30 @@
         </div>
     </div>
 
+    <!-- ── CoC User Assignment Modal (for commanders) ── -->
+    <div id="coc-user-assign-modal" class="admin-modal-overlay" style="display:none;">
+        <div class="admin-modal">
+            <div class="admin-modal-header">
+                <span>👤 Assign Commander to Unit</span>
+                <button class="admin-modal-close" id="coc-user-assign-close" title="Cancel">✕</button>
+            </div>
+            <div class="admin-modal-body">
+                <div id="coc-user-assign-unit-label" style="font-size:13px;color:#4fc3f7;font-weight:700;margin-bottom:10px;"></div>
+                <div class="admin-modal-row">
+                    <label>Assign to Participant</label>
+                    <select id="coc-user-assign-select" class="admin-modal-select" size="6" style="height:auto;min-height:100px;">
+                    </select>
+                </div>
+                <div id="coc-user-assign-status" class="admin-info" style="margin-top:6px;"></div>
+            </div>
+            <div class="admin-modal-footer">
+                <button id="coc-user-assign-confirm" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;flex:1;">✓ Assign</button>
+                <button id="coc-user-assign-unassign" class="admin-btn admin-btn-danger" style="flex:1;">✕ Unassign</button>
+                <button id="coc-user-assign-cancel" class="admin-btn" style="flex:1;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ── Overlay Context Menu ─────────────────────── -->
     <div id="overlay-ctx-menu" class="ctx-menu" style="display:none;">
         <div class="ctx-menu-header" id="ctx-menu-type-label"></div>

@@ -16,8 +16,11 @@ from sqlalchemy import select, func, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from geoalchemy2 import Geography
 
+from sqlalchemy.orm import selectinload
+
 from backend.models.unit import Unit
 from backend.models.contact import Contact
+from backend.models.session import SessionParticipant
 
 
 def _serialize_unit(unit: Unit) -> dict:
@@ -204,4 +207,131 @@ async def get_visible_contacts(
             )
         )
     return [_serialize_contact(c) for c in result.scalars().all()]
+
+
+async def _get_user_map(session_id: uuid.UUID, db: AsyncSession) -> dict[str, str]:
+    """Return a mapping of user_id (str) → display_name for session participants."""
+    result = await db.execute(
+        select(SessionParticipant)
+        .options(selectinload(SessionParticipant.user))
+        .where(SessionParticipant.session_id == session_id)
+    )
+    participants = result.scalars().all()
+    return {
+        str(p.user_id): p.user.display_name
+        for p in participants
+        if p.user
+    }
+
+
+async def enrich_units_with_command_info(
+    units_data: list[dict],
+    session_id: uuid.UUID,
+    db: AsyncSession,
+    requesting_side: str | None = None,
+) -> list[dict]:
+    """
+    Add commanding_user_name and assigned_user_names to each unit dict.
+
+    For each unit, the commanding user is determined by walking UP the parent
+    chain (including self) and finding the first unit with an assigned user.
+    This mirrors real military Chain of Command.
+    """
+    user_map = await _get_user_map(session_id, db)
+
+    # Build unit lookup by ID for parent-chain walking
+    unit_lookup = {u["id"]: u for u in units_data}
+
+    for u in units_data:
+        # For enemy units behind fog-of-war, don't expose command structure
+        if (
+            requesting_side
+            and requesting_side not in ("admin", "observer")
+            and u.get("side") != requesting_side
+        ):
+            u["assigned_user_names"] = []
+            u["commanding_user_name"] = None
+            continue
+
+        # Resolve assigned user IDs → display names
+        names = []
+        if u.get("assigned_user_ids"):
+            for uid in u["assigned_user_ids"]:
+                name = user_map.get(uid)
+                if name:
+                    names.append(name)
+        u["assigned_user_names"] = names
+
+        # Walk up parent chain to find commanding user (first assigned user)
+        cmd_name = None
+        current = u
+        visited = set()
+        while current:
+            cid = current["id"]
+            if cid in visited:
+                break
+            visited.add(cid)
+
+            if current.get("assigned_user_ids"):
+                for uid in current["assigned_user_ids"]:
+                    name = user_map.get(uid)
+                    if name:
+                        cmd_name = name
+                        break
+                if cmd_name:
+                    break
+
+            parent_id = current.get("parent_unit_id")
+            if parent_id and parent_id in unit_lookup:
+                current = unit_lookup[parent_id]
+            else:
+                break
+        u["commanding_user_name"] = cmd_name
+
+    return units_data
+
+
+async def check_command_authority(
+    user_id: str,
+    unit: Unit,
+    session_id: uuid.UUID,
+    db: AsyncSession,
+) -> bool:
+    """
+    Check if a user has command authority over a unit via the hierarchy.
+
+    A user has authority if they are assigned to the unit itself
+    OR to any proper ancestor in the parent chain.
+    """
+    # Check self first
+    if unit.assigned_user_ids and user_id in unit.assigned_user_ids:
+        return True
+
+    # Load lightweight unit data for parent-chain walk
+    result = await db.execute(
+        select(Unit.id, Unit.parent_unit_id, Unit.assigned_user_ids).where(
+            Unit.session_id == session_id, Unit.is_destroyed == False
+        )
+    )
+    rows = result.all()
+    unit_info = {
+        str(r[0]): (str(r[1]) if r[1] else None, r[2])
+        for r in rows
+    }
+
+    # Walk up parent chain
+    current_parent_id = str(unit.parent_unit_id) if unit.parent_unit_id else None
+    visited = set()
+    while current_parent_id and current_parent_id not in visited:
+        visited.add(current_parent_id)
+        info = unit_info.get(current_parent_id)
+        if info is None:
+            break
+        parent_parent_id, assigned_ids = info
+        if assigned_ids and user_id in assigned_ids:
+            return True
+        current_parent_id = parent_parent_id
+
+    return False
+
 

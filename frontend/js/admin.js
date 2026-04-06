@@ -122,6 +122,7 @@ const KAdmin = (() => {
         // ── Initialize modals ─────────────────────────
         _initAssignModal();
         _initCocPickerModal();
+        _initCocUserAssignModal();
     }
 
     function _bind(id, evt, fn) {
@@ -1041,6 +1042,26 @@ const KAdmin = (() => {
     // ── Chain of Command – Public Tab ────────────────
     // ══════════════════════════════════════════════════
 
+    /** Cached participants for the current session (for CoC user picker). */
+    let _cachedParticipants = [];
+
+    async function _loadParticipantsForCoC(sessionId) {
+        const token = _getToken();
+        if (!token || !sessionId) return [];
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}/participants`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok) {
+                _cachedParticipants = await resp.json();
+                return _cachedParticipants;
+            }
+        } catch (err) {
+            console.warn('Load participants for CoC:', err);
+        }
+        return [];
+    }
+
     async function loadPublicCoC() {
         const token = _getToken(), sid = _getUserSessionId();
         if (!token || !sid) {
@@ -1050,18 +1071,32 @@ const KAdmin = (() => {
         }
 
         try {
-            const resp = await fetch(`/api/admin/sessions/${sid}/unit-hierarchy`, {
+            // Use the public hierarchy endpoint (works for any participant)
+            const resp = await fetch(`/api/sessions/${sid}/units/hierarchy`, {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             if (!resp.ok) {
-                const el = document.getElementById('coc-tree-public');
-                if (el) el.innerHTML = '<div class="admin-info">Could not load hierarchy</div>';
+                // Fallback to admin endpoint if available
+                const adminResp = await fetch(`/api/admin/sessions/${sid}/unit-hierarchy`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!adminResp.ok) {
+                    const el = document.getElementById('coc-tree-public');
+                    if (el) el.innerHTML = '<div class="admin-info">Could not load hierarchy</div>';
+                    return;
+                }
+                const allUnits = await adminResp.json();
+                const visibleUnits = _adminUnlocked ? allUnits : allUnits.filter(u => u.side === 'blue');
+                _renderCoCTree(visibleUnits, 'coc-tree-public', true, allUnits);
                 return;
             }
-            const allUnits = await resp.json();
-            // Public view: Blue force only (Red is admin-only)
-            const visibleUnits = _adminUnlocked ? allUnits : allUnits.filter(u => u.side === 'blue');
-            _renderCoCTree(visibleUnits, 'coc-tree-public', _adminUnlocked, allUnits);
+            const units = await resp.json();
+
+            // Load participants for the user-assign modal
+            await _loadParticipantsForCoC(sid);
+
+            // Editable if user has any assigned units (commander) or is admin
+            _renderCoCTree(units, 'coc-tree-public', true, units);
         } catch (err) {
             const el = document.getElementById('coc-tree-public');
             if (el) el.innerHTML = `<div class="admin-info admin-error">✗ ${err.message}</div>`;
@@ -1071,6 +1106,36 @@ const KAdmin = (() => {
     // ══════════════════════════════════════════════════
     // ── CoC Tree Rendering (shared) ─────────────────
     // ══════════════════════════════════════════════════
+
+    /**
+     * Check if the current user has command authority over a unit.
+     * User can assign a unit if they are directly assigned to it
+     * or to a proper ancestor in the parent chain.
+     */
+    function _userCanAssign(unit, allUnitMap) {
+        const userId = KSessionUI.getUserId();
+        if (!userId) return false;
+
+        // Case 1: User is directly assigned to this unit
+        if (unit.assigned_user_ids && unit.assigned_user_ids.includes(userId)) {
+            return true;
+        }
+
+        // Case 2: User is assigned to a proper ancestor
+        let parentId = unit.parent_unit_id;
+        const visited = new Set();
+        while (parentId && allUnitMap[parentId]) {
+            if (visited.has(parentId)) break;
+            visited.add(parentId);
+
+            const parent = allUnitMap[parentId];
+            if (parent.assigned_user_ids && parent.assigned_user_ids.includes(userId)) {
+                return true;
+            }
+            parentId = parent.parent_unit_id;
+        }
+        return false;
+    }
 
     function _renderCoCTree(units, targetElId, editable, allUnits) {
         const el = document.getElementById(targetElId);
@@ -1125,8 +1190,8 @@ const KAdmin = (() => {
         html += '</div>';
         el.innerHTML = html;
 
+        // Bind admin assign/unassign (hierarchy structure) buttons
         if (editable) {
-            // Bind assign/unassign buttons
             el.querySelectorAll('.coc-assign-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -1143,32 +1208,16 @@ const KAdmin = (() => {
                 });
             });
         }
-    }
 
-    /**
-     * Find the nearest commanding user for a unit by walking up the parent chain.
-     * Returns the display name of the user assigned to the nearest ancestor (or self).
-     */
-    function _findCommandingUser(unit, allUnitMap) {
-        let current = unit;
-        const visited = new Set();
-        while (current) {
-            if (visited.has(current.id)) break; // prevent infinite loop
-            visited.add(current.id);
-            if (current.commanding_user_name) {
-                return current.commanding_user_name;
-            }
-            // Also check assigned_user_ids for a direct assignment label
-            if (current.assigned_user_names && current.assigned_user_names.length > 0) {
-                return current.assigned_user_names[0];
-            }
-            if (current.parent_unit_id && allUnitMap[current.parent_unit_id]) {
-                current = allUnitMap[current.parent_unit_id];
-            } else {
-                break;
-            }
-        }
-        return null;
+        // Bind user-assignment buttons (assign commander to unit)
+        el.querySelectorAll('.coc-user-assign-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const unitId = btn.dataset.unitId;
+                const unit = allUnitMap[unitId];
+                if (unit) _showUserAssignModal(unit);
+            });
+        });
     }
 
     function _renderCoCNode(unit, depth, allUnits, editable, allUnitMap) {
@@ -1179,30 +1228,33 @@ const KAdmin = (() => {
         const hasChildren = unit.children && unit.children.length > 0;
         const expandIcon = hasChildren ? '▼' : '·';
 
-        // Resolve commanding officer (lowest rank parent in the chain)
-        let cmdInfo = '';
-        if (unit.parent_unit_id && allUnitMap) {
-            const parent = allUnitMap[unit.parent_unit_id];
-            if (parent) {
-                cmdInfo = `<span class="coc-cmd" title="Commanded by: ${parent.name}" style="font-size:9px;color:#90caf9;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:middle;">⬆ ${parent.name}</span>`;
-            }
-        }
-
         // Find assigned users for this unit
         let userBadge = '';
         if (unit.assigned_user_names && unit.assigned_user_names.length > 0) {
             const names = unit.assigned_user_names.join(', ');
-            userBadge = `<span class="coc-user-badge" title="Assigned to: ${names}">👤 ${names}</span>`;
+            userBadge = `<span class="coc-user-badge" title="Assigned to: ${names}">⭐ ${names}</span>`;
         }
 
-        // Find the commanding user (lowest-rank user up the chain)
-        let cmdUserTitle = '';
-        const cmdUser = _findCommandingUser(unit, allUnitMap);
-        if (cmdUser) {
-            cmdUserTitle = `\nCommanding user: ${cmdUser}`;
+        // Commanding officer info (from hierarchy)
+        let cmdInfo = '';
+        if (unit.commanding_user_name) {
+            const isSelfCO = unit.assigned_user_names
+                && unit.assigned_user_names.includes(unit.commanding_user_name);
+            if (!isSelfCO) {
+                // CO is inherited from parent chain
+                cmdInfo = `<span class="coc-cmd" title="CO: ${unit.commanding_user_name}">⬆ ${unit.commanding_user_name}</span>`;
+            }
         }
 
-        let html = `<div class="coc-node" style="margin-left:${indent}px;" title="${unit.unit_type} — Str: ${strPct}${unit.parent_unit_id && allUnitMap && allUnitMap[unit.parent_unit_id] ? '\nCommander unit: ' + allUnitMap[unit.parent_unit_id].name : ''}${cmdUserTitle}">
+        // Build tooltip with rich info
+        let tooltipParts = [unit.unit_type, `Str: ${strPct}`];
+        if (unit.commanding_user_name) tooltipParts.push(`CO: ${unit.commanding_user_name}`);
+        if (unit.parent_unit_id && allUnitMap && allUnitMap[unit.parent_unit_id]) {
+            tooltipParts.push(`Parent: ${allUnitMap[unit.parent_unit_id].name}`);
+        }
+        const tooltip = tooltipParts.join(' — ');
+
+        let html = `<div class="coc-node" style="margin-left:${indent}px;" title="${tooltip}">
             <span class="coc-expand">${expandIcon}</span>
             <span class="coc-connector" style="background:${sideColor};"></span>
             <span class="coc-name" style="color:#e0e0e0;">${unit.name}</span>
@@ -1211,7 +1263,14 @@ const KAdmin = (() => {
             <span class="coc-type" title="${unit.unit_type}">${unit.unit_type}</span>
             <span class="coc-str" style="color:${strClr};" title="Strength">${strPct}</span>`;
 
-        if (editable) {
+        // User-assign button: shown if current user can manage this unit
+        const canUserAssign = _adminUnlocked || _userCanAssign(unit, allUnitMap);
+        if (canUserAssign) {
+            html += `<button class="coc-user-assign-btn coc-assign-btn" data-unit-id="${unit.id}" title="Assign a commander to this unit" style="color:#81c784;">👤</button>`;
+        }
+
+        // Admin-only: parent hierarchy buttons
+        if (editable && _adminUnlocked) {
             html += `<button class="coc-assign-btn" data-unit-id="${unit.id}" title="Assign to a parent commander">⬆</button>`;
             if (unit.parent_unit_id) {
                 html += `<button class="coc-unassign-btn" data-unit-id="${unit.id}" title="Remove from parent chain of command">✕</button>`;
@@ -1302,6 +1361,159 @@ const KAdmin = (() => {
         const modal = document.getElementById('admin-coc-picker-modal');
         if (modal) modal.style.display = 'none';
         _cocPickerPendingUnitId = null;
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── CoC User Assignment Modal (for commanders) ───
+    // ══════════════════════════════════════════════════
+
+    let _userAssignPendingUnit = null;
+
+    function _showUserAssignModal(unit) {
+        _userAssignPendingUnit = unit;
+
+        const label = document.getElementById('coc-user-assign-unit-label');
+        if (label) label.textContent = `Assign commander for "${unit.name}" (${unit.unit_type})`;
+
+        const statusEl = document.getElementById('coc-user-assign-status');
+        if (statusEl) statusEl.textContent = '';
+
+        // Populate participant select — filter to same side
+        const sel = document.getElementById('coc-user-assign-select');
+        if (sel) {
+            sel.innerHTML = '';
+            const sameSideParticipants = _cachedParticipants.filter(
+                p => p.side === unit.side || p.side === 'admin' || p.side === 'observer'
+            );
+            if (sameSideParticipants.length === 0) {
+                const opt = document.createElement('option');
+                opt.textContent = '(no participants available)';
+                opt.disabled = true;
+                sel.appendChild(opt);
+            } else {
+                sameSideParticipants.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.user_id;
+                    const sideIcon = p.side === 'blue' ? '🔵' : p.side === 'red' ? '🔴' : '👁';
+                    const currentMark = (unit.assigned_user_ids && unit.assigned_user_ids.includes(p.user_id))
+                        ? ' ⭐' : '';
+                    opt.textContent = `${sideIcon} ${p.display_name} (${p.role})${currentMark}`;
+                    sel.appendChild(opt);
+                });
+                // Pre-select the currently assigned user if any
+                if (unit.assigned_user_ids && unit.assigned_user_ids.length > 0) {
+                    sel.value = unit.assigned_user_ids[0];
+                }
+            }
+        }
+
+        // Show modal
+        const modal = document.getElementById('coc-user-assign-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function _closeCocUserAssignModal() {
+        const modal = document.getElementById('coc-user-assign-modal');
+        if (modal) modal.style.display = 'none';
+        _userAssignPendingUnit = null;
+    }
+
+    function _initCocUserAssignModal() {
+        _bind('coc-user-assign-confirm', 'click', _doCocUserAssign);
+        _bind('coc-user-assign-unassign', 'click', _doCocUserUnassign);
+        _bind('coc-user-assign-cancel', 'click', _closeCocUserAssignModal);
+        _bind('coc-user-assign-close', 'click', _closeCocUserAssignModal);
+
+        // Close on overlay click
+        const overlay = document.getElementById('coc-user-assign-modal');
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) _closeCocUserAssignModal();
+            });
+        }
+
+        // Double-click to confirm
+        const sel = document.getElementById('coc-user-assign-select');
+        if (sel) {
+            sel.addEventListener('dblclick', () => {
+                if (sel.value && _userAssignPendingUnit) {
+                    _doCocUserAssign();
+                }
+            });
+        }
+    }
+
+    async function _doCocUserAssign() {
+        if (!_userAssignPendingUnit) return;
+        const sel = document.getElementById('coc-user-assign-select');
+        const statusEl = document.getElementById('coc-user-assign-status');
+        if (!sel || !sel.value) {
+            if (statusEl) { statusEl.textContent = 'Select a participant'; statusEl.className = 'admin-info admin-error'; }
+            return;
+        }
+
+        const token = _getToken();
+        const sid = _getUserSessionId() || _getAdminSessionId();
+        if (!token || !sid) return;
+
+        const unitId = _userAssignPendingUnit.id;
+        const userId = sel.value;
+
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/units/${unitId}/assign`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ assigned_user_ids: [userId] }),
+            });
+            if (resp.ok) {
+                const participant = _cachedParticipants.find(p => p.user_id === userId);
+                const name = participant ? participant.display_name : userId.substring(0, 8);
+                if (statusEl) { statusEl.textContent = `✓ ${name} assigned as commander`; statusEl.className = 'admin-info admin-success'; }
+                // Refresh CoC trees after a brief delay
+                setTimeout(() => {
+                    _closeCocUserAssignModal();
+                    loadPublicCoC();
+                    if (_adminUnlocked) _loadChainOfCommand();
+                }, 600);
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Assignment failed'}`; statusEl.className = 'admin-info admin-error'; }
+            }
+        } catch (err) {
+            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
+        }
+    }
+
+    async function _doCocUserUnassign() {
+        if (!_userAssignPendingUnit) return;
+        const statusEl = document.getElementById('coc-user-assign-status');
+
+        const token = _getToken();
+        const sid = _getUserSessionId() || _getAdminSessionId();
+        if (!token || !sid) return;
+
+        const unitId = _userAssignPendingUnit.id;
+
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/units/${unitId}/assign`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ assigned_user_ids: [] }),
+            });
+            if (resp.ok) {
+                if (statusEl) { statusEl.textContent = '✓ Unit unassigned'; statusEl.className = 'admin-info admin-success'; }
+                setTimeout(() => {
+                    _closeCocUserAssignModal();
+                    loadPublicCoC();
+                    if (_adminUnlocked) _loadChainOfCommand();
+                }, 600);
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Failed'}`; statusEl.className = 'admin-info admin-error'; }
+            }
+        } catch (err) {
+            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
+        }
     }
 
     async function _setUnitParent(unitId, parentId) {

@@ -1,4 +1,4 @@
-"""Units API – fog-of-war filtered unit and contact retrieval, unit assignment."""
+"""Units API – fog-of-war filtered unit and contact retrieval, unit assignment, hierarchy."""
 
 from __future__ import annotations
 
@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
 from backend.api.deps import get_session_participant
-from backend.services.visibility_service import get_visible_units, get_visible_contacts
+from backend.services.visibility_service import (
+    get_visible_units,
+    get_visible_contacts,
+    enrich_units_with_command_info,
+    check_command_authority,
+    _serialize_unit,
+)
 from backend.models.unit import Unit
 
 router = APIRouter()
@@ -26,9 +32,50 @@ async def get_units(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Return units visible to the requester's side (fog-of-war filtered)."""
+    """Return units visible to the requester's side (fog-of-war filtered),
+    enriched with commanding officer info."""
     side = participant.side.value
-    return await get_visible_units(session_id, side, db)
+    units = await get_visible_units(session_id, side, db)
+    # Enrich with commanding user names for popups
+    units = await enrich_units_with_command_info(units, session_id, db, requesting_side=side)
+    return units
+
+
+@router.get("/{session_id}/units/hierarchy")
+async def get_unit_hierarchy(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """Return unit hierarchy with command info for the user's side.
+    Admin/observer sees all sides."""
+    side = participant.side.value
+
+    if side in ("admin", "observer"):
+        # See all units
+        result = await db.execute(
+            select(Unit).where(
+                Unit.session_id == session_id,
+                Unit.is_destroyed == False,
+            )
+        )
+    else:
+        # Own-side only
+        result = await db.execute(
+            select(Unit).where(
+                Unit.session_id == session_id,
+                Unit.side == side,
+                Unit.is_destroyed == False,
+            )
+        )
+    units = result.scalars().all()
+    serialized = [_serialize_unit(u) for u in units]
+
+    # Enrich with user names and commanding officer
+    enriched = await enrich_units_with_command_info(
+        serialized, session_id, db, requesting_side=side,
+    )
+    return enriched
 
 
 @router.get("/{session_id}/units/{unit_id}")
@@ -57,10 +104,11 @@ async def assign_unit(
 ):
     """
     Assign users to a unit.
-    
+
     Permission rules:
     - Admin or observer (referee) can assign any unit.
     - A user who already owns the unit (in assigned_user_ids) can modify assignment.
+    - A user who commands an ancestor of the unit (chain of command) can assign it.
     - If the unit is unassigned, a same-side participant can claim it.
     - Otherwise, a user who does not own the unit cannot assign it.
     """
@@ -85,13 +133,16 @@ async def assign_unit(
 
         current_owners = unit.assigned_user_ids or []
 
-        # If the unit already has owners, only an existing owner can modify
-        if len(current_owners) > 0 and user_id not in current_owners:
-            raise HTTPException(
-                status_code=403,
-                detail="Only the unit owner, admin, or referee can assign this unit"
-            )
-        # If the unit has no owners, same-side user can claim it (first assignment)
+        # Check if user has command authority via hierarchy (self or ancestor)
+        has_authority = await check_command_authority(user_id, unit, session_id, db)
+
+        if not has_authority:
+            # Fall back to original rules: owner or unassigned
+            if len(current_owners) > 0 and user_id not in current_owners:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only commanders, the unit owner, admin, or referee can assign this unit",
+                )
 
     unit.assigned_user_ids = body.assigned_user_ids if body.assigned_user_ids else None
     await db.flush()

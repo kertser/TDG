@@ -363,8 +363,26 @@ const KUnits = (() => {
         html += `<span style="font-size:10px;color:#64b5f6">👁 ${_fmtDist(detR)}</span>`;
         html += ` <span style="font-size:10px;color:#ff9800">🎯 ${_fmtDist(fireR)}</span><br>`;
 
-        // Assignment info
-        if (u.assigned_user_ids && u.assigned_user_ids.length > 0) {
+        // ── Chain of Command info ────────────────────────
+        // Commanding officer (nearest assigned user up the parent chain)
+        if (u.commanding_user_name) {
+            const isSelfCO = u.assigned_user_names && u.assigned_user_names.length > 0
+                && u.assigned_user_names.includes(u.commanding_user_name);
+            if (isSelfCO) {
+                // Unit's own assigned user is the CO
+                html += `<span style="font-size:10px;color:#81c784;">⭐ CO: ${u.commanding_user_name}</span><br>`;
+            } else {
+                // CO is from an ancestor in the hierarchy
+                html += `<span style="font-size:10px;color:#90caf9;">⬆ CO: ${u.commanding_user_name}</span><br>`;
+            }
+        }
+
+        // Direct assignment info
+        if (u.assigned_user_names && u.assigned_user_names.length > 0) {
+            const names = u.assigned_user_names.join(', ');
+            const meTag = isAssignedToMe ? ' (you)' : '';
+            html += `<span style="font-size:10px;color:#81c784;">👤 Assigned: ${names}${meTag}</span><br>`;
+        } else if (u.assigned_user_ids && u.assigned_user_ids.length > 0) {
             const tag = isAssignedToMe ? ' (you)' : '';
             html += `<span style="font-size:10px;color:#81c784;">Assigned ✓${tag}</span><br>`;
         } else {

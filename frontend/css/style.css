@@ -934,6 +934,16 @@ button:hover { background: #1a5276; }
     color: #ef9a9a;
     border-color: #e53935;
 }
+.coc-user-assign-btn {
+    font-size: 11px;
+    width: 22px;
+    height: 18px;
+}
+.coc-user-assign-btn:hover {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81c784;
+    border-color: #4caf50;
+}
 
 /* ── Scenario Builder Context Menu (reuses .ctx-menu) ── */
 .sb-ctx-menu {
@@ -949,7 +959,7 @@ button:hover { background: #1a5276; }
     position: fixed;
     top: 50px;
     right: 10px;
-    width: 520px;
+    width: 700px;
     max-height: calc(100vh - 60px);
     z-index: 9000;
     background: #16213e;
@@ -960,8 +970,8 @@ button:hover { background: #1a5276; }
     flex-direction: column;
     overflow: hidden;
     resize: both;
-    min-width: 400px;
-    min-height: 300px;
+    min-width: 420px;
+    min-height: 500px;
 }
 #admin-window-header {
     display: flex;

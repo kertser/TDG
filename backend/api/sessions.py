@@ -203,6 +203,37 @@ async def join_session(session_id: uuid.UUID, body: SessionJoin, db: DB, user: C
     )
 
 
+@router.get("/{session_id}/participants")
+async def list_session_participants(session_id: uuid.UUID, db: DB, user: CurrentUser):
+    """List all participants in a session. Requires the caller to be a participant."""
+    # Verify user is a participant
+    me = await db.execute(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.user_id == user.id,
+        )
+    )
+    if me.scalar_one_or_none() is None:
+        raise HTTPException(status_code=403, detail="Not a participant in this session")
+
+    result = await db.execute(
+        select(SessionParticipant)
+        .options(selectinload(SessionParticipant.user))
+        .where(SessionParticipant.session_id == session_id)
+    )
+    participants = result.scalars().all()
+    return [
+        {
+            "id": str(p.id),
+            "user_id": str(p.user_id),
+            "display_name": p.user.display_name if p.user else "?",
+            "side": p.side.value,
+            "role": p.role,
+        }
+        for p in participants
+    ]
+
+
 @router.post("/{session_id}/start")
 async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     result = await db.execute(
