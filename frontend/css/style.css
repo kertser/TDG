@@ -881,6 +881,12 @@ button:hover { background: #1a5276; }
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+    cursor: pointer;
+    transition: color 0.12s;
+}
+.coc-name:hover {
+    color: #4fc3f7 !important;
+    text-decoration: underline;
 }
 .coc-type {
     font-size: 9px;
@@ -1169,16 +1175,142 @@ button:hover { background: #1a5276; }
 
 /* ── Unit Context Menu (reuses .ctx-menu) ──────── */
 #unit-ctx-menu {
-    min-width: 140px;
-}
-#unit-ctx-menu .ctx-menu-header {
-    padding: 6px 10px;
-    font-size: 12px;
-    text-transform: none;
-    letter-spacing: 0;
+    min-width: 220px;
+    max-width: 280px;
+    padding: 0;
+    overflow: hidden;
 }
 #unit-ctx-menu .ctx-item {
-    padding: 6px 10px;
+    padding: 7px 12px;
+    font-size: 12px;
+}
+
+/* ── Elegant Unit Info Card (inside context menu) ── */
+.unit-info-card {
+    padding: 0;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+}
+.unit-info-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px 6px;
+}
+.unit-info-side-bar {
+    width: 4px;
+    min-height: 36px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.unit-info-title {
+    flex: 1;
+    min-width: 0;
+}
+.unit-info-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+.unit-info-type {
+    font-size: 10px;
+    color: #777;
+    margin-top: 1px;
+}
+.unit-info-status {
+    flex-shrink: 0;
+}
+.unit-status-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+.unit-info-stats {
+    padding: 4px 12px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.unit-stat-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.unit-stat-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    width: 32px;
+    flex-shrink: 0;
+}
+.unit-stat-bar {
+    flex: 1;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.unit-stat-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+.unit-stat-value {
+    font-size: 10px;
+    font-weight: 700;
+    width: 30px;
+    text-align: right;
+    flex-shrink: 0;
+}
+.unit-info-ranges {
+    padding: 3px 12px 5px;
+    font-size: 10px;
+    color: #aaa;
+    display: flex;
+    gap: 10px;
+}
+.unit-info-command {
+    padding: 4px 12px 8px;
+    font-size: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.unit-info-command-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Dashboard sortable headers ──────────────────── */
+.admin-dashboard-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s;
+}
+.admin-dashboard-table th.sortable:hover {
+    color: #4fc3f7;
+}
+.admin-dashboard-table th.sort-active {
+    color: #4fc3f7;
+}
+.admin-dashboard-table th .sort-arrow {
+    font-size: 8px;
+    margin-left: 2px;
+    opacity: 0.6;
 }
 
 /* ── Unit Status Badge (on tooltip) ──────────── */

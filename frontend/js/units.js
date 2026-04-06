@@ -29,6 +29,7 @@ const KUnits = (() => {
     let _visible = true;
     let _hoveredUnitId = null;     // currently hovered unit ID
     let _lastZoomBucket = null;    // track zoom bucket for marker size changes
+    let _adminDragEnabled = false; // admin drag-and-drop mode
 
     // ── Rubber-band selection state ──────────────────
     let _selectRect = null;
@@ -309,10 +310,9 @@ const KUnits = (() => {
                 zoomScale: zoomScale,
             });
 
-            const marker = L.marker([u.lat, u.lon], { icon });
-
-            // Detail popup (right-click)
-            marker.bindPopup(_buildPopupHtml(u));
+            // Admin drag-and-drop: make markers draggable when admin is unlocked
+            const isDraggable = _adminDragEnabled;
+            const marker = L.marker([u.lat, u.lon], { icon, draggable: isDraggable });
 
             // Tooltip with unit name + range summary + size + status
             const detR = u.detection_range_m || 2000;
@@ -345,7 +345,7 @@ const KUnits = (() => {
                 }
             });
 
-            // LEFT-CLICK: select (replace, or shift-add)
+            // LEFT-CLICK: select/deselect only (no popup)
             marker.on('click', (e) => {
                 L.DomEvent.stopPropagation(e);
                 _closeUnitContextMenu();
@@ -353,12 +353,78 @@ const KUnits = (() => {
                 _selectUnit(u.id, shiftKey);
             });
 
-            // RIGHT-CLICK: custom context menu
+            // RIGHT-CLICK: context menu with info, rename, etc.
             marker.on('contextmenu', (e) => {
                 L.DomEvent.stopPropagation(e);
                 L.DomEvent.preventDefault(e);
                 _showUnitContextMenu(u, e.originalEvent);
             });
+
+            // DRAG: admin drag-and-drop to reposition (supports group move)
+            if (isDraggable) {
+                marker.on('dragstart', () => {
+                    // If this unit is part of a multi-selection, enable group drag
+                    if (selectedUnitIds.has(u.id) && selectedUnitIds.size > 1) {
+                        marker._groupDrag = true;
+                        marker._groupDragStart = marker.getLatLng();
+                        marker._groupPeers = [];
+                        selectedUnitIds.forEach(uid => {
+                            if (uid !== u.id && unitMarkers[uid]) {
+                                marker._groupPeers.push({
+                                    id: uid,
+                                    marker: unitMarkers[uid],
+                                    startPos: unitMarkers[uid].getLatLng(),
+                                });
+                            }
+                        });
+                    } else {
+                        marker._groupDrag = false;
+                    }
+                });
+
+                marker.on('drag', () => {
+                    // Move all selected peers in real-time
+                    if (!marker._groupDrag || !marker._groupPeers) return;
+                    const newPos = marker.getLatLng();
+                    const dLat = newPos.lat - marker._groupDragStart.lat;
+                    const dLng = newPos.lng - marker._groupDragStart.lng;
+                    marker._groupPeers.forEach(p => {
+                        p.marker.setLatLng([
+                            p.startPos.lat + dLat,
+                            p.startPos.lng + dLng,
+                        ]);
+                    });
+                });
+
+                marker.on('dragend', () => {
+                    const pos = marker.getLatLng();
+                    _saveUnitPosition(u.id, pos.lat, pos.lng);
+                    u.lat = pos.lat;
+                    u.lon = pos.lng;
+
+                    // Save all peer positions if group drag
+                    if (marker._groupDrag && marker._groupPeers) {
+                        const dLat = pos.lat - marker._groupDragStart.lat;
+                        const dLng = pos.lng - marker._groupDragStart.lng;
+                        marker._groupPeers.forEach(p => {
+                            const newLat = p.startPos.lat + dLat;
+                            const newLng = p.startPos.lng + dLng;
+                            const peerUnit = allUnitsData.find(pu => pu.id === p.id);
+                            if (peerUnit) {
+                                peerUnit.lat = newLat;
+                                peerUnit.lon = newLng;
+                            }
+                            _saveUnitPosition(p.id, newLat, newLng);
+                        });
+                    }
+
+                    marker._groupDrag = false;
+                    marker._groupPeers = null;
+                    marker._groupDragStart = null;
+                    _drawSelectionOverlays();
+                    _drawMovementArrows();
+                });
+            }
 
             unitsLayer.addLayer(marker);
             unitMarkers[u.id] = marker;
@@ -386,7 +452,7 @@ const KUnits = (() => {
             opacity: 0.3,
             dashArray: '6,8',
             fillColor: accent,
-            fillOpacity: 0.02,
+            fillOpacity: 0.05,
             interactive: false,
         }));
 
@@ -400,7 +466,7 @@ const KUnits = (() => {
                 opacity: 0.35,
                 dashArray: '4,5',
                 fillColor: '#ff9800',
-                fillOpacity: 0.03,
+                fillOpacity: 0.06,
                 interactive: false,
             }));
         }
@@ -467,21 +533,35 @@ const KUnits = (() => {
             html += `<span style="font-size:10px;color:#777;">Unassigned</span><br>`;
         }
 
-        if (canSel) {
-            const isSel = selectedUnitIds.has(u.id);
-            const label = isSel ? '✓ Selected' : '☐ Select';
-            const style = isSel
-                ? 'margin-top:4px;background:#0d3460;color:#4fc3f7;border:1px solid #4fc3f7;'
-                : 'margin-top:4px;';
-            html += `<button onclick="KUnits.toggleSelect('${u.id}')" style="${style}">${label}</button>`;
-        }
-
-        if (canAsgn) {
-            const lbl = isAssignedToMe ? '✕ Unassign me' : '+ Assign to me';
-            html += ` <button onclick="KUnits.assignToMe('${u.id}')" style="margin-top:4px;font-size:10px;" title="${lbl}">${lbl}</button>`;
-        }
-
         return html;
+    }
+
+    /** Save unit position via admin API after drag. */
+    async function _saveUnitPosition(unitId, lat, lon) {
+        const token = KSessionUI.getToken();
+        const sessionId = KSessionUI.getSessionId();
+        if (!token || !sessionId) return;
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sessionId}/units/${unitId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ lat, lon }),
+            });
+            if (!resp.ok) {
+                console.warn('Save unit position failed:', resp.status);
+            }
+        } catch (err) {
+            console.warn('Save unit position error:', err);
+        }
+    }
+
+    /** Enable/disable admin drag-and-drop mode. */
+    function setAdminDrag(enabled) {
+        _adminDragEnabled = enabled;
+        // Re-render to apply draggable state to markers
+        if (allUnitsData.length > 0) {
+            render(allUnitsData);
+        }
     }
 
     // ══════════════════════════════════════════════════
@@ -517,29 +597,93 @@ const KUnits = (() => {
     function _showUnitContextMenu(u, e) {
         const menu = _createUnitContextMenu();
         const canSel = _canSelect(u);
+        const canAsgn = _canAssign(u);
         const isSel = selectedUnitIds.has(u.id);
         const status = u.unit_status || 'idle';
         const statusIcon = STATUS_ICONS[status] || '•';
         const statusColor = STATUS_COLORS[status] || '#aaa';
 
-        let html = `<div class="ctx-menu-header" style="border-bottom:1px solid #333;padding:6px 10px;">
-            <b>${u.name}</b><br>
-            <span style="font-size:10px;color:#888;">${u.unit_type}</span>
-            <span style="font-size:10px;color:${statusColor};margin-left:4px;">${statusIcon} ${status}</span>
-        </div>`;
+        const userId = KSessionUI.getUserId();
+        const isAssignedToMe = u.assigned_user_ids && u.assigned_user_ids.includes(userId);
 
-        // Select/deselect
+        const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
+        const detR = u.detection_range_m || 2000;
+        const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
+
+        const sideColor = u.side === 'blue' ? '#4fc3f7' : '#ef5350';
+        const strPct = u.strength != null ? Math.round(u.strength * 100) : 100;
+        const morPct = u.morale != null ? Math.round(u.morale * 100) : 90;
+        const ammPct = u.ammo != null ? Math.round(u.ammo * 100) : 100;
+
+        const strClr = strPct > 60 ? '#4caf50' : strPct > 30 ? '#ff9800' : '#f44336';
+        const morClr = morPct > 60 ? '#64b5f6' : morPct > 30 ? '#ff9800' : '#f44336';
+        const ammClr = ammPct > 50 ? '#81c784' : ammPct > 20 ? '#ff9800' : '#f44336';
+
+        const statusBg = statusColor + '22';
+
+        // Build elegant card
+        let html = `<div class="unit-info-card">`;
+        html += `<div class="unit-info-header">`;
+        html += `<div class="unit-info-side-bar" style="background:${sideColor};"></div>`;
+        html += `<div class="unit-info-title">`;
+        html += `<div class="unit-info-name">${u.name}</div>`;
+        html += `<div class="unit-info-type">${u.unit_type} · ${pers} pers</div>`;
+        html += `</div>`;
+        html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${statusIcon} ${status}</span></div>`;
+        html += `</div>`;
+
+        // Stat bars
+        html += `<div class="unit-info-stats">`;
+        html += `<div class="unit-stat-row"><span class="unit-stat-label">STR</span><div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${strPct}%;background:${strClr};"></div></div><span class="unit-stat-value" style="color:${strClr};">${strPct}%</span></div>`;
+        html += `<div class="unit-stat-row"><span class="unit-stat-label">MOR</span><div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${morPct}%;background:${morClr};"></div></div><span class="unit-stat-value" style="color:${morClr};">${morPct}%</span></div>`;
+        html += `<div class="unit-stat-row"><span class="unit-stat-label">AMMO</span><div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${ammPct}%;background:${ammClr};"></div></div><span class="unit-stat-value" style="color:${ammClr};">${ammPct}%</span></div>`;
+        html += `</div>`;
+
+        // Ranges and task
+        html += `<div class="unit-info-ranges">`;
+        html += `<span style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
+        html += `<span style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
+        if (u.current_task && u.current_task.type) {
+            html += `<span style="color:#ffd740;">📋 ${u.current_task.type}</span>`;
+        }
+        html += `</div>`;
+
+        // Command info
+        const hasCmdInfo = u.commanding_user_name || (u.assigned_user_names && u.assigned_user_names.length > 0);
+        if (hasCmdInfo) {
+            html += `<div class="unit-info-command">`;
+            if (u.commanding_user_name) {
+                html += `<div class="unit-info-command-line" style="color:#90caf9;">⬆ CO: ${u.commanding_user_name}</div>`;
+            }
+            if (u.assigned_user_names && u.assigned_user_names.length > 0) {
+                const meTag = isAssignedToMe ? ' (you)' : '';
+                html += `<div class="unit-info-command-line" style="color:#81c784;">👤 ${u.assigned_user_names.join(', ')}${meTag}</div>`;
+            }
+            html += `</div>`;
+        } else {
+            html += `<div class="unit-info-command"><div class="unit-info-command-line" style="color:#666;">Unassigned</div></div>`;
+        }
+
+        if (u.suppression != null && u.suppression > 0) {
+            html += `<div style="padding:0 12px 4px;font-size:10px;color:#e91e63;">💥 Suppression: ${Math.round(u.suppression * 100)}%</div>`;
+        }
+        if (u.comms_status && u.comms_status !== 'operational') {
+            html += `<div style="padding:0 12px 4px;font-size:10px;color:#ff9800;">📡 Comms: ${u.comms_status}</div>`;
+        }
+
+        html += `</div>`; // end unit-info-card
+
+        // Action items
         if (canSel) {
             const selLabel = isSel ? '✓ Deselect' : '☐ Select';
             html += `<div class="ctx-item" data-action="select">${selLabel}</div>`;
         }
-
-        // Info (open popup)
-        html += `<div class="ctx-item" data-action="info">ℹ Details</div>`;
-
-        // Rename (only if commanding this unit)
         if (canSel) {
             html += `<div class="ctx-item" data-action="rename">✏ Rename</div>`;
+        }
+        if (canAsgn) {
+            const assignLabel = isAssignedToMe ? '✕ Unassign me' : '+ Assign to me';
+            html += `<div class="ctx-item" data-action="assign">${assignLabel}</div>`;
         }
 
         menu.innerHTML = html;
@@ -561,14 +705,10 @@ const KUnits = (() => {
                 _closeUnitContextMenu();
                 if (action === 'select') {
                     _selectUnit(u.id, false);
-                } else if (action === 'info') {
-                    const marker = unitMarkers[u.id];
-                    if (marker) {
-                        marker.setPopupContent(_buildPopupHtml(u));
-                        marker.openPopup();
-                    }
                 } else if (action === 'rename') {
                     _renameUnit(u);
+                } else if (action === 'assign') {
+                    assignToMe(u.id);
                 }
             });
         });
@@ -660,11 +800,13 @@ const KUnits = (() => {
                 'Authorization': `Bearer ${token}`,
             },
             body: JSON.stringify({ assigned_user_ids: currentIds }),
-        }).then(resp => {
+        }).then(async resp => {
             if (resp.ok) {
-                if (unit) unit.assigned_user_ids = currentIds.length > 0 ? currentIds : null;
-                render(allUnitsData);
+                // Reload units from server to get updated assigned_user_names
+                await load(sessionId, token);
                 if (_map) _map.closePopup();
+                // Refresh CoC tree
+                try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 resp.json().then(d => console.warn('Assign rejected:', d.detail || d)).catch(() => {});
             }
@@ -792,7 +934,7 @@ const KUnits = (() => {
                 opacity: 0.35,
                 dashArray: '6,8',
                 fillColor: accent,
-                fillOpacity: 0.03,
+                fillOpacity: 0.06,
                 interactive: false,
             }));
 
@@ -806,7 +948,7 @@ const KUnits = (() => {
                     opacity: 0.4,
                     dashArray: '4,5',
                     fillColor: '#ff9800',
-                    fillOpacity: 0.04,
+                    fillOpacity: 0.07,
                     interactive: false,
                 }));
             }
@@ -934,6 +1076,6 @@ const KUnits = (() => {
         toggle, isVisible,
         toggleSelect, assignToMe,
         getSelectedIds, clearSelection, getAllUnits,
-        clearAll,
+        clearAll, setAdminDrag,
     };
 })();

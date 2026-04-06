@@ -192,36 +192,22 @@ const KAdmin = (() => {
         // Toggle visibility
         if (win.style.display === 'none' || !win.style.display) {
             win.style.display = 'flex';
+            // Re-enable admin drag when admin window is reopened
+            if (_adminUnlocked) {
+                try { KUnits.setAdminDrag(true); } catch(e) {}
+            }
         } else {
             _closeAdminWindow();
         }
     }
 
-    /** Close admin window and auto-disable god view to prevent fog-of-war leak. */
+    /** Close admin window — disable admin drag but keep god view. */
     async function _closeAdminWindow() {
         const win = document.getElementById('admin-window');
         if (win) win.style.display = 'none';
 
-        // Auto-disable god view when closing admin window to prevent data leaks
-        if (_godViewEnabled) {
-            _godViewEnabled = false;
-            const btn = document.getElementById('admin-god-view-toggle');
-            if (btn) {
-                btn.textContent = '👁 God View OFF';
-                btn.classList.remove('admin-btn-active');
-            }
-            // Reload normal fog-of-war view
-            const token = _getToken();
-            const userSid = _getUserSessionId() || _getAdminSessionId();
-            if (userSid && token) {
-                try {
-                    await KUnits.load(userSid, token);
-                    await KContacts.load(userSid, token);
-                } catch (e) {}
-            }
-            _removeGodViewBanner();
-            _showInfo('admin-god-status', 'God View auto-disabled (window closed)');
-        }
+        // Disable admin drag-and-drop when admin window is closed
+        try { KUnits.setAdminDrag(false); } catch(e) {}
     }
 
     // ══════════════════════════════════════════════════
@@ -252,6 +238,12 @@ const KAdmin = (() => {
                 if (topbarBtn) topbarBtn.style.display = '';
                 // Load admin sessions dropdown
                 _loadAdminSessions();
+                // Enable admin drag-and-drop on unit markers
+                try { KUnits.setAdminDrag(true); } catch(e) {}
+                // Auto-enable God View by default
+                if (!_godViewEnabled) {
+                    setTimeout(() => { try { _toggleGodView(); } catch(e) {} }, 300);
+                }
             } else {
                 const data = await resp.json().catch(() => ({}));
                 alert(data.detail || 'Incorrect password');
@@ -759,10 +751,16 @@ const KAdmin = (() => {
         }
     }
 
-    function _wizardDone() {
+    async function _wizardDone() {
         _closeWizard();
-        // Switch to CoC sub-tab for hierarchy setup
+        // Auto-enter the created session so grid + units load on map
         if (_wizardCreatedSessionId) {
+            try {
+                await enterSession(_wizardCreatedSessionId);
+            } catch (e) {
+                console.warn('Auto-enter session after wizard:', e);
+            }
+            // Switch to CoC sub-tab for hierarchy setup
             document.querySelectorAll('.admin-subtab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.admin-subtab-panel').forEach(p => p.style.display = 'none');
             const cocBtn = document.querySelector('[data-panel="admin-coc-panel"]');
@@ -975,6 +973,11 @@ const KAdmin = (() => {
                 if (sid === userSid || !userSid) {
                     try {
                         await KGrid.load(map, sid);
+                        // If scenario builder is active, clear its preview grid
+                        // (session grid takes precedence)
+                        if (KScenarioBuilder.isActive()) {
+                            try { KScenarioBuilder.clearGridPreview && KScenarioBuilder.clearGridPreview(); } catch(e) {}
+                        }
                         // Re-center map on grid if it loaded
                         const gridGJ = KGrid.getGridGeoJson();
                         if (gridGJ && gridGJ.features && gridGJ.features.length > 0) {
@@ -1238,6 +1241,101 @@ const KAdmin = (() => {
 
     // ── Unit Dashboard ───────────────────────────────
 
+    let _dashboardSort = { field: 'side_name', asc: true }; // default: side then name
+
+    function _sortDashboardUnits(units) {
+        const f = _dashboardSort.field;
+        const dir = _dashboardSort.asc ? 1 : -1;
+        return [...units].sort((a, b) => {
+            if (f === 'side_name') {
+                // Sort by side first (blue < red), then by name
+                if (a.side !== b.side) return (a.side === 'blue' ? -1 : 1);
+                return (a.name || '').localeCompare(b.name || '') * dir;
+            }
+            if (f === 'name') return (a.name || '').localeCompare(b.name || '') * dir;
+            if (f === 'side') return (a.side || '').localeCompare(b.side || '') * dir;
+            if (f === 'status') return (a.unit_status || 'idle').localeCompare(b.unit_status || 'idle') * dir;
+            if (f === 'strength') return ((a.strength || 0) - (b.strength || 0)) * dir;
+            if (f === 'morale') return ((a.morale || 0) - (b.morale || 0)) * dir;
+            if (f === 'ammo') return ((a.ammo || 0) - (b.ammo || 0)) * dir;
+            return 0;
+        });
+    }
+
+    function _sortArrow(field) {
+        if (_dashboardSort.field === field) {
+            return `<span class="sort-arrow">${_dashboardSort.asc ? '▲' : '▼'}</span>`;
+        }
+        if (_dashboardSort.field === 'side_name' && (field === 'side' || field === 'name')) {
+            return `<span class="sort-arrow">▲</span>`;
+        }
+        return '';
+    }
+
+    function _setDashboardSort(field) {
+        if (_dashboardSort.field === field) {
+            _dashboardSort.asc = !_dashboardSort.asc;
+        } else {
+            _dashboardSort.field = field;
+            _dashboardSort.asc = true;
+        }
+        _renderDashboardTable();
+    }
+
+    function _renderDashboardTable() {
+        const el = document.getElementById('admin-unit-dashboard');
+        if (!el || !_dashboardUnits.length) return;
+
+        const sorted = _sortDashboardUnits(_dashboardUnits);
+
+        const statusIcons = {
+            idle: '⏸', moving: '🚶', engaging: '⚔', defending: '🛡',
+            retreating: '↩', observing: '👁', suppressed: '💥',
+            broken: '💔', destroyed: '☠', supporting: '🤝',
+        };
+
+        let html = `<table class="admin-dashboard-table"><tr>
+            <th class="sortable ${_dashboardSort.field === 'name' || _dashboardSort.field === 'side_name' ? 'sort-active' : ''}" data-sort="name">Unit${_sortArrow('name')}</th>
+            <th class="sortable ${_dashboardSort.field === 'side' || _dashboardSort.field === 'side_name' ? 'sort-active' : ''}" data-sort="side">Side${_sortArrow('side')}</th>
+            <th class="sortable ${_dashboardSort.field === 'status' ? 'sort-active' : ''}" data-sort="status">Status${_sortArrow('status')}</th>
+            <th class="sortable ${_dashboardSort.field === 'strength' ? 'sort-active' : ''}" data-sort="strength">Str${_sortArrow('strength')}</th>
+            <th class="sortable ${_dashboardSort.field === 'morale' ? 'sort-active' : ''}" data-sort="morale">Mor${_sortArrow('morale')}</th>
+            <th class="sortable ${_dashboardSort.field === 'ammo' ? 'sort-active' : ''}" data-sort="ammo">Ammo${_sortArrow('ammo')}</th>
+            <th>Comms</th><th></th></tr>`;
+
+        sorted.forEach(u => {
+            const sideClr = u.side === 'blue' ? '#4fc3f7' : '#ef5350';
+            const strPct = u.strength != null ? (u.strength * 100).toFixed(0) : '?';
+            const morPct = u.morale != null ? (u.morale * 100).toFixed(0) : '?';
+            const ammPct = u.ammo != null ? (u.ammo * 100).toFixed(0) : '?';
+            const strClr = u.strength > 0.6 ? '#4caf50' : u.strength > 0.3 ? '#ff9800' : '#f44336';
+            const status = u.unit_status || 'idle';
+            const statusIcon = statusIcons[status] || '•';
+
+            html += `<tr>
+                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${u.name}">${u.name}</td>
+                <td style="color:${sideClr};font-weight:700;">${u.side}</td>
+                <td style="font-size:10px;" title="${status}">${statusIcon} ${status}</td>
+                <td><span style="color:${strClr}">${strPct}%</span></td>
+                <td>${morPct}%</td>
+                <td>${ammPct}%</td>
+                <td style="font-size:10px;">${u.comms_status || '—'}</td>
+                <td style="white-space:nowrap;">
+                    <button class="admin-btn" onclick="KAdmin.editUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Edit unit settings">✏</button>
+                    <button class="admin-btn" onclick="KAdmin.focusUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Center map on unit">📍</button>
+                    <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteUnit('${u.id}','${u.name.replace(/'/g, "\\'")}')" style="padding:1px 5px;font-size:9px;" title="Delete unit">✕</button>
+                </td>
+            </tr>`;
+        });
+        html += '</table>';
+        el.innerHTML = html;
+
+        // Bind sort header clicks
+        el.querySelectorAll('th.sortable').forEach(th => {
+            th.addEventListener('click', () => _setDashboardSort(th.dataset.sort));
+        });
+    }
+
     async function _loadUnitDashboard() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-unit-dashboard', 'Select a session first'); return; }
@@ -1255,43 +1353,9 @@ const KAdmin = (() => {
                 return;
             }
 
-            // Status icon mapping
-            const statusIcons = {
-                idle: '⏸', moving: '🚶', engaging: '⚔', defending: '🛡',
-                retreating: '↩', observing: '👁', suppressed: '💥',
-                broken: '💔', destroyed: '☠', supporting: '🤝',
-            };
-
-            let html = '<table class="admin-dashboard-table"><tr><th>Unit</th><th>Side</th><th>Status</th><th>Str</th><th>Mor</th><th>Ammo</th><th>Comms</th><th></th></tr>';
-            units.forEach(u => {
-                const sideClr = u.side === 'blue' ? '#4fc3f7' : '#ef5350';
-                const strPct = u.strength != null ? (u.strength * 100).toFixed(0) : '?';
-                const morPct = u.morale != null ? (u.morale * 100).toFixed(0) : '?';
-                const ammPct = u.ammo != null ? (u.ammo * 100).toFixed(0) : '?';
-                const strClr = u.strength > 0.6 ? '#4caf50' : u.strength > 0.3 ? '#ff9800' : '#f44336';
-                const status = u.unit_status || 'idle';
-                const statusIcon = statusIcons[status] || '•';
-
-                html += `<tr>
-                    <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${u.name}">${u.name}</td>
-                    <td style="color:${sideClr};font-weight:700;">${u.side}</td>
-                    <td style="font-size:10px;" title="${status}">${statusIcon} ${status}</td>
-                    <td><span style="color:${strClr}">${strPct}%</span></td>
-                    <td>${morPct}%</td>
-                    <td>${ammPct}%</td>
-                    <td style="font-size:10px;">${u.comms_status || '—'}</td>
-                    <td style="white-space:nowrap;">
-                        <button class="admin-btn" onclick="KAdmin.editUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Edit unit settings">✏</button>
-                        <button class="admin-btn" onclick="KAdmin.focusUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Center map on unit">📍</button>
-                        <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteUnit('${u.id}','${u.name.replace(/'/g, "\\'")}')" style="padding:1px 5px;font-size:9px;" title="Delete unit">✕</button>
-                    </td>
-                </tr>`;
-            });
-            html += '</table>';
-            el.innerHTML = html;
-
-            // Store units data for editing
+            // Store units data for editing and sorting
             _dashboardUnits = units;
+            _renderDashboardTable();
         } catch (err) {
             _showInfo('admin-unit-dashboard', `✗ ${err.message}`, 'error');
         }
@@ -1521,10 +1585,13 @@ const KAdmin = (() => {
                     _loadUnitDashboard();
                     // Refresh map units if this is the active session
                     const userSid = _getUserSessionId();
-                    if (sid === userSid) {
-                        try { KUnits.load(userSid, token); } catch(e) {}
+                    if (sid === userSid || _godViewEnabled) {
+                        try {
+                            if (_godViewEnabled) _refreshGodView();
+                            else KUnits.load(userSid, token);
+                        } catch(e) {}
                     }
-                }, 400);
+                }, 200);
             } else {
                 const d = await resp.json().catch(() => ({}));
                 if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Failed'}`; statusEl.className = 'admin-info admin-error'; }
@@ -2084,6 +2151,19 @@ const KAdmin = (() => {
             });
         });
 
+        // Bind click-on-name to center map on unit position
+        el.querySelectorAll('.coc-name[data-unit-id]').forEach(nameEl => {
+            nameEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const lat = parseFloat(nameEl.dataset.lat);
+                const lon = parseFloat(nameEl.dataset.lon);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    const map = KMap.getMap();
+                    if (map) map.setView([lat, lon], Math.max(map.getZoom(), 14));
+                }
+            });
+        });
+
         // Bind bulk action bar (admin only)
         if (_adminUnlocked) {
             // Populate bulk user select from cached participants (exclude observers)
@@ -2160,7 +2240,7 @@ const KAdmin = (() => {
             ${bulkCb}
             <span class="coc-expand">${expandIcon}</span>
             <span class="coc-connector" style="background:${sideColor};"></span>
-            <span class="coc-name" style="color:#e0e0e0;">${unit.name}</span>
+            <span class="coc-name" style="color:#e0e0e0;" data-unit-id="${unit.id}" data-lat="${unit.lat || ''}" data-lon="${unit.lon || ''}">${unit.name}</span>
             ${userBadge}
             ${cmdInfo}
             <span class="coc-type" title="${unit.unit_type}">${unit.unit_type}</span>
@@ -2223,6 +2303,15 @@ const KAdmin = (() => {
         KGameLog.addEntry(`Bulk assigned ${userName} to ${success}/${unitIds.length} units`, 'info');
         _loadChainOfCommand();
         loadPublicCoC();
+        // Reload units on map to reflect assignment changes
+        const token2 = _getToken();
+        const userSid2 = _getUserSessionId();
+        if (userSid2 && token2) {
+            try {
+                if (_godViewEnabled) await _refreshGodView();
+                else await KUnits.load(userSid2, token2);
+            } catch(e) {}
+        }
     }
 
     async function _doBulkUnassign() {
@@ -2251,6 +2340,15 @@ const KAdmin = (() => {
         KGameLog.addEntry(`Bulk unassigned ${success}/${unitIds.length} units`, 'info');
         _loadChainOfCommand();
         loadPublicCoC();
+        // Reload units on map to reflect unassignment changes
+        const token3 = _getToken();
+        const userSid3 = _getUserSessionId();
+        if (userSid3 && token3) {
+            try {
+                if (_godViewEnabled) await _refreshGodView();
+                else await KUnits.load(userSid3, token3);
+            } catch(e) {}
+        }
     }
 
     let _cocPickerPendingUnitId = null;
@@ -2444,11 +2542,23 @@ const KAdmin = (() => {
                 const participant = _cachedParticipants.find(p => p.user_id === userId);
                 const name = participant ? participant.display_name : userId.substring(0, 8);
                 if (statusEl) { statusEl.textContent = `✓ ${name} assigned as commander`; statusEl.className = 'admin-info admin-success'; }
-                // Refresh CoC trees after a brief delay
-                setTimeout(() => {
+                // Refresh CoC trees and reload map units after a brief delay
+                setTimeout(async () => {
                     _closeCocUserAssignModal();
                     loadPublicCoC();
                     if (_adminUnlocked) _loadChainOfCommand();
+                    // Reload units on map to show updated assignment names
+                    const token = _getToken();
+                    const userSid = _getUserSessionId();
+                    if (userSid && token) {
+                        try {
+                            if (_godViewEnabled) {
+                                await _refreshGodView();
+                            } else {
+                                await KUnits.load(userSid, token);
+                            }
+                        } catch(e) {}
+                    }
                 }, 600);
             } else {
                 const d = await resp.json().catch(() => ({}));
@@ -2484,10 +2594,22 @@ const KAdmin = (() => {
             });
             if (resp.ok) {
                 if (statusEl) { statusEl.textContent = '✓ Unit unassigned'; statusEl.className = 'admin-info admin-success'; }
-                setTimeout(() => {
+                setTimeout(async () => {
                     _closeCocUserAssignModal();
                     loadPublicCoC();
                     if (_adminUnlocked) _loadChainOfCommand();
+                    // Reload units on map to show updated assignment
+                    const token2 = _getToken();
+                    const userSid2 = _getUserSessionId();
+                    if (userSid2 && token2) {
+                        try {
+                            if (_godViewEnabled) {
+                                await _refreshGodView();
+                            } else {
+                                await KUnits.load(userSid2, token2);
+                            }
+                        } catch(e) {}
+                    }
                 }, 600);
             } else {
                 const d = await resp.json().catch(() => ({}));
@@ -2527,13 +2649,16 @@ const KAdmin = (() => {
             if (modal) modal.style.display = 'none';
         });
         _bind('admin-ue-close', 'click', () => {
-            const modal = document.getElementById('admin-unit-edit-modal');
-            if (modal) modal.style.display = 'none';
+            // Auto-save on close
+            _saveUnitEdit();
         });
         const overlay = document.getElementById('admin-unit-edit-modal');
         if (overlay) {
             overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) overlay.style.display = 'none';
+                if (e.target === overlay) {
+                    // Auto-save on backdrop click
+                    _saveUnitEdit();
+                }
             });
         }
     }
@@ -2572,6 +2697,9 @@ const KAdmin = (() => {
         _adminUnlocked = false;
         _godViewEnabled = false;
         _adminSelectedSessionId = null;
+
+        // Disable admin drag-and-drop
+        try { KUnits.setAdminDrag(false); } catch(e) {}
 
         // Re-lock admin panel
         const gate = document.getElementById('admin-lock-gate');
