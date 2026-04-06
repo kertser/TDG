@@ -69,7 +69,26 @@ const KMap = (() => {
         };
         L.control.layers(baseLayers, {}, { position: 'topright' }).addTo(map);
 
-        // ── Scale control ───────────────────────────────
+        // ── Coordinate + Zoom info bar (bottom-left, on map) ──
+        // Added BEFORE scale so scale stacks above it (Leaflet bottom-controls
+        // use insertBefore → later-added = higher).
+        const CoordInfoControl = L.Control.extend({
+            options: { position: 'bottomleft' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'coord-info-control');
+                container.innerHTML =
+                    '<span id="snail-display" title="Snail address under cursor"></span>' +
+                    '<span class="coord-sep">│</span>' +
+                    '<span id="coord-display" title="Coordinates under cursor"></span>' +
+                    '<span class="coord-sep">│</span>' +
+                    '<span id="zoom-display" title="Current zoom level"></span>';
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            },
+        });
+        new CoordInfoControl().addTo(map);
+
+        // ── Scale control (sits above coord bar) ────────────
         L.control.scale({
             metric: true,
             imperial: false,
@@ -101,22 +120,6 @@ const KMap = (() => {
         // ── Measure layer group ─────────────────────────
         measureGroup = L.layerGroup().addTo(map);
 
-        // ── Coordinate + Zoom info bar (bottom-left, on map) ──
-        const CoordInfoControl = L.Control.extend({
-            options: { position: 'bottomleft' },
-            onAdd: function () {
-                const container = L.DomUtil.create('div', 'coord-info-control');
-                container.innerHTML =
-                    '<span id="snail-display" title="Snail address under cursor"></span>' +
-                    '<span class="coord-sep">│</span>' +
-                    '<span id="coord-display" title="Coordinates under cursor"></span>' +
-                    '<span class="coord-sep">│</span>' +
-                    '<span id="zoom-display" title="Current zoom level"></span>';
-                L.DomEvent.disableClickPropagation(container);
-                return container;
-            },
-        });
-        new CoordInfoControl().addTo(map);
 
         // ── Coordinate + Zoom display ───────────────────
         const zoomEl = document.getElementById('zoom-display');

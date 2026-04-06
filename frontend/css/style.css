@@ -806,7 +806,7 @@ button:hover { background: #1a5276; }
 
 /* ── Leaflet scale control styling ───────────── */
 .leaflet-control-scale {
-    margin-bottom: 6px !important;
+    margin-bottom: 2px !important;
     margin-left: 8px !important;
 }
 .leaflet-control-scale-line {
