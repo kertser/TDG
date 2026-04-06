@@ -33,6 +33,9 @@ def _serialize_unit(unit: Unit) -> dict:
         except Exception:
             pass
 
+    # Compute unit status from current_task
+    status = _compute_unit_status(unit)
+
     return {
         "id": str(unit.id),
         "session_id": str(unit.session_id),
@@ -55,7 +58,40 @@ def _serialize_unit(unit: Unit) -> dict:
         "detection_range_m": unit.detection_range_m,
         "is_destroyed": unit.is_destroyed,
         "assigned_user_ids": unit.assigned_user_ids,
+        "unit_status": status,
     }
+
+
+def _compute_unit_status(unit: Unit) -> str:
+    """Derive a human-readable status string from unit state."""
+    if unit.is_destroyed:
+        return "destroyed"
+    if unit.strength is not None and unit.strength <= 0:
+        return "destroyed"
+    if unit.morale is not None and unit.morale < 0.15:
+        return "broken"
+    if unit.suppression is not None and unit.suppression > 0.7:
+        return "suppressed"
+
+    task = unit.current_task
+    if task:
+        task_type = task.get("type", "")
+        if task_type in ("attack", "engage"):
+            return "engaging"
+        if task_type in ("move", "advance"):
+            return "moving"
+        if task_type in ("retreat", "withdraw"):
+            return "retreating"
+        if task_type in ("defend", "hold"):
+            return "defending"
+        if task_type in ("observe", "recon"):
+            return "observing"
+        if task_type in ("support",):
+            return "supporting"
+        if task_type:
+            return task_type  # custom status
+
+    return "idle"
 
 
 def _serialize_contact(contact: Contact) -> dict:

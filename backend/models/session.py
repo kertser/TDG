@@ -44,6 +44,7 @@ class Session(Base):
     scenario_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("scenarios.id"), nullable=False
     )
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     status: Mapped[SessionStatus] = mapped_column(
         SAEnum(SessionStatus, name="session_status", create_constraint=True),
         default=SessionStatus.lobby,

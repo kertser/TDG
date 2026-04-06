@@ -33,6 +33,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE units ADD COLUMN IF NOT EXISTS assigned_user_ids JSONB"
         ))
+        # Add name column to sessions (migration for existing DBs)
+        await conn.execute(text(
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS name VARCHAR(200)"
+        ))
 
     yield
     # ── Shutdown ──────────────────────────────────────

@@ -268,11 +268,16 @@ async def admin_add_participant(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid side: {body.side}")
 
+    # Enforce: observer side can only have observer role
+    role = body.role or "observer"
+    if side == Side.observer and role in ("commander", "officer"):
+        role = "observer"
+
     participant = SessionParticipant(
         session_id=session_id,
         user_id=uid,
         side=side,
-        role=body.role or "commander",
+        role=role,
     )
     db.add(participant)
     await db.flush()
@@ -380,7 +385,7 @@ class TickIntervalUpdate(BaseModel):
 async def admin_list_all_sessions(db: DB):
     """Admin: list ALL sessions regardless of participation."""
     result = await db.execute(
-        select(Session).order_by(Session.created_at.desc())
+        select(Session).options(selectinload(Session.scenario)).order_by(Session.created_at.desc())
     )
     sessions = result.scalars().all()
     out = []
@@ -399,6 +404,7 @@ async def admin_list_all_sessions(db: DB):
             "tick": s.tick,
             "participant_count": cnt,
             "created_at": s.created_at.isoformat() if s.created_at else None,
+            "name": s.name or (s.scenario.title if s.scenario else None),
         })
     return out
 
@@ -408,9 +414,15 @@ class AdminSessionCreate(BaseModel):
     settings: dict | None = None
 
 
+class AdminSessionUpdate(BaseModel):
+    name: str | None = None
+
+
 @router.post("/sessions")
 async def admin_create_session(body: AdminSessionCreate, db: DB):
-    """Admin: create a new session from a scenario (no auto-join)."""
+    """Admin: create a new session from a scenario (no auto-join).
+    Immediately initializes grid and units from scenario data so they are
+    available in lobby state for hierarchy setup and grid viewing."""
     result = await db.execute(select(Scenario).where(Scenario.id == uuid.UUID(body.scenario_id)))
     scenario = result.scalar_one_or_none()
     if scenario is None:
@@ -418,6 +430,7 @@ async def admin_create_session(body: AdminSessionCreate, db: DB):
 
     session = Session(
         scenario_id=scenario.id,
+        name=scenario.title,  # default name from scenario
         status=SessionStatus.lobby,
         tick=0,
         tick_interval=60,
@@ -427,12 +440,42 @@ async def admin_create_session(body: AdminSessionCreate, db: DB):
     db.add(session)
     await db.flush()
 
+    # Auto-initialize grid and units from scenario (available in lobby)
+    from backend.services.session_service import initialize_session_from_scenario
+    await initialize_session_from_scenario(session, scenario, db)
+
     return {
         "id": str(session.id),
         "scenario_id": str(session.scenario_id),
         "status": session.status.value,
         "tick": session.tick,
         "created_at": session.created_at.isoformat() if session.created_at else None,
+        "name": session.name or scenario.title,
+    }
+
+
+@router.put("/sessions/{session_id}")
+async def admin_update_session(session_id: uuid.UUID, body: AdminSessionUpdate, db: DB):
+    """Admin: update session properties (e.g. rename)."""
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.name is not None:
+        session.name = body.name.strip() if body.name.strip() else None
+    await db.flush()
+
+    # Resolve scenario title for response
+    scenario_title = None
+    if session.scenario_id:
+        sc_result = await db.execute(select(Scenario).where(Scenario.id == session.scenario_id))
+        sc = sc_result.scalar_one_or_none()
+        if sc:
+            scenario_title = sc.title
+    return {
+        "id": str(session.id),
+        "name": session.name or scenario_title,
+        "status": session.status.value,
     }
 
 
@@ -613,6 +656,25 @@ async def admin_update_unit(
     if body.parent_unit_id is not None:
         unit.parent_unit_id = uuid.UUID(body.parent_unit_id) if body.parent_unit_id != "" else None
     if body.assigned_user_ids is not None:
+        # Validate: observers cannot be assigned to units
+        if body.assigned_user_ids:
+            for uid_str in body.assigned_user_ids:
+                try:
+                    uid = uuid.UUID(uid_str)
+                except ValueError:
+                    continue
+                part_result = await db.execute(
+                    select(SessionParticipant).where(
+                        SessionParticipant.session_id == session_id,
+                        SessionParticipant.user_id == uid,
+                    )
+                )
+                participant = part_result.scalar_one_or_none()
+                if participant and participant.side == Side.observer:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot assign observer to unit — observers do not control units"
+                    )
         unit.assigned_user_ids = body.assigned_user_ids if body.assigned_user_ids else None
     if body.is_destroyed is not None:
         unit.is_destroyed = body.is_destroyed
@@ -686,6 +748,10 @@ async def admin_update_participant(
             raise HTTPException(status_code=400, detail=f"Invalid side: {body.side}")
     if body.role is not None:
         p.role = body.role
+
+    # Enforce: observer side can only have observer role
+    if p.side == Side.observer and p.role in ("commander", "officer"):
+        p.role = "observer"
 
     await db.flush()
     return {"id": str(p.id), "side": p.side.value, "role": p.role}

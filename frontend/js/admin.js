@@ -39,7 +39,7 @@ const KAdmin = (() => {
         // ── Draggable window header ─────────────────────
         _initDraggableWindow();
 
-        // Sub-tab switching inside admin tab
+        // Sub-tab switching inside admin tab (with auto-load)
         document.querySelectorAll('.admin-subtab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.admin-subtab-btn').forEach(b => b.classList.remove('active'));
@@ -47,6 +47,14 @@ const KAdmin = (() => {
                 btn.classList.add('active');
                 const panel = document.getElementById(btn.dataset.panel);
                 if (panel) panel.style.display = 'block';
+
+                // Auto-load data for the relevant sub-tab
+                const panelId = btn.dataset.panel;
+                if (panelId === 'admin-users-panel') _loadUsers();
+                else if (panelId === 'admin-coc-panel') _loadChainOfCommand();
+                else if (panelId === 'admin-monitor-panel') _loadUnitDashboard();
+                else if (panelId === 'admin-session-panel') { _refreshSessions(); _loadParticipants(); }
+                else if (panelId === 'admin-builder-panel') refreshScenarioList();
             });
         });
 
@@ -122,6 +130,8 @@ const KAdmin = (() => {
         _initAssignModal();
         _initCocPickerModal();
         _initCocUserAssignModal();
+        _initUnitEditModal();
+        _initSessionWizard();
     }
 
     function _bind(id, evt, fn) {
@@ -277,7 +287,8 @@ const KAdmin = (() => {
                 const opt = document.createElement('option');
                 opt.value = s.id;
                 const statusIcon = s.status === 'running' ? '🟢' : s.status === 'paused' ? '🟡' : s.status === 'lobby' ? '⚪' : '🔴';
-                opt.textContent = `${statusIcon} ${s.id.substring(0, 8)}… [${s.status}] T${s.tick} (${s.participant_count}p)`;
+                const displayName = s.name || s.id.substring(0, 8) + '…';
+                opt.textContent = `${statusIcon} ${displayName} [${s.status}] T${s.tick} (${s.participant_count}p)`;
                 sel.appendChild(opt);
             });
 
@@ -302,7 +313,7 @@ const KAdmin = (() => {
         }
     }
 
-    /** Render admin session list with individual delete buttons. */
+    /** Render admin session list with individual delete and rename buttons. */
     function _renderAdminSessionList(sessions) {
         const listEl = document.getElementById('admin-session-list');
         if (!listEl) return;
@@ -318,15 +329,74 @@ const KAdmin = (() => {
             const isCurrent = s.id === _getUserSessionId();
             const border = isCurrent ? 'border-left:3px solid #4fc3f7;' : '';
             const currentTag = isCurrent ? '<span style="color:#4fc3f7;font-size:9px;"> (active)</span>' : '';
+            const displayName = s.name || s.id.substring(0, 8) + '…';
             html += `<div class="admin-item" style="${border}">
                 <div style="flex:1;min-width:0;">
-                    <div style="font-size:11px;">${statusIcon} <b>${s.id.substring(0, 8)}…</b>${currentTag}</div>
+                    <div style="font-size:11px;">${statusIcon} <b>${displayName}</b>${currentTag}</div>
                     <div style="font-size:10px;color:#888;">Turn ${s.tick} | ${s.participant_count} participant(s) | ${s.status}</div>
                 </div>
-                <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteSession('${s.id}')" style="padding:2px 6px;font-size:10px;flex-shrink:0;" title="Delete this session">✕</button>
+                <div style="display:flex;gap:2px;flex-shrink:0;">
+                    <button class="admin-btn" onclick="KAdmin.enterSession('${s.id}')" style="padding:2px 6px;font-size:10px;background:#0d3460;color:#4fc3f7;" title="Enter this session">▶</button>
+                    <button class="admin-btn" onclick="KAdmin.renameSession('${s.id}','${(displayName).replace(/'/g, "\\'")}')" style="padding:2px 6px;font-size:10px;" title="Rename this session">✏</button>
+                    <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteSession('${s.id}')" style="padding:2px 6px;font-size:10px;" title="Delete this session">✕</button>
+                </div>
             </div>`;
         });
         listEl.innerHTML = html;
+    }
+
+    /** Rename a session. */
+    async function renameSession(sessionId, currentName) {
+        const newName = prompt('Rename session:', currentName);
+        if (!newName || newName.trim() === currentName) return;
+        const token = _getToken();
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sessionId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ name: newName.trim() }),
+            });
+            if (resp.ok) {
+                _loadAdminSessions();
+                KSessionUI.loadSessions();
+                KGameLog.addEntry(`Session renamed to "${newName.trim()}"`, 'info');
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Rename failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    /** Enter a session from admin list (auto-join + switch). */
+    async function enterSession(sessionId) {
+        const token = _getToken();
+        if (!token) return;
+        // Try to join (may already be joined)
+        try {
+            await fetch(`/api/sessions/${sessionId}/join`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ side: 'blue', role: 'commander' }),
+            });
+        } catch {}
+
+        // Fetch session data for joinAndEnter
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok) {
+                const sessData = await resp.json();
+                // Use KSessionUI's joinAndEnter if available
+                if (KSessionUI.joinAndEnter) {
+                    await KSessionUI.joinAndEnter(sessionId, sessData);
+                } else if (window.onSessionJoined) {
+                    await window.onSessionJoined(sessionId, token);
+                }
+            }
+        } catch (err) {
+            console.warn('Enter session:', err);
+        }
     }
 
     // ══════════════════════════════════════════════════
@@ -421,36 +491,286 @@ const KAdmin = (() => {
         }
     }
 
-    /** Create a new session from a scenario (admin-only). */
+    /** Create a new session from a scenario — opens wizard modal. */
     async function createSessionFromScenario(scenarioId) {
         const token = _getToken();
         if (!token) { alert('Not logged in'); return; }
+        _openSessionWizard(scenarioId);
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Session Creation Wizard ──────────────────────
+    // ══════════════════════════════════════════════════
+
+    let _wizardScenarioId = null;
+    let _wizardCreatedSessionId = null;
+    let _wizardStep = 1;
+    let _wizardParticipants = []; // {user_id, display_name, side, role}
+    let _wizardUsers = [];
+
+    function _initSessionWizard() {
+        _bind('wizard-next-btn', 'click', _wizardNextStep);
+        _bind('wizard-prev-btn', 'click', _wizardPrevStep);
+        _bind('wizard-create-btn', 'click', _wizardCreate);
+        _bind('wizard-done-btn', 'click', _wizardDone);
+        _bind('wizard-cancel-btn', 'click', _closeWizard);
+        _bind('wizard-close', 'click', _closeWizard);
+        _bind('wizard-add-participant-btn', 'click', _wizardAddParticipant);
+
+        // Close on overlay click
+        const overlay = document.getElementById('session-wizard-modal');
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) _closeWizard();
+            });
+        }
+
+        // Side change → update role options
+        const sideEl = document.getElementById('wizard-p-side');
+        if (sideEl) {
+            sideEl.addEventListener('change', () => {
+                const roleEl = document.getElementById('wizard-p-role');
+                if (!roleEl) return;
+                roleEl.innerHTML = '';
+                if (sideEl.value === 'observer') {
+                    roleEl.innerHTML = '<option value="observer">Observer</option>';
+                } else {
+                    roleEl.innerHTML = '<option value="commander">Commander</option><option value="officer">Officer</option><option value="observer">Observer</option>';
+                }
+            });
+        }
+    }
+
+    async function _openSessionWizard(scenarioId) {
+        _wizardScenarioId = scenarioId;
+        _wizardCreatedSessionId = null;
+        _wizardStep = 1;
+        _wizardParticipants = [];
+
+        // Fetch scenario info
         try {
+            const resp = await fetch(`/api/scenarios/${scenarioId}`);
+            if (resp.ok) {
+                const sc = await resp.json();
+                _setVal('wizard-session-name', sc.title || 'New Session');
+                _setVal('wizard-turn-interval', 1);
+                const infoEl = document.getElementById('wizard-scenario-info');
+                if (infoEl) {
+                    const unitCount = ((sc.initial_units?.blue || []).length + (sc.initial_units?.red || []).length);
+                    infoEl.textContent = `${sc.title || 'Untitled'} — ${unitCount} units`;
+                }
+            }
+        } catch {}
+
+        // Load available users
+        try {
+            const resp = await fetch('/api/admin/users');
+            if (resp.ok) _wizardUsers = await resp.json();
+        } catch {}
+        _wizardPopulateUserSelect();
+
+        // Show modal
+        _wizardShowStep(1);
+        const modal = document.getElementById('session-wizard-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function _closeWizard() {
+        const modal = document.getElementById('session-wizard-modal');
+        if (modal) modal.style.display = 'none';
+        _wizardScenarioId = null;
+    }
+
+    function _wizardShowStep(step) {
+        _wizardStep = step;
+        for (let i = 1; i <= 3; i++) {
+            const el = document.getElementById(`wizard-step-${i}`);
+            if (el) el.style.display = i === step ? 'block' : 'none';
+            const ind = document.getElementById(`wizard-ind-${i}`);
+            if (ind) {
+                ind.classList.toggle('active', i === step);
+                ind.classList.toggle('done', i < step);
+            }
+        }
+        // Button visibility
+        const prevBtn = document.getElementById('wizard-prev-btn');
+        const nextBtn = document.getElementById('wizard-next-btn');
+        const createBtn = document.getElementById('wizard-create-btn');
+        const doneBtn = document.getElementById('wizard-done-btn');
+        if (prevBtn) prevBtn.style.display = step > 1 && step < 3 ? '' : 'none';
+        if (nextBtn) nextBtn.style.display = step === 1 ? '' : 'none';
+        if (createBtn) createBtn.style.display = step === 2 ? '' : 'none';
+        if (doneBtn) doneBtn.style.display = step === 3 ? '' : 'none';
+    }
+
+    function _wizardNextStep() {
+        if (_wizardStep === 1) {
+            const name = document.getElementById('wizard-session-name')?.value?.trim();
+            if (!name) { alert('Session name is required'); return; }
+            _wizardShowStep(2);
+        }
+    }
+
+    function _wizardPrevStep() {
+        if (_wizardStep > 1) _wizardShowStep(_wizardStep - 1);
+    }
+
+    function _wizardPopulateUserSelect() {
+        const sel = document.getElementById('wizard-p-user');
+        if (!sel) return;
+        sel.innerHTML = '';
+        _wizardUsers.forEach(u => {
+            // Skip users already added as participants
+            if (_wizardParticipants.find(p => p.user_id === u.id)) return;
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = u.display_name;
+            sel.appendChild(opt);
+        });
+    }
+
+    function _wizardAddParticipant() {
+        const userEl = document.getElementById('wizard-p-user');
+        const sideEl = document.getElementById('wizard-p-side');
+        const roleEl = document.getElementById('wizard-p-role');
+        if (!userEl || !sideEl || !roleEl || !userEl.value) return;
+
+        const user = _wizardUsers.find(u => u.id === userEl.value);
+        if (!user) return;
+
+        _wizardParticipants.push({
+            user_id: user.id,
+            display_name: user.display_name,
+            side: sideEl.value,
+            role: roleEl.value,
+        });
+
+        _wizardPopulateUserSelect();
+        _wizardRenderParticipants();
+    }
+
+    function _wizardRemoveParticipant(idx) {
+        _wizardParticipants.splice(idx, 1);
+        _wizardPopulateUserSelect();
+        _wizardRenderParticipants();
+    }
+
+    function _wizardRenderParticipants() {
+        const el = document.getElementById('wizard-participants-list');
+        if (!el) return;
+        if (_wizardParticipants.length === 0) {
+            el.innerHTML = '<div style="color:#888;font-size:11px;padding:4px;">No participants added yet</div>';
+            return;
+        }
+        let html = '';
+        _wizardParticipants.forEach((p, i) => {
+            const sideColor = p.side === 'blue' ? '#4fc3f7' : p.side === 'red' ? '#ef5350' : '#aaa';
+            html += `<div class="admin-item" style="border-left:3px solid ${sideColor};padding:4px 6px;">
+                <div style="flex:1;">
+                    <b>${p.display_name}</b>
+                    <span class="admin-item-meta">${p.side} / ${p.role}</span>
+                </div>
+                <button class="admin-btn admin-btn-danger" onclick="KAdmin.wizardRemoveParticipant(${i})" style="padding:1px 6px;font-size:9px;">✕</button>
+            </div>`;
+        });
+        el.innerHTML = html;
+    }
+
+    async function _wizardCreate() {
+        const token = _getToken();
+        if (!token || !_wizardScenarioId) return;
+
+        const name = document.getElementById('wizard-session-name')?.value?.trim();
+        const interval = parseInt(document.getElementById('wizard-turn-interval')?.value) || 1;
+
+        const statusEl = document.getElementById('wizard-create-status');
+        if (statusEl) { statusEl.textContent = '⏳ Creating session...'; statusEl.className = 'admin-info'; }
+
+        try {
+            // 1. Create session
             const resp = await fetch('/api/admin/sessions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ scenario_id: scenarioId }),
+                body: JSON.stringify({ scenario_id: _wizardScenarioId }),
             });
-            if (resp.ok) {
-                const data = await resp.json();
-                KGameLog.addEntry(`Session ${data.id.substring(0, 8)}… created from scenario (admin)`, 'info');
-                _loadAdminSessions();
-                KSessionUI.loadSessions();
-                // Auto-select the new session
-                setTimeout(() => {
-                    const sel = document.getElementById('admin-session-selector');
-                    if (sel) {
-                        sel.value = data.id;
-                        _adminSelectedSessionId = data.id;
-                        const info = document.getElementById('admin-selected-session-info');
-                        if (info) info.textContent = `Selected: ${data.id.substring(0, 8)}...`;
-                    }
-                }, 300);
-            } else {
+            if (!resp.ok) {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Session creation failed');
+                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Creation failed'}`; statusEl.className = 'admin-info admin-error'; }
+                return;
             }
-        } catch (err) { alert(err.message); }
+            const sessionData = await resp.json();
+            _wizardCreatedSessionId = sessionData.id;
+
+            // 2. Rename session
+            if (name && name !== sessionData.name) {
+                await fetch(`/api/admin/sessions/${sessionData.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ name }),
+                });
+            }
+
+            // 3. Set tick interval
+            if (interval !== 1) {
+                await fetch(`/api/admin/sessions/${sessionData.id}/tick-interval`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ tick_interval: interval * 60 }),
+                });
+            }
+
+            // 4. Add participants
+            let addedCount = 0;
+            for (const p of _wizardParticipants) {
+                try {
+                    const pResp = await fetch(`/api/admin/sessions/${sessionData.id}/add-participant`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ user_id: p.user_id, side: p.side, role: p.role }),
+                    });
+                    if (pResp.ok) addedCount++;
+                } catch {}
+            }
+
+            if (statusEl) {
+                statusEl.textContent = `✓ Session "${name}" created with ${addedCount} participant(s)`;
+                statusEl.className = 'admin-info admin-success';
+            }
+
+            // Update admin session list and select new session
+            _loadAdminSessions();
+            KSessionUI.loadSessions();
+
+            setTimeout(() => {
+                const sel = document.getElementById('admin-session-selector');
+                if (sel) {
+                    sel.value = sessionData.id;
+                    _adminSelectedSessionId = sessionData.id;
+                }
+            }, 300);
+
+            KGameLog.addEntry(`Session "${name}" created via wizard (${addedCount} participants)`, 'info');
+
+            // Move to step 3 (done)
+            _wizardShowStep(3);
+
+        } catch (err) {
+            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
+        }
+    }
+
+    function _wizardDone() {
+        _closeWizard();
+        // Switch to CoC sub-tab for hierarchy setup
+        if (_wizardCreatedSessionId) {
+            document.querySelectorAll('.admin-subtab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.admin-subtab-panel').forEach(p => p.style.display = 'none');
+            const cocBtn = document.querySelector('[data-panel="admin-coc-panel"]');
+            if (cocBtn) cocBtn.classList.add('active');
+            const cocPanel = document.getElementById('admin-coc-panel');
+            if (cocPanel) cocPanel.style.display = 'block';
+            _loadChainOfCommand();
+        }
     }
 
     async function _deleteAllScenarios() {
@@ -935,27 +1255,282 @@ const KAdmin = (() => {
                 return;
             }
 
-            let html = '<table class="admin-dashboard-table"><tr><th>Unit</th><th>Side</th><th>Str</th><th>Mor</th><th>Ammo</th><th>Comms</th></tr>';
+            // Status icon mapping
+            const statusIcons = {
+                idle: '⏸', moving: '🚶', engaging: '⚔', defending: '🛡',
+                retreating: '↩', observing: '👁', suppressed: '💥',
+                broken: '💔', destroyed: '☠', supporting: '🤝',
+            };
+
+            let html = '<table class="admin-dashboard-table"><tr><th>Unit</th><th>Side</th><th>Status</th><th>Str</th><th>Mor</th><th>Ammo</th><th>Comms</th><th></th></tr>';
             units.forEach(u => {
                 const sideClr = u.side === 'blue' ? '#4fc3f7' : '#ef5350';
                 const strPct = u.strength != null ? (u.strength * 100).toFixed(0) : '?';
                 const morPct = u.morale != null ? (u.morale * 100).toFixed(0) : '?';
                 const ammPct = u.ammo != null ? (u.ammo * 100).toFixed(0) : '?';
                 const strClr = u.strength > 0.6 ? '#4caf50' : u.strength > 0.3 ? '#ff9800' : '#f44336';
+                const status = u.unit_status || 'idle';
+                const statusIcon = statusIcons[status] || '•';
 
                 html += `<tr>
                     <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${u.name}">${u.name}</td>
                     <td style="color:${sideClr};font-weight:700;">${u.side}</td>
+                    <td style="font-size:10px;" title="${status}">${statusIcon} ${status}</td>
                     <td><span style="color:${strClr}">${strPct}%</span></td>
                     <td>${morPct}%</td>
                     <td>${ammPct}%</td>
                     <td style="font-size:10px;">${u.comms_status || '—'}</td>
+                    <td style="white-space:nowrap;">
+                        <button class="admin-btn" onclick="KAdmin.editUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Edit unit settings">✏</button>
+                        <button class="admin-btn" onclick="KAdmin.focusUnit('${u.id}')" style="padding:1px 5px;font-size:9px;" title="Center map on unit">📍</button>
+                        <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteUnit('${u.id}','${u.name.replace(/'/g, "\\'")}')" style="padding:1px 5px;font-size:9px;" title="Delete unit">✕</button>
+                    </td>
                 </tr>`;
             });
             html += '</table>';
             el.innerHTML = html;
+
+            // Store units data for editing
+            _dashboardUnits = units;
         } catch (err) {
             _showInfo('admin-unit-dashboard', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    let _dashboardUnits = [];
+
+    /** Focus map on a unit's position. */
+    function focusUnit(unitId) {
+        const unit = _dashboardUnits.find(u => u.id === unitId);
+        if (!unit || unit.lat == null || unit.lon == null) {
+            alert('Unit has no position');
+            return;
+        }
+        const map = KMap.getMap();
+        if (map) map.setView([unit.lat, unit.lon], Math.max(map.getZoom(), 14));
+    }
+
+    /** Delete a unit (admin). */
+    async function deleteUnit(unitId, unitName) {
+        if (!confirm(`Delete unit "${unitName}"?`)) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) return;
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok || resp.status === 204) {
+                _loadUnitDashboard();
+                // Reload units on map
+                const userSid = _getUserSessionId();
+                if (sid === userSid) {
+                    try { await KUnits.load(userSid, token); } catch(e) {}
+                }
+                KGameLog.addEntry(`Unit "${unitName}" deleted (admin)`, 'info');
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Delete failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    /** Add a unit mid-session (admin) — opens the edit modal for creation. */
+    async function addUnit() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { alert('Select a session first'); return; }
+
+        // Get map center for default position
+        const map = KMap.getMap();
+        const center = map ? map.getCenter() : { lat: 49.05, lng: 4.5 };
+
+        const modal = document.getElementById('admin-unit-edit-modal');
+        if (!modal) return;
+
+        // Populate unit type dropdown
+        const typeEl = document.getElementById('admin-ue-unit-type');
+        if (typeEl) {
+            typeEl.innerHTML = '';
+            const types = typeof KScenarioBuilder !== 'undefined' ? KScenarioBuilder.getUnitTypes() : {};
+            for (const [key, info] of Object.entries(types)) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = info.label || key;
+                typeEl.appendChild(opt);
+            }
+        }
+
+        // Pre-fill with defaults for new unit
+        _setVal('admin-ue-name', 'New Unit');
+        _setVal('admin-ue-side', 'blue');
+        _setVal('admin-ue-unit-type', 'infantry_platoon');
+        _setVal('admin-ue-strength', 100);
+        _setVal('admin-ue-morale', 90);
+        _setVal('admin-ue-ammo', 100);
+        _setVal('admin-ue-detection', 1500);
+        _setVal('admin-ue-speed', 4);
+        _setVal('admin-ue-lat', center.lat.toFixed(6));
+        _setVal('admin-ue-lon', center.lng.toFixed(6));
+
+        const label = document.getElementById('admin-ue-label');
+        if (label) label.textContent = 'Create New Unit';
+
+        const header = modal.querySelector('.admin-modal-header span');
+        if (header) header.textContent = '➕ New Unit';
+
+        const statusEl = document.getElementById('admin-ue-status');
+        if (statusEl) statusEl.textContent = '';
+
+        // Use __new__ marker so save knows to POST instead of PUT
+        modal.dataset.unitId = '__new__';
+        modal.style.display = 'flex';
+    }
+
+    /** Show edit modal for a unit. */
+    function editUnit(unitId) {
+        const unit = _dashboardUnits.find(u => u.id === unitId);
+        if (!unit) { alert('Unit not found'); return; }
+
+        const modal = document.getElementById('admin-unit-edit-modal');
+        if (!modal) return;
+
+        // Populate unit type dropdown from scenario builder registry
+        const typeEl = document.getElementById('admin-ue-unit-type');
+        if (typeEl) {
+            typeEl.innerHTML = '';
+            const types = typeof KScenarioBuilder !== 'undefined' ? KScenarioBuilder.getUnitTypes() : {};
+            for (const [key, info] of Object.entries(types)) {
+                const opt = document.createElement('option');
+                opt.value = key;
+                opt.textContent = info.label || key;
+                typeEl.appendChild(opt);
+            }
+            // Add current type if not in list
+            if (unit.unit_type && !types[unit.unit_type]) {
+                const opt = document.createElement('option');
+                opt.value = unit.unit_type;
+                opt.textContent = unit.unit_type;
+                typeEl.appendChild(opt);
+            }
+            typeEl.value = unit.unit_type || '';
+        }
+
+        // Populate fields
+        _setVal('admin-ue-name', unit.name);
+        _setVal('admin-ue-side', unit.side || 'blue');
+        _setVal('admin-ue-strength', unit.strength != null ? Math.round(unit.strength * 100) : 100);
+        _setVal('admin-ue-morale', unit.morale != null ? Math.round(unit.morale * 100) : 90);
+        _setVal('admin-ue-ammo', unit.ammo != null ? Math.round(unit.ammo * 100) : 100);
+        _setVal('admin-ue-detection', unit.detection_range_m || 1500);
+        _setVal('admin-ue-speed', unit.move_speed_mps || 4);
+        _setVal('admin-ue-lat', unit.lat != null ? unit.lat.toFixed(6) : '');
+        _setVal('admin-ue-lon', unit.lon != null ? unit.lon.toFixed(6) : '');
+
+        const label = document.getElementById('admin-ue-label');
+        if (label) label.textContent = `Edit: ${unit.name}`;
+
+        const statusEl = document.getElementById('admin-ue-status');
+        if (statusEl) statusEl.textContent = '';
+
+        modal.dataset.unitId = unitId;
+        modal.style.display = 'flex';
+    }
+
+    function _setVal(id, val) {
+        const el = document.getElementById(id);
+        if (el && val != null) el.value = val;
+    }
+
+    async function _saveUnitEdit() {
+        const modal = document.getElementById('admin-unit-edit-modal');
+        if (!modal) return;
+        const unitId = modal.dataset.unitId;
+        if (!unitId) return;
+
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) return;
+
+        const statusEl = document.getElementById('admin-ue-status');
+
+        const body = {};
+        const nameVal = document.getElementById('admin-ue-name').value.trim();
+        if (nameVal) body.name = nameVal;
+
+        // Side and unit type
+        const sideEl = document.getElementById('admin-ue-side');
+        const typeEl = document.getElementById('admin-ue-unit-type');
+        if (sideEl && sideEl.value) body.side = sideEl.value;
+        if (typeEl && typeEl.value) {
+            body.unit_type = typeEl.value;
+            // Update SIDC based on side and type
+            const types = typeof KScenarioBuilder !== 'undefined' ? KScenarioBuilder.getUnitTypes() : {};
+            const info = types[typeEl.value];
+            if (info) {
+                const side = sideEl ? sideEl.value : 'blue';
+                body.sidc = side === 'red' ? (info.sidc_red || '') : (info.sidc_blue || '');
+            }
+        }
+
+        const str = parseFloat(document.getElementById('admin-ue-strength').value);
+        if (!isNaN(str)) body.strength = Math.max(0, Math.min(1, str / 100));
+
+        const mor = parseFloat(document.getElementById('admin-ue-morale').value);
+        if (!isNaN(mor)) body.morale = Math.max(0, Math.min(1, mor / 100));
+
+        const amm = parseFloat(document.getElementById('admin-ue-ammo').value);
+        if (!isNaN(amm)) body.ammo = Math.max(0, Math.min(1, amm / 100));
+
+        const det = parseFloat(document.getElementById('admin-ue-detection').value);
+        if (!isNaN(det)) body.detection_range_m = Math.max(0, det);
+
+        const spd = parseFloat(document.getElementById('admin-ue-speed').value);
+        if (!isNaN(spd)) body.move_speed_mps = Math.max(0, spd);
+
+        // Position (lat/lon)
+        const latEl = document.getElementById('admin-ue-lat');
+        const lonEl = document.getElementById('admin-ue-lon');
+        if (latEl && lonEl) {
+            const lat = parseFloat(latEl.value);
+            const lon = parseFloat(lonEl.value);
+            if (!isNaN(lat) && !isNaN(lon)) {
+                body.lat = lat;
+                body.lon = lon;
+            }
+        }
+
+        try {
+            const isNew = unitId === '__new__';
+            const url = isNew
+                ? `/api/admin/sessions/${sid}/units`
+                : `/api/admin/sessions/${sid}/units/${unitId}`;
+            const method = isNew ? 'POST' : 'PUT';
+
+            const resp = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify(body),
+            });
+            if (resp.ok) {
+                const verb = isNew ? 'Created' : 'Saved';
+                if (statusEl) { statusEl.textContent = `✓ ${verb}`; statusEl.className = 'admin-info admin-success'; }
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                    // Reset modal header
+                    const header = modal.querySelector('.admin-modal-header span');
+                    if (header) header.textContent = '✏ Edit Unit';
+                    _loadUnitDashboard();
+                    // Refresh map units if this is the active session
+                    const userSid = _getUserSessionId();
+                    if (sid === userSid) {
+                        try { KUnits.load(userSid, token); } catch(e) {}
+                    }
+                }, 400);
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Failed'}`; statusEl.className = 'admin-info admin-error'; }
+            }
+        } catch (err) {
+            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
         }
     }
 
@@ -1159,6 +1734,7 @@ const KAdmin = (() => {
         const sideEl = document.getElementById('admin-assign-side');
         const roleEl = document.getElementById('admin-assign-role');
         if (sideEl) sideEl.value = 'blue';
+        _updateRoleOptions();  // update role options based on side
         if (roleEl) roleEl.value = 'commander';
 
         const statusEl = document.getElementById('admin-assign-status');
@@ -1174,11 +1750,41 @@ const KAdmin = (() => {
         _bind('admin-assign-cancel', 'click', _closeAssignModal);
         _bind('admin-assign-modal-close', 'click', _closeAssignModal);
 
+        // Restrict role options based on side selection
+        const sideEl = document.getElementById('admin-assign-side');
+        if (sideEl) {
+            sideEl.addEventListener('change', _updateRoleOptions);
+        }
+
         // Close on overlay click
         const overlay = document.getElementById('admin-assign-modal');
         if (overlay) {
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) _closeAssignModal();
+            });
+        }
+    }
+
+    /** Update role dropdown based on selected side. Observer can only be observer. */
+    function _updateRoleOptions() {
+        const sideEl = document.getElementById('admin-assign-side');
+        const roleEl = document.getElementById('admin-assign-role');
+        if (!sideEl || !roleEl) return;
+
+        const side = sideEl.value;
+        roleEl.innerHTML = '';
+
+        if (side === 'observer') {
+            const opt = document.createElement('option');
+            opt.value = 'observer';
+            opt.textContent = 'Observer';
+            roleEl.appendChild(opt);
+        } else {
+            ['commander', 'officer', 'observer'].forEach(role => {
+                const opt = document.createElement('option');
+                opt.value = role;
+                opt.textContent = role.charAt(0).toUpperCase() + role.slice(1);
+                roleEl.appendChild(opt);
             });
         }
     }
@@ -1234,6 +1840,9 @@ const KAdmin = (() => {
         const el = document.getElementById('admin-coc-tree');
 
         try {
+            // Load participants for user-assign modal (admin endpoint)
+            await _loadParticipantsForAdminCoC(sid);
+
             const resp = await fetch(`/api/admin/sessions/${sid}/unit-hierarchy`, {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
@@ -1252,6 +1861,24 @@ const KAdmin = (() => {
         } catch (err) {
             if (el) el.innerHTML = `<div class="admin-info admin-error">✗ ${err.message}</div>`;
         }
+    }
+
+    /** Load participants for admin CoC using admin endpoint. */
+    async function _loadParticipantsForAdminCoC(sessionId) {
+        const token = _getToken();
+        if (!token || !sessionId) return [];
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sessionId}/participants`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok) {
+                _cachedParticipants = await resp.json();
+                return _cachedParticipants;
+            }
+        } catch (err) {
+            console.warn('Load participants for admin CoC:', err);
+        }
+        return [];
     }
 
     // ══════════════════════════════════════════════════
@@ -1395,7 +2022,23 @@ const KAdmin = (() => {
         Object.values(unitMap).forEach(u => u.children.sort(sortFn));
 
         // Render tree
-        let html = '<div class="coc-tree">';
+        let html = '';
+
+        // Bulk action bar (admin only)
+        if (_adminUnlocked) {
+            html += `<div class="coc-bulk-bar">
+                <label style="font-size:10px;color:#aaa;cursor:pointer;display:flex;align-items:center;gap:3px;">
+                    <input type="checkbox" id="coc-bulk-select-all" style="cursor:pointer;" /> Select All
+                </label>
+                <select id="coc-bulk-user-select" style="flex:1;min-width:80px;padding:2px 4px;font-size:10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;">
+                    <option value="">— Select user —</option>
+                </select>
+                <button class="admin-btn" id="coc-bulk-assign-btn" style="padding:2px 8px;font-size:10px;background:#1b5e20;color:#a5d6a7;" title="Assign selected user to all checked units">👤 Assign</button>
+                <button class="admin-btn admin-btn-danger" id="coc-bulk-unassign-btn" style="padding:2px 8px;font-size:10px;" title="Unassign all checked units">✕ Unassign</button>
+            </div>`;
+        }
+
+        html += '<div class="coc-tree">';
 
         const blueRoots = roots.filter(u => u.side === 'blue');
         const redRoots = roots.filter(u => u.side === 'red');
@@ -1440,6 +2083,38 @@ const KAdmin = (() => {
                 if (unit) _showUserAssignModal(unit);
             });
         });
+
+        // Bind bulk action bar (admin only)
+        if (_adminUnlocked) {
+            // Populate bulk user select from cached participants (exclude observers)
+            const bulkUserSel = document.getElementById('coc-bulk-user-select');
+            if (bulkUserSel && _cachedParticipants.length > 0) {
+                bulkUserSel.innerHTML = '<option value="">— Select user —</option>';
+                _cachedParticipants.filter(p => p.side !== 'observer').forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.user_id;
+                    const sideIcon = p.side === 'blue' ? '🔵' : p.side === 'red' ? '🔴' : '⚪';
+                    opt.textContent = `${sideIcon} ${p.display_name} (${p.role})`;
+                    bulkUserSel.appendChild(opt);
+                });
+            }
+
+            // Select-all checkbox
+            const selectAllCb = document.getElementById('coc-bulk-select-all');
+            if (selectAllCb) {
+                selectAllCb.addEventListener('change', () => {
+                    el.querySelectorAll('.coc-bulk-cb').forEach(cb => { cb.checked = selectAllCb.checked; });
+                });
+            }
+
+            // Bulk assign button
+            const bulkAssignBtn = document.getElementById('coc-bulk-assign-btn');
+            if (bulkAssignBtn) bulkAssignBtn.addEventListener('click', _doBulkAssign);
+
+            // Bulk unassign button
+            const bulkUnassignBtn = document.getElementById('coc-bulk-unassign-btn');
+            if (bulkUnassignBtn) bulkUnassignBtn.addEventListener('click', _doBulkUnassign);
+        }
     }
 
     function _renderCoCNode(unit, depth, allUnits, editable, allUnitMap) {
@@ -1476,7 +2151,13 @@ const KAdmin = (() => {
         }
         const tooltip = tooltipParts.join(' — ');
 
+        // Admin bulk checkbox
+        const bulkCb = _adminUnlocked
+            ? `<input type="checkbox" class="coc-bulk-cb" data-unit-id="${unit.id}" data-side="${unit.side}" style="cursor:pointer;flex-shrink:0;margin-right:3px;" />`
+            : '';
+
         let html = `<div class="coc-node" style="margin-left:${indent}px;" title="${tooltip}">
+            ${bulkCb}
             <span class="coc-expand">${expandIcon}</span>
             <span class="coc-connector" style="background:${sideColor};"></span>
             <span class="coc-name" style="color:#e0e0e0;">${unit.name}</span>
@@ -1488,7 +2169,7 @@ const KAdmin = (() => {
         // User-assign button: shown if current user can manage this unit
         const canUserAssign = _adminUnlocked || _userCanAssign(unit, allUnitMap);
         if (canUserAssign) {
-            html += `<button class="coc-user-assign-btn coc-assign-btn" data-unit-id="${unit.id}" title="Assign a commander to this unit" style="color:#81c784;">👤</button>`;
+            html += `<button class="coc-user-assign-btn" data-unit-id="${unit.id}" title="Assign a commander to this unit" style="color:#81c784;">👤</button>`;
         }
 
         // Admin-only: parent hierarchy buttons
@@ -1506,8 +2187,70 @@ const KAdmin = (() => {
                 html += _renderCoCNode(child, depth + 1, allUnits, editable, allUnitMap);
             });
         }
-
         return html;
+    }
+
+    // ── Bulk Assign / Unassign ─────────────────────────
+
+    async function _doBulkAssign() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) return;
+
+        const bulkUserSel = document.getElementById('coc-bulk-user-select');
+        const userId = bulkUserSel ? bulkUserSel.value : '';
+        if (!userId) { alert('Select a user to assign'); return; }
+
+        const checkedBoxes = document.querySelectorAll('.coc-bulk-cb:checked');
+        if (checkedBoxes.length === 0) { alert('No units selected'); return; }
+
+        const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);
+        const userName = bulkUserSel.options[bulkUserSel.selectedIndex]?.textContent || '';
+
+        if (!confirm(`Assign ${userName} to ${unitIds.length} unit(s)?`)) return;
+
+        let success = 0;
+        for (const unitId of unitIds) {
+            try {
+                const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ assigned_user_ids: [userId] }),
+                });
+                if (resp.ok) success++;
+            } catch {}
+        }
+
+        KGameLog.addEntry(`Bulk assigned ${userName} to ${success}/${unitIds.length} units`, 'info');
+        _loadChainOfCommand();
+        loadPublicCoC();
+    }
+
+    async function _doBulkUnassign() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) return;
+
+        const checkedBoxes = document.querySelectorAll('.coc-bulk-cb:checked');
+        if (checkedBoxes.length === 0) { alert('No units selected'); return; }
+
+        const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);
+
+        if (!confirm(`Unassign commanders from ${unitIds.length} unit(s)?`)) return;
+
+        let success = 0;
+        for (const unitId of unitIds) {
+            try {
+                const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ assigned_user_ids: [] }),
+                });
+                if (resp.ok) success++;
+            } catch {}
+        }
+
+        KGameLog.addEntry(`Bulk unassigned ${success}/${unitIds.length} units`, 'info');
+        _loadChainOfCommand();
+        loadPublicCoC();
     }
 
     let _cocPickerPendingUnitId = null;
@@ -1600,12 +2343,12 @@ const KAdmin = (() => {
         const statusEl = document.getElementById('coc-user-assign-status');
         if (statusEl) statusEl.textContent = '';
 
-        // Populate participant select — filter to same side
+        // Populate participant select — filter to same side, exclude observers (they don't control units)
         const sel = document.getElementById('coc-user-assign-select');
         if (sel) {
             sel.innerHTML = '';
             const sameSideParticipants = _cachedParticipants.filter(
-                p => p.side === unit.side || p.side === 'admin' || p.side === 'observer'
+                p => (p.side === unit.side || p.side === 'admin') && p.side !== 'observer'
             );
             if (sameSideParticipants.length === 0) {
                 const opt = document.createElement('option');
@@ -1675,17 +2418,27 @@ const KAdmin = (() => {
         }
 
         const token = _getToken();
-        const sid = _getUserSessionId() || _getAdminSessionId();
+        // Admin should use admin session; user uses their own session
+        const sid = _adminUnlocked ? (_getAdminSessionId() || _getUserSessionId()) : (_getUserSessionId() || _getAdminSessionId());
         if (!token || !sid) return;
 
         const unitId = _userAssignPendingUnit.id;
         const userId = sel.value;
 
         try {
-            const resp = await fetch(`/api/sessions/${sid}/units/${unitId}/assign`, {
-                method: 'PUT',
+            // Use admin endpoint for assignment (bypasses permission checks)
+            const endpoint = _adminUnlocked
+                ? `/api/admin/sessions/${sid}/units/${unitId}`
+                : `/api/sessions/${sid}/units/${unitId}/assign`;
+            const method = _adminUnlocked ? 'PUT' : 'PUT';
+            const body = _adminUnlocked
+                ? { assigned_user_ids: [userId] }
+                : { assigned_user_ids: [userId] };
+
+            const resp = await fetch(endpoint, {
+                method: method,
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ assigned_user_ids: [userId] }),
+                body: JSON.stringify(body),
             });
             if (resp.ok) {
                 const participant = _cachedParticipants.find(p => p.user_id === userId);
@@ -1711,16 +2464,23 @@ const KAdmin = (() => {
         const statusEl = document.getElementById('coc-user-assign-status');
 
         const token = _getToken();
-        const sid = _getUserSessionId() || _getAdminSessionId();
+        const sid = _adminUnlocked ? (_getAdminSessionId() || _getUserSessionId()) : (_getUserSessionId() || _getAdminSessionId());
         if (!token || !sid) return;
 
         const unitId = _userAssignPendingUnit.id;
 
         try {
-            const resp = await fetch(`/api/sessions/${sid}/units/${unitId}/assign`, {
+            const endpoint = _adminUnlocked
+                ? `/api/admin/sessions/${sid}/units/${unitId}`
+                : `/api/sessions/${sid}/units/${unitId}/assign`;
+            const body = _adminUnlocked
+                ? { assigned_user_ids: [] }
+                : { assigned_user_ids: [] };
+
+            const resp = await fetch(endpoint, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ assigned_user_ids: [] }),
+                body: JSON.stringify(body),
             });
             if (resp.ok) {
                 if (statusEl) { statusEl.textContent = '✓ Unit unassigned'; statusEl.className = 'admin-info admin-success'; }
@@ -1756,6 +2516,26 @@ const KAdmin = (() => {
                 alert(d.detail || 'Failed');
             }
         } catch (err) { alert(err.message); }
+    }
+
+    // ── Unit Edit Modal ──────────────────────────────
+
+    function _initUnitEditModal() {
+        _bind('admin-ue-save', 'click', _saveUnitEdit);
+        _bind('admin-ue-cancel', 'click', () => {
+            const modal = document.getElementById('admin-unit-edit-modal');
+            if (modal) modal.style.display = 'none';
+        });
+        _bind('admin-ue-close', 'click', () => {
+            const modal = document.getElementById('admin-unit-edit-modal');
+            if (modal) modal.style.display = 'none';
+        });
+        const overlay = document.getElementById('admin-unit-edit-modal');
+        if (overlay) {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) overlay.style.display = 'none';
+            });
+        }
     }
 
     // ── Session Context Update ───────────────────────
@@ -1820,8 +2600,11 @@ const KAdmin = (() => {
         init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
         onStateUpdate, resetOnLogout,
         editScenario, deleteScenario, deleteSession, createSessionFromScenario,
+        renameSession, enterSession,
         kickParticipant,
         renameUser, deleteUser, assignUserToSession,
         loadPublicCoC,
+        editUnit, focusUnit, deleteUnit, addUnit,
+        wizardRemoveParticipant: _wizardRemoveParticipant,
     };
 })();

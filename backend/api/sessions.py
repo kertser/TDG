@@ -38,6 +38,7 @@ class SessionRead(BaseModel):
     current_time: datetime | None = None
     participant_count: int = 0
     created_at: datetime
+    name: str | None = None  # session display name (usually from scenario title)
 
 
 class ParticipantRead(BaseModel):
@@ -60,6 +61,7 @@ async def create_session(body: SessionCreate, db: DB, user: CurrentUser):
 
     session = Session(
         scenario_id=scenario.id,
+        name=scenario.title,  # default name from scenario
         status=SessionStatus.lobby,
         tick=0,
         tick_interval=60,
@@ -79,6 +81,10 @@ async def create_session(body: SessionCreate, db: DB, user: CurrentUser):
     db.add(participant)
     await db.flush()
 
+    # Auto-initialize grid and units from scenario (available in lobby)
+    from backend.services.session_service import initialize_session_from_scenario
+    await initialize_session_from_scenario(session, scenario, db)
+
     return SessionRead(
         id=str(session.id),
         scenario_id=str(session.scenario_id),
@@ -88,6 +94,7 @@ async def create_session(body: SessionCreate, db: DB, user: CurrentUser):
         current_time=session.current_time,
         participant_count=1,
         created_at=session.created_at,
+        name=session.name or scenario.title,
     )
 
 
@@ -98,7 +105,7 @@ async def list_sessions(db: DB, user: CurrentUser):
         select(Session)
         .join(SessionParticipant, SessionParticipant.session_id == Session.id)
         .where(SessionParticipant.user_id == user.id)
-        .options(selectinload(Session.participants))
+        .options(selectinload(Session.participants), selectinload(Session.scenario))
     )
     sessions = result.scalars().unique().all()
     return [
@@ -111,6 +118,7 @@ async def list_sessions(db: DB, user: CurrentUser):
             current_time=s.current_time,
             participant_count=len(s.participants),
             created_at=s.created_at,
+            name=s.name or (s.scenario.title if s.scenario else None),
         )
         for s in sessions
     ]
@@ -146,7 +154,7 @@ async def delete_all_sessions(db: DB, user: CurrentUser):
 @router.get("/{session_id}", response_model=SessionRead)
 async def get_session(session_id: uuid.UUID, db: DB):
     result = await db.execute(
-        select(Session).options(selectinload(Session.participants)).where(Session.id == session_id)
+        select(Session).options(selectinload(Session.participants), selectinload(Session.scenario)).where(Session.id == session_id)
     )
     s = result.scalar_one_or_none()
     if s is None:
@@ -160,6 +168,7 @@ async def get_session(session_id: uuid.UUID, db: DB):
         current_time=s.current_time,
         participant_count=len(s.participants),
         created_at=s.created_at,
+        name=s.name or (s.scenario.title if s.scenario else None),
     )
 
 
@@ -185,11 +194,16 @@ async def join_session(session_id: uuid.UUID, body: SessionJoin, db: DB, user: C
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid side: {body.side}")
 
+    # Enforce: observer side can only have observer role
+    role = body.role
+    if side == Side.observer and role in ("commander", "officer"):
+        role = "observer"
+
     participant = SessionParticipant(
         session_id=session_id,
         user_id=user.id,
         side=side,
-        role=body.role,
+        role=role,
     )
     db.add(participant)
     await db.flush()
@@ -242,8 +256,17 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.status != SessionStatus.lobby and session.status != SessionStatus.paused:
-        raise HTTPException(status_code=400, detail=f"Cannot start session in state {session.status.value}")
+
+    # Already running — return current state (idempotent)
+    if session.status == SessionStatus.running:
+        return {
+            "status": session.status.value,
+            "tick": session.tick,
+            "current_time": session.current_time.isoformat() if session.current_time else None,
+        }
+
+    if session.status == SessionStatus.finished:
+        raise HTTPException(status_code=400, detail="Cannot start a finished session — reset it first")
 
     # Initialize units and grid from scenario (idempotent)
     from backend.services.session_service import initialize_session_from_scenario

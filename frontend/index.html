@@ -201,12 +201,18 @@
                             <input type="text" id="sb-unit-lon" placeholder="Lon" style="width:48%;" readonly />
                         </div>
                         <div class="sb-form-row">
-                            <label style="width:50px;">Str</label>
-                            <input type="number" id="sb-unit-strength" value="1.0" min="0" max="1" step="0.1" style="width:60px;" />
-                            <label style="width:50px;">Ammo</label>
-                            <input type="number" id="sb-unit-ammo" value="1.0" min="0" max="1" step="0.1" style="width:60px;" />
-                            <label style="width:40px;">Mor</label>
-                            <input type="number" id="sb-unit-morale" value="0.9" min="0" max="1" step="0.1" style="width:60px;" />
+                            <label style="width:50px;">Str%</label>
+                            <input type="number" id="sb-unit-strength" value="100" min="0" max="100" step="5" style="width:60px;" title="Strength percentage (0-100%)" />
+                            <label style="width:50px;">Ammo%</label>
+                            <input type="number" id="sb-unit-ammo" value="100" min="0" max="100" step="5" style="width:60px;" title="Ammo percentage (0-100%)" />
+                            <label style="width:40px;">Mor%</label>
+                            <input type="number" id="sb-unit-morale" value="90" min="0" max="100" step="5" style="width:60px;" title="Morale percentage (0-100%)" />
+                        </div>
+                        <div class="sb-form-row">
+                            <label style="width:50px;">Det (m)</label>
+                            <input type="number" id="sb-unit-detection" value="1500" min="0" max="10000" step="100" style="width:70px;" title="Detection range in meters" />
+                            <label style="width:50px;">Speed</label>
+                            <input type="number" id="sb-unit-speed" value="4" min="0" max="50" step="0.5" style="width:60px;" title="Movement speed in m/s" />
                         </div>
                         <div style="display:flex;gap:4px;margin-top:4px;">
                             <button id="sb-confirm-unit" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;">✓ Confirm</button>
@@ -235,6 +241,15 @@
 
             <!-- ═══ SESSION SUB-TAB ═══════════════════════ -->
             <div id="admin-session-panel" class="admin-subtab-panel" style="display:none;">
+                <div class="admin-section" style="background:#0a1628;border:1px solid #1a3a5c;border-radius:4px;padding:8px;margin-bottom:8px;">
+                    <div style="font-size:11px;color:#4fc3f7;font-weight:600;margin-bottom:4px;">📋 Session Setup Steps</div>
+                    <div style="font-size:10px;color:#aaa;line-height:1.6;">
+                        1️⃣ <b>Builder</b> → Create & save a scenario with units<br>
+                        2️⃣ <b>Builder</b> → Click "🎮 Session" → Wizard walks you through setup<br>
+                        3️⃣ <b>CoC</b> → Assign commanders to units (bulk or individual)<br>
+                        4️⃣ <b>▶ Enter</b> the session → Click "Start Session"
+                    </div>
+                </div>
                 <div class="admin-section">
                     <h4>Session Management</h4>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
@@ -311,8 +326,11 @@
 
                 <div class="admin-section">
                     <h4>Unit Dashboard</h4>
-                    <button id="admin-load-dashboard" class="admin-btn" style="margin-bottom:4px;" title="Load all unit status data">🔄 Load</button>
-                    <div id="admin-unit-dashboard" style="max-height:200px;overflow-y:auto;"></div>
+                    <div style="display:flex;gap:4px;margin-bottom:4px;">
+                        <button id="admin-load-dashboard" class="admin-btn" title="Load all unit status data">🔄 Load</button>
+                        <button class="admin-btn" onclick="KAdmin.addUnit()" style="background:#1b5e20;color:#a5d6a7;" title="Add a new unit to the session">➕ Add Unit</button>
+                    </div>
+                    <div id="admin-unit-dashboard" style="max-height:250px;overflow-y:auto;"></div>
                 </div>
 
                 <div class="admin-section">
@@ -439,6 +457,149 @@
                 <button id="coc-user-assign-confirm" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;flex:1;">✓ Assign</button>
                 <button id="coc-user-assign-unassign" class="admin-btn admin-btn-danger" style="flex:1;">✕ Unassign</button>
                 <button id="coc-user-assign-cancel" class="admin-btn" style="flex:1;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Admin Unit Edit Modal ─────────────────────── -->
+    <div id="admin-unit-edit-modal" class="admin-modal-overlay" style="display:none;">
+        <div class="admin-modal">
+            <div class="admin-modal-header">
+                <span>✏ Edit Unit</span>
+                <button class="admin-modal-close" id="admin-ue-close" title="Cancel">✕</button>
+            </div>
+            <div class="admin-modal-body">
+                <div id="admin-ue-label" style="font-size:13px;color:#4fc3f7;font-weight:700;margin-bottom:10px;"></div>
+                <div class="admin-modal-row">
+                    <label>Name</label>
+                    <input type="text" id="admin-ue-name" class="admin-modal-select" style="padding:4px 6px;" />
+                </div>
+                <div class="admin-modal-row" style="display:flex;gap:8px;">
+                    <div style="flex:1;">
+                        <label>Side</label>
+                        <select id="admin-ue-side" class="admin-modal-select" style="padding:4px 6px;">
+                            <option value="blue">🔵 Blue</option>
+                            <option value="red">🔴 Red</option>
+                        </select>
+                    </div>
+                    <div style="flex:2;">
+                        <label>Unit Type</label>
+                        <select id="admin-ue-unit-type" class="admin-modal-select" style="padding:4px 6px;">
+                        </select>
+                    </div>
+                </div>
+                <div class="admin-modal-row">
+                    <label>Strength %</label>
+                    <input type="number" id="admin-ue-strength" min="0" max="100" step="5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                </div>
+                <div class="admin-modal-row">
+                    <label>Morale %</label>
+                    <input type="number" id="admin-ue-morale" min="0" max="100" step="5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                </div>
+                <div class="admin-modal-row">
+                    <label>Ammo %</label>
+                    <input type="number" id="admin-ue-ammo" min="0" max="100" step="5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                </div>
+                <div class="admin-modal-row">
+                    <label>Detection (m)</label>
+                    <input type="number" id="admin-ue-detection" min="0" max="10000" step="100" class="admin-modal-select" style="width:100px;padding:4px 6px;" />
+                </div>
+                <div class="admin-modal-row">
+                    <label>Speed (m/s)</label>
+                    <input type="number" id="admin-ue-speed" min="0" max="50" step="0.5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                </div>
+                <div class="admin-modal-row">
+                    <label>Position</label>
+                    <input type="text" id="admin-ue-lat" placeholder="Lat" class="admin-modal-select" style="width:100px;padding:4px 6px;" title="Latitude" />
+                    <input type="text" id="admin-ue-lon" placeholder="Lon" class="admin-modal-select" style="width:100px;padding:4px 6px;" title="Longitude" />
+                </div>
+                <div id="admin-ue-status" class="admin-info" style="margin-top:6px;"></div>
+            </div>
+            <div class="admin-modal-footer">
+                <button id="admin-ue-save" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;flex:1;">✓ Save</button>
+                <button id="admin-ue-cancel" class="admin-btn" style="flex:1;">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Session Creation Wizard Modal ──────────────── -->
+    <div id="session-wizard-modal" class="admin-modal-overlay" style="display:none;">
+        <div class="admin-modal" style="max-width:480px;min-height:320px;">
+            <div class="admin-modal-header">
+                <span>🧙 New Session Wizard</span>
+                <button class="admin-modal-close" id="wizard-close" title="Cancel">✕</button>
+            </div>
+            <div class="admin-modal-body">
+                <!-- Step indicator -->
+                <div class="wizard-steps-indicator">
+                    <div class="wizard-step-dot active" id="wizard-ind-1"><span>1</span> Setup</div>
+                    <div class="wizard-step-dot" id="wizard-ind-2"><span>2</span> Participants</div>
+                    <div class="wizard-step-dot" id="wizard-ind-3"><span>3</span> Done</div>
+                </div>
+
+                <!-- Step 1: Session Setup -->
+                <div id="wizard-step-1">
+                    <div style="font-size:11px;color:#aaa;margin-bottom:8px;">
+                        Creating session from: <b id="wizard-scenario-info" style="color:#4fc3f7;"></b>
+                    </div>
+                    <div class="admin-modal-row">
+                        <label>Session Name</label>
+                        <input type="text" id="wizard-session-name" class="admin-modal-select" style="padding:4px 6px;" placeholder="e.g. Training Exercise Alpha" />
+                    </div>
+                    <div class="admin-modal-row">
+                        <label>Turn Interval (min)</label>
+                        <input type="number" id="wizard-turn-interval" value="1" min="1" max="60" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Minutes of game time per turn" />
+                    </div>
+                    <div style="font-size:10px;color:#666;margin-top:8px;">
+                        Grid and units will be copied from the scenario automatically.
+                    </div>
+                </div>
+
+                <!-- Step 2: Add Participants -->
+                <div id="wizard-step-2" style="display:none;">
+                    <div style="font-size:11px;color:#aaa;margin-bottom:6px;">
+                        Add users to this session. You can also add more later.
+                    </div>
+                    <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+                        <select id="wizard-p-user" class="admin-modal-select" style="flex:2;min-width:100px;padding:3px 4px;font-size:11px;">
+                        </select>
+                        <select id="wizard-p-side" class="admin-modal-select" style="width:80px;padding:3px 4px;font-size:11px;">
+                            <option value="blue">🔵 Blue</option>
+                            <option value="red">🔴 Red</option>
+                            <option value="observer">👁 Observer</option>
+                        </select>
+                        <select id="wizard-p-role" class="admin-modal-select" style="width:90px;padding:3px 4px;font-size:11px;">
+                            <option value="commander">Commander</option>
+                            <option value="officer">Officer</option>
+                            <option value="observer">Observer</option>
+                        </select>
+                        <button id="wizard-add-participant-btn" class="admin-btn" style="padding:3px 8px;font-size:11px;background:#1b5e20;color:#a5d6a7;">+ Add</button>
+                    </div>
+                    <div id="wizard-participants-list" style="max-height:180px;overflow-y:auto;">
+                        <div style="color:#888;font-size:11px;padding:4px;">No participants added yet</div>
+                    </div>
+                    <div id="wizard-create-status" class="admin-info" style="margin-top:6px;"></div>
+                </div>
+
+                <!-- Step 3: Done -->
+                <div id="wizard-step-3" style="display:none;">
+                    <div style="text-align:center;padding:16px 0;">
+                        <div style="font-size:28px;margin-bottom:8px;">✅</div>
+                        <div style="font-size:14px;color:#a5d6a7;font-weight:700;margin-bottom:8px;">Session Created!</div>
+                        <div style="font-size:11px;color:#aaa;line-height:1.6;">
+                            Units and grid are ready.<br>
+                            Next step: Open the <b>CoC</b> tab to assign commanders to units,<br>
+                            then <b>Enter</b> the session and click <b>Start</b>.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="admin-modal-footer">
+                <button id="wizard-prev-btn" class="admin-btn" style="flex:1;display:none;">← Back</button>
+                <button id="wizard-next-btn" class="admin-btn" style="flex:1;background:#0d3460;color:#4fc3f7;">Next →</button>
+                <button id="wizard-create-btn" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;display:none;">🎮 Create Session</button>
+                <button id="wizard-done-btn" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;display:none;">✓ Open CoC Setup</button>
+                <button id="wizard-cancel-btn" class="admin-btn" style="flex:1;">Cancel</button>
             </div>
         </div>
     </div>

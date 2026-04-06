@@ -26,6 +26,10 @@ class UnitAssignRequest(BaseModel):
     assigned_user_ids: list[str]
 
 
+class UnitRenameRequest(BaseModel):
+    name: str
+
+
 @router.get("/{session_id}/units")
 async def get_units(
     session_id: uuid.UUID,
@@ -97,6 +101,42 @@ async def get_unit(
         if u["id"] == str(unit_id):
             return u
     raise HTTPException(status_code=404, detail="Unit not found or not visible")
+
+
+@router.put("/{session_id}/units/{unit_id}/rename")
+async def rename_unit(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    body: UnitRenameRequest,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """Rename a unit. Requires command authority over the unit."""
+    side = participant.side.value
+    user_id = str(participant.user_id)
+
+    result = await db.execute(
+        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
+    )
+    unit = result.scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+
+    # Admin/observer can rename any unit
+    if side not in ("admin", "observer"):
+        if unit.side.value != side:
+            raise HTTPException(status_code=403, detail="Cannot rename units from other side")
+        has_authority = await check_command_authority(user_id, unit, session_id, db)
+        if not has_authority:
+            raise HTTPException(status_code=403, detail="No command authority over this unit")
+
+    new_name = body.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+
+    unit.name = new_name
+    await db.flush()
+    return {"id": str(unit.id), "name": unit.name}
 
 
 @router.put("/{session_id}/units/{unit_id}/assign")

@@ -262,11 +262,12 @@ const KSessionUI = (() => {
                 const card = document.createElement('div');
                 card.className = 'session-card';
                 const statusIcon = s.status === 'running' ? '🟢' : s.status === 'paused' ? '🟡' : s.status === 'lobby' ? '⚪' : '🔴';
+                const displayName = s.name || 'Session ' + s.id.substring(0, 8) + '...';
                 card.innerHTML = `
-                    <div class="title">${statusIcon} Session ${s.id.substring(0, 8)}...</div>
+                    <div class="title">${statusIcon} ${displayName}</div>
                     <div class="meta">Status: ${s.status} | Turn: ${s.tick} | Players: ${s.participant_count}</div>
                 `;
-                card.addEventListener('click', () => joinAndEnter(s.id));
+                card.addEventListener('click', () => joinAndEnter(s.id, s));
                 listEl.appendChild(card);
             });
         } catch (err) {
@@ -274,7 +275,7 @@ const KSessionUI = (() => {
         }
     }
 
-    async function joinAndEnter(sessionId) {
+    async function joinAndEnter(sessionId, sessionData) {
         try {
             // Try to join (may already be joined)
             await fetch(`/api/sessions/${sessionId}/join`, {
@@ -288,13 +289,27 @@ const KSessionUI = (() => {
         } catch {}
 
         currentSessionId = sessionId;
-        document.getElementById('session-info').textContent = `Session: ${sessionId.substring(0, 8)}...`;
+        const displayName = (sessionData && sessionData.name) || sessionId.substring(0, 8) + '...';
+        document.getElementById('session-info').textContent = `📋 ${displayName}`;
 
-        // Show session control buttons
+        // Show session control buttons based on status
         const startBtn = document.getElementById('start-session-btn');
         const turnBtn = document.getElementById('turn-btn');
-        if (startBtn) startBtn.style.display = 'block';
-        if (turnBtn) turnBtn.style.display = 'block';
+        const status = sessionData && sessionData.status;
+
+        if (status === 'running') {
+            // Already running — show only turn button
+            if (startBtn) startBtn.style.display = 'none';
+            if (turnBtn) turnBtn.style.display = 'block';
+        } else if (status === 'paused') {
+            // Paused — show start (to resume) and turn
+            if (startBtn) { startBtn.style.display = 'block'; startBtn.textContent = '▶ Resume Session'; }
+            if (turnBtn) turnBtn.style.display = 'block';
+        } else {
+            // Lobby or unknown — show start button
+            if (startBtn) { startBtn.style.display = 'block'; startBtn.textContent = 'Start Session'; }
+            if (turnBtn) turnBtn.style.display = 'none';
+        }
 
         // Notify app to initialize map layers
         if (window.onSessionJoined) {
@@ -306,5 +321,5 @@ const KSessionUI = (() => {
         }
     }
 
-    return { init, getToken, getUserId, getSessionId, loadSessions };
+    return { init, getToken, getUserId, getSessionId, loadSessions, joinAndEnter };
 })();

@@ -4,7 +4,7 @@
  */
 const KUI = (() => {
     function init() {
-        // Tab switching
+        // Tab switching (with auto-load for CoC tab)
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -12,6 +12,11 @@ const KUI = (() => {
                 btn.classList.add('active');
                 const panel = document.getElementById(btn.dataset.tab);
                 if (panel) panel.classList.add('active');
+
+                // Auto-load data for specific tabs
+                if (btn.dataset.tab === 'coc-tab') {
+                    try { KAdmin.loadPublicCoC(); } catch(e) {}
+                }
             });
         });
 

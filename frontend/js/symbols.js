@@ -60,10 +60,18 @@ const KSymbols = (() => {
             });
         }
 
-        const sym = new ms.Symbol(sidc, {
-            size: size,
-            direction: options.direction || 0,
-        });
+        // Build milsymbol options — do NOT pass direction (we draw our own
+        // movement arrows in units.js; milsymbol's direction indicator adds
+        // unwanted staff/arrow lines extending from the symbol frame).
+        const symOpts = { size: size };
+
+        // Optional: show unit size info below symbol
+        if (options.infoFields) {
+            if (options.infoFields.uniqueDesignation)
+                symOpts.uniqueDesignation = options.infoFields.uniqueDesignation;
+        }
+
+        const sym = new ms.Symbol(sidc, symOpts);
 
         const svg = sym.asSVG();
         const anchor = sym.getAnchor();

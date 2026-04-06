@@ -38,6 +38,20 @@ const KUnits = (() => {
     let _shiftHeld = false;
     const SELECT_THRESHOLD = 6;
 
+    // ── Personnel/unit size by type ─────────────────────
+    const PERSONNEL = {
+        'tank_company':      60,
+        'mech_company':      100,
+        'infantry_company':  120,
+        'infantry_platoon':  30,
+        'mortar_section':    12,
+        'at_team':           6,
+        'recon_team':        6,
+        'observation_post':  4,
+        'sniper_team':       2,
+    };
+    const DEFAULT_PERSONNEL = 20;
+
     // ── Fire range by unit type (meters) ─────────────
     const FIRE_RANGE = {
         'tank_company':      2500,
@@ -51,6 +65,18 @@ const KUnits = (() => {
         'sniper_team':       1000,
     };
     const DEFAULT_FIRE_RANGE = 500;
+
+    // ── Status icons ────────────────────────────────────
+    const STATUS_ICONS = {
+        idle: '⏸', moving: '🚶', engaging: '⚔', defending: '🛡',
+        retreating: '↩', observing: '👁', suppressed: '💥',
+        broken: '💔', destroyed: '☠', supporting: '🤝',
+    };
+    const STATUS_COLORS = {
+        idle: '#aaa', moving: '#4fc3f7', engaging: '#f44336', defending: '#66bb6a',
+        retreating: '#ff9800', observing: '#90caf9', suppressed: '#e91e63',
+        broken: '#9c27b0', destroyed: '#666', supporting: '#4caf50',
+    };
 
     function init(map) {
         _map = map;
@@ -288,10 +314,15 @@ const KUnits = (() => {
             // Detail popup (right-click)
             marker.bindPopup(_buildPopupHtml(u));
 
-            // Tooltip with unit name + range summary
+            // Tooltip with unit name + range summary + size + status
             const detR = u.detection_range_m || 2000;
             const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
-            const tooltipHtml = `<b>${u.name}</b><br>`
+            const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
+            const status = u.unit_status || 'idle';
+            const statusIcon = STATUS_ICONS[status] || '•';
+            const statusColor = STATUS_COLORS[status] || '#aaa';
+            const tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span><br>`
+                + `<span style="color:${statusColor};font-weight:600;">${statusIcon} ${status}</span> `
                 + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}</span> `
                 + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
             marker.bindTooltip(tooltipHtml, {
@@ -317,16 +348,16 @@ const KUnits = (() => {
             // LEFT-CLICK: select (replace, or shift-add)
             marker.on('click', (e) => {
                 L.DomEvent.stopPropagation(e);
+                _closeUnitContextMenu();
                 const shiftKey = e.originalEvent && e.originalEvent.shiftKey;
                 _selectUnit(u.id, shiftKey);
             });
 
-            // RIGHT-CLICK: detail popup
+            // RIGHT-CLICK: custom context menu
             marker.on('contextmenu', (e) => {
                 L.DomEvent.stopPropagation(e);
                 L.DomEvent.preventDefault(e);
-                marker.setPopupContent(_buildPopupHtml(u));
-                marker.openPopup();
+                _showUnitContextMenu(u, e.originalEvent);
             });
 
             unitsLayer.addLayer(marker);
@@ -381,9 +412,15 @@ const KUnits = (() => {
         const userId = KSessionUI.getUserId();
         const isAssignedToMe = u.assigned_user_ids && u.assigned_user_ids.includes(userId);
 
+        const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
+        const status = u.unit_status || 'idle';
+        const statusIcon = STATUS_ICONS[status] || '•';
+        const statusColor = STATUS_COLORS[status] || '#aaa';
+
         let html = `<b>${u.name}</b><br>`;
-        html += `<span style="color:#888">${u.unit_type}</span><br>`;
+        html += `<span style="color:#888">${u.unit_type}</span> <span style="font-size:10px;color:#aaa;">(${pers} pers)</span><br>`;
         html += `Side: <b>${u.side}</b><br>`;
+        html += `Status: <span style="color:${statusColor};font-weight:600;">${statusIcon} ${status}</span><br>`;
 
         if (u.strength != null) {
             const pct = (u.strength * 100).toFixed(0);
@@ -403,21 +440,22 @@ const KUnits = (() => {
         html += `<span style="font-size:10px;color:#64b5f6">👁 ${_fmtDist(detR)}</span>`;
         html += ` <span style="font-size:10px;color:#ff9800">🎯 ${_fmtDist(fireR)}</span><br>`;
 
+        // Current task info
+        if (u.current_task && u.current_task.type) {
+            html += `<span style="font-size:10px;color:#ffd740;">📋 Task: ${u.current_task.type}</span><br>`;
+        }
+
         // ── Chain of Command info ────────────────────────
-        // Commanding officer (nearest assigned user up the parent chain)
         if (u.commanding_user_name) {
             const isSelfCO = u.assigned_user_names && u.assigned_user_names.length > 0
                 && u.assigned_user_names.includes(u.commanding_user_name);
             if (isSelfCO) {
-                // Unit's own assigned user is the CO
                 html += `<span style="font-size:10px;color:#81c784;">⭐ CO: ${u.commanding_user_name}</span><br>`;
             } else {
-                // CO is from an ancestor in the hierarchy
                 html += `<span style="font-size:10px;color:#90caf9;">⬆ CO: ${u.commanding_user_name}</span><br>`;
             }
         }
 
-        // Direct assignment info
         if (u.assigned_user_names && u.assigned_user_names.length > 0) {
             const names = u.assigned_user_names.join(', ');
             const meTag = isAssignedToMe ? ' (you)' : '';
@@ -444,6 +482,123 @@ const KUnits = (() => {
         }
 
         return html;
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Unit Context Menu (right-click) ───────────────
+    // ══════════════════════════════════════════════════
+
+    let _unitCtxMenuEl = null;
+
+    function _createUnitContextMenu() {
+        if (_unitCtxMenuEl) return _unitCtxMenuEl;
+        const div = document.createElement('div');
+        div.id = 'unit-ctx-menu';
+        div.className = 'ctx-menu';
+        div.style.display = 'none';
+        document.body.appendChild(div);
+        _unitCtxMenuEl = div;
+
+        // Close on click outside
+        document.addEventListener('click', (e) => {
+            if (!div.contains(e.target)) _closeUnitContextMenu();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') _closeUnitContextMenu();
+        });
+
+        return div;
+    }
+
+    function _closeUnitContextMenu() {
+        if (_unitCtxMenuEl) _unitCtxMenuEl.style.display = 'none';
+    }
+
+    function _showUnitContextMenu(u, e) {
+        const menu = _createUnitContextMenu();
+        const canSel = _canSelect(u);
+        const isSel = selectedUnitIds.has(u.id);
+        const status = u.unit_status || 'idle';
+        const statusIcon = STATUS_ICONS[status] || '•';
+        const statusColor = STATUS_COLORS[status] || '#aaa';
+
+        let html = `<div class="ctx-menu-header" style="border-bottom:1px solid #333;padding:6px 10px;">
+            <b>${u.name}</b><br>
+            <span style="font-size:10px;color:#888;">${u.unit_type}</span>
+            <span style="font-size:10px;color:${statusColor};margin-left:4px;">${statusIcon} ${status}</span>
+        </div>`;
+
+        // Select/deselect
+        if (canSel) {
+            const selLabel = isSel ? '✓ Deselect' : '☐ Select';
+            html += `<div class="ctx-item" data-action="select">${selLabel}</div>`;
+        }
+
+        // Info (open popup)
+        html += `<div class="ctx-item" data-action="info">ℹ Details</div>`;
+
+        // Rename (only if commanding this unit)
+        if (canSel) {
+            html += `<div class="ctx-item" data-action="rename">✏ Rename</div>`;
+        }
+
+        menu.innerHTML = html;
+
+        // Position the menu
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        menu.style.display = 'block';
+
+        // Ensure menu stays within viewport
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 5) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
+
+        // Bind actions
+        menu.querySelectorAll('.ctx-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const action = item.dataset.action;
+                _closeUnitContextMenu();
+                if (action === 'select') {
+                    _selectUnit(u.id, false);
+                } else if (action === 'info') {
+                    const marker = unitMarkers[u.id];
+                    if (marker) {
+                        marker.setPopupContent(_buildPopupHtml(u));
+                        marker.openPopup();
+                    }
+                } else if (action === 'rename') {
+                    _renameUnit(u);
+                }
+            });
+        });
+    }
+
+    /** Rename a unit via API. */
+    async function _renameUnit(u) {
+        const newName = prompt('Rename unit:', u.name);
+        if (!newName || newName.trim() === u.name) return;
+        const token = KSessionUI.getToken();
+        const sessionId = KSessionUI.getSessionId();
+        if (!token || !sessionId) return;
+
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/rename`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ name: newName.trim() }),
+            });
+            if (resp.ok) {
+                // Update local data and re-render
+                u.name = newName.trim();
+                render(allUnitsData);
+                // Refresh CoC tree
+                try { KAdmin.loadPublicCoC(); } catch(e) {}
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Rename failed');
+            }
+        } catch (err) { alert(err.message); }
     }
 
     function _fmtDist(m) {

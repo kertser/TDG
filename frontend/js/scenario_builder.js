@@ -22,15 +22,20 @@ const KScenarioBuilder = (() => {
 
     // ── Unit type registry ──────────────────────────────
     const UNIT_TYPES = {
-        infantry_platoon:  { label: 'Infantry Platoon',  sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 4.0, det: 1500, fire: 600 },
-        infantry_company:  { label: 'Infantry Company',  sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.5, det: 1500, fire: 800 },
-        tank_company:      { label: 'Tank Company',      sidc_blue: '10031000151301000000', sidc_red: '10061000151301000000', speed: 8.0, det: 2000, fire: 2500 },
-        mech_company:      { label: 'Mech Infantry Co',  sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 7.0, det: 1800, fire: 1500 },
-        mortar_section:    { label: 'Mortar Section',    sidc_blue: '10031000151215000000', sidc_red: '10061000151215000000', speed: 3.0, det: 1000, fire: 3500 },
-        at_team:           { label: 'Anti-Tank Team',    sidc_blue: '10031000151211004000', sidc_red: '10061000151211004000', speed: 3.5, det: 2000, fire: 2000 },
-        recon_team:        { label: 'Recon Team',        sidc_blue: '10031000151213000000', sidc_red: '10061000151213000000', speed: 5.0, det: 3000, fire: 400 },
-        observation_post:  { label: 'Observation Post',  sidc_blue: '10031000151213000000', sidc_red: '10061000151213000000', speed: 5.0, det: 4000, fire: 300 },
-        sniper_team:       { label: 'Sniper Team',       sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.0, det: 2500, fire: 1000 },
+        headquarters:      { label: 'Headquarters',       sidc_blue: '10031000151200000000', sidc_red: '10061000151200000000', speed: 3.0, det: 2000, fire: 200,  personnel: 20, isHQ: true },
+        command_post:      { label: 'Command Post',       sidc_blue: '10031000151200000000', sidc_red: '10061000151200000000', speed: 2.0, det: 1500, fire: 100,  personnel: 10, isHQ: true },
+        infantry_platoon:  { label: 'Infantry Platoon',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 4.0, det: 1500, fire: 600,  personnel: 30 },
+        infantry_company:  { label: 'Infantry Company',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.5, det: 1500, fire: 800,  personnel: 120 },
+        tank_company:      { label: 'Tank Company',       sidc_blue: '10031000151301000000', sidc_red: '10061000151301000000', speed: 8.0, det: 2000, fire: 2500, personnel: 60 },
+        mech_company:      { label: 'Mech Infantry Co',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 7.0, det: 1800, fire: 1500, personnel: 100 },
+        artillery_battery: { label: 'Artillery Battery',  sidc_blue: '10031000151303000000', sidc_red: '10061000151303000000', speed: 3.0, det: 1200, fire: 5000, personnel: 40 },
+        mortar_section:    { label: 'Mortar Section',     sidc_blue: '10031000151215000000', sidc_red: '10061000151215000000', speed: 3.0, det: 1000, fire: 3500, personnel: 12 },
+        at_team:           { label: 'Anti-Tank Team',     sidc_blue: '10031000151211004000', sidc_red: '10061000151211004000', speed: 3.5, det: 2000, fire: 2000, personnel: 6 },
+        recon_team:        { label: 'Recon Team',         sidc_blue: '10031000151213000000', sidc_red: '10061000151213000000', speed: 5.0, det: 3000, fire: 400,  personnel: 6 },
+        observation_post:  { label: 'Observation Post',   sidc_blue: '10031000151213000000', sidc_red: '10061000151213000000', speed: 5.0, det: 4000, fire: 300,  personnel: 4 },
+        sniper_team:       { label: 'Sniper Team',        sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.0, det: 2500, fire: 1000, personnel: 2 },
+        engineer_platoon:  { label: 'Engineer Platoon',   sidc_blue: '10031000151206000000', sidc_red: '10061000151206000000', speed: 3.5, det: 1200, fire: 400,  personnel: 30 },
+        logistics_unit:    { label: 'Logistics Unit',     sidc_blue: '10031000151207000000', sidc_red: '10061000151207000000', speed: 5.0, det: 800,  fire: 100,  personnel: 20 },
     };
 
     function init(map) {
@@ -151,9 +156,12 @@ const KScenarioBuilder = (() => {
         document.getElementById('sb-unit-name').value = existing ? existing.name : '';
         document.getElementById('sb-unit-side').value = existing ? existing.side : 'blue';
         document.getElementById('sb-unit-type').value = existing ? existing.unit_type : 'infantry_platoon';
-        document.getElementById('sb-unit-strength').value = existing ? existing.strength : 1.0;
-        document.getElementById('sb-unit-ammo').value = existing ? existing.ammo : 1.0;
-        document.getElementById('sb-unit-morale').value = existing ? existing.morale : 0.9;
+        // Show as percentages (0-100)
+        document.getElementById('sb-unit-strength').value = existing ? Math.round(existing.strength * 100) : 100;
+        document.getElementById('sb-unit-ammo').value = existing ? Math.round(existing.ammo * 100) : 100;
+        document.getElementById('sb-unit-morale').value = existing ? Math.round(existing.morale * 100) : 90;
+        document.getElementById('sb-unit-detection').value = existing ? existing.detection_range_m : 1500;
+        document.getElementById('sb-unit-speed').value = existing ? existing.move_speed_mps : 4.0;
 
         const title = document.getElementById('sb-form-title');
         if (title) title.textContent = existing ? 'Edit Unit' : 'Place Unit';
@@ -179,6 +187,13 @@ const KScenarioBuilder = (() => {
             const count = _stagedUnits.filter(u => u.side === side && u.unit_type === typeEl.value).length + 1;
             nameEl.value = `${info.label} ${count}`;
         }
+        // Auto-fill detection and speed from type defaults
+        if (info) {
+            const detEl = document.getElementById('sb-unit-detection');
+            const spdEl = document.getElementById('sb-unit-speed');
+            if (detEl) detEl.value = info.det || 1500;
+            if (spdEl) spdEl.value = info.speed || 4.0;
+        }
     }
 
     function _confirmUnit() {
@@ -187,9 +202,13 @@ const KScenarioBuilder = (() => {
         const name = document.getElementById('sb-unit-name').value.trim();
         const side = document.getElementById('sb-unit-side').value;
         const unit_type = document.getElementById('sb-unit-type').value;
-        const strength = parseFloat(document.getElementById('sb-unit-strength').value) || 1.0;
-        const ammo = parseFloat(document.getElementById('sb-unit-ammo').value) || 1.0;
-        const morale = parseFloat(document.getElementById('sb-unit-morale').value) || 0.9;
+        // Form values are in percentages (0-100), store as 0.0-1.0
+        const strengthPct = parseFloat(document.getElementById('sb-unit-strength').value) || 100;
+        const ammoPct = parseFloat(document.getElementById('sb-unit-ammo').value) || 100;
+        const moralePct = parseFloat(document.getElementById('sb-unit-morale').value) || 90;
+        const strength = Math.max(0, Math.min(1, strengthPct / 100));
+        const ammo = Math.max(0, Math.min(1, ammoPct / 100));
+        const morale = Math.max(0, Math.min(1, moralePct / 100));
 
         if (!name) { alert('Unit name required'); return; }
         if (isNaN(lat) || isNaN(lon)) { alert('Invalid coordinates'); return; }
@@ -197,12 +216,18 @@ const KScenarioBuilder = (() => {
         const info = UNIT_TYPES[unit_type] || {};
         const sidc = side === 'red' ? (info.sidc_red || '') : (info.sidc_blue || '');
 
+        // Read detection and speed from form (or fall back to type defaults)
+        const detEl = document.getElementById('sb-unit-detection');
+        const spdEl = document.getElementById('sb-unit-speed');
+        const detection_range_m = detEl ? (parseFloat(detEl.value) || info.det || 1500) : (info.det || 1500);
+        const move_speed_mps = spdEl ? (parseFloat(spdEl.value) || info.speed || 4.0) : (info.speed || 4.0);
+
         const unitData = {
             tempId: _editingIdx >= 0 ? _stagedUnits[_editingIdx].tempId : 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
             side, name, unit_type, sidc, lat, lon,
             strength, ammo, morale,
-            move_speed_mps: info.speed || 4.0,
-            detection_range_m: info.det || 1500,
+            move_speed_mps: move_speed_mps,
+            detection_range_m: detection_range_m,
             capabilities: {},
         };
 
@@ -244,8 +269,13 @@ const KScenarioBuilder = (() => {
             const info = UNIT_TYPES[u.unit_type] || {};
             const detR = u.detection_range_m || info.det || 1500;
             const fireR = info.fire || 600;
+            const pers = info.personnel || '?';
+            const strPct = Math.round((u.strength || 1) * 100);
+            const morPct = Math.round((u.morale || 0.9) * 100);
+            const ammPct = Math.round((u.ammo || 1) * 100);
             const tooltipHtml = `<b>${u.name}</b> <span style="color:${u.side === 'red' ? '#ef5350' : '#4fc3f7'}">[${u.side}]</span><br>`
-                + `<span style="font-size:10px;color:#aaa">${info.label || u.unit_type}</span><br>`
+                + `<span style="font-size:10px;color:#aaa">${info.label || u.unit_type} (${pers} pers)</span><br>`
+                + `<span style="font-size:10px;">Str:${strPct}% Mor:${morPct}% Ammo:${ammPct}%</span><br>`
                 + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}</span> `
                 + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
             marker.bindTooltip(tooltipHtml, {
@@ -326,9 +356,15 @@ const KScenarioBuilder = (() => {
             html += '<div style="color:#4fc3f7;font-size:10px;font-weight:700;margin-bottom:2px;">BLUE (' + blues.length + ')</div>';
             blues.forEach((u, i) => {
                 const idx = _stagedUnits.indexOf(u);
+                const info = UNIT_TYPES[u.unit_type] || {};
+                const strPct = Math.round((u.strength || 1) * 100);
+                const morPct = Math.round((u.morale || 0.9) * 100);
+                const ammPct = Math.round((u.ammo || 1) * 100);
+                const pers = info.personnel || '?';
                 html += `<div class="sb-unit-item" onclick="KScenarioBuilder.editUnit(${idx})">
                     <span class="sb-unit-name">${u.name}</span>
                     <span class="sb-unit-type-badge">${u.unit_type}</span>
+                    <span style="font-size:9px;color:#aaa;margin-left:auto;">${pers}p S${strPct}% M${morPct}% A${ammPct}%</span>
                     <button class="sb-unit-del" onclick="event.stopPropagation();KScenarioBuilder.removeUnit(${idx})">✕</button>
                 </div>`;
             });
@@ -337,9 +373,15 @@ const KScenarioBuilder = (() => {
             html += '<div style="color:#ef5350;font-size:10px;font-weight:700;margin:4px 0 2px;">RED (' + reds.length + ')</div>';
             reds.forEach((u) => {
                 const idx = _stagedUnits.indexOf(u);
+                const info = UNIT_TYPES[u.unit_type] || {};
+                const strPct = Math.round((u.strength || 1) * 100);
+                const morPct = Math.round((u.morale || 0.9) * 100);
+                const ammPct = Math.round((u.ammo || 1) * 100);
+                const pers = info.personnel || '?';
                 html += `<div class="sb-unit-item sb-unit-red" onclick="KScenarioBuilder.editUnit(${idx})">
                     <span class="sb-unit-name">${u.name}</span>
                     <span class="sb-unit-type-badge">${u.unit_type}</span>
+                    <span style="font-size:9px;color:#aaa;margin-left:auto;">${pers}p S${strPct}% M${morPct}% A${ammPct}%</span>
                     <button class="sb-unit-del" onclick="event.stopPropagation();KScenarioBuilder.removeUnit(${idx})">✕</button>
                 </div>`;
             });
@@ -545,11 +587,16 @@ const KScenarioBuilder = (() => {
         const sideColor = u.side === 'red' ? '#ef5350' : '#4fc3f7';
         const oppositeSide = u.side === 'red' ? 'blue' : 'red';
         const oppositeSideColor = oppositeSide === 'red' ? '#ef5350' : '#4fc3f7';
+        const strPct = Math.round((u.strength || 1) * 100);
+        const morPct = Math.round((u.morale || 0.9) * 100);
+        const ammPct = Math.round((u.ammo || 1) * 100);
+        const pers = info.personnel || '?';
 
         _ctxMenuEl.innerHTML = `
             <div class="ctx-menu-header" style="border-left:3px solid ${sideColor};padding-left:8px;">
                 <div style="font-size:12px;font-weight:700;color:#e0e0e0;">${u.name}</div>
-                <div style="font-size:10px;color:#aaa;margin-top:1px;">${info.label || u.unit_type} · <span style="color:${sideColor}">${u.side.toUpperCase()}</span></div>
+                <div style="font-size:10px;color:#aaa;margin-top:1px;">${info.label || u.unit_type} (${pers}p) · <span style="color:${sideColor}">${u.side.toUpperCase()}</span></div>
+                <div style="font-size:10px;color:#888;margin-top:2px;">Str:${strPct}% Mor:${morPct}% Ammo:${ammPct}%</div>
             </div>
             <div class="ctx-menu-section" style="padding:2px 0;">
                 <button class="ctx-item" data-action="edit" title="Edit unit properties">
@@ -570,9 +617,9 @@ const KScenarioBuilder = (() => {
                 </button>
             </div>
             <div class="ctx-menu-section" style="padding:2px 0;border-top:1px solid rgba(15,52,96,0.4);">
-                <button class="ctx-item" data-action="strength100" title="Set strength to 100%">💪 Full Strength</button>
-                <button class="ctx-item" data-action="strength50" title="Set strength to 50%">⚠ Half Strength</button>
-                <button class="ctx-item" data-action="strength25" title="Set strength to 25%">🩸 Quarter Strength</button>
+                <button class="ctx-item" data-action="strength100" title="Set strength to 100%">💪 Full Strength (100%)</button>
+                <button class="ctx-item" data-action="strength50" title="Set strength to 50%">⚠ Half Strength (50%)</button>
+                <button class="ctx-item" data-action="strength25" title="Set strength to 25%">🩸 Quarter Strength (25%)</button>
             </div>
             <div class="ctx-menu-section" style="padding:2px 0;border-top:1px solid rgba(15,52,96,0.4);">
                 <button class="ctx-item ctx-item-danger" data-action="delete" title="Remove this unit">
