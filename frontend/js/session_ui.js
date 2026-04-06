@@ -28,6 +28,27 @@ const KSessionUI = (() => {
             logoutBtn.addEventListener('click', _doLogout);
         }
 
+        // ── User Dropdown Menu ──────────────────
+        const userInfo = document.getElementById('user-info');
+        const userDropdown = document.getElementById('user-dropdown');
+        if (userInfo && userDropdown) {
+            userInfo.addEventListener('click', (e) => {
+                e.stopPropagation();
+                userDropdown.style.display = userDropdown.style.display === 'none' ? 'block' : 'none';
+            });
+            document.addEventListener('click', () => { userDropdown.style.display = 'none'; });
+            userDropdown.addEventListener('click', (e) => e.stopPropagation());
+
+            const renameBtn = document.getElementById('user-menu-rename');
+            if (renameBtn) renameBtn.addEventListener('click', _renameCurrentUser);
+            const infoBtn = document.getElementById('user-menu-info');
+            if (infoBtn) infoBtn.addEventListener('click', _showUserInfo);
+            const settingsBtn = document.getElementById('user-menu-settings');
+            if (settingsBtn) settingsBtn.addEventListener('click', () => alert('Settings coming soon'));
+            const menuLogout = document.getElementById('user-menu-logout');
+            if (menuLogout) menuLogout.addEventListener('click', () => { userDropdown.style.display = 'none'; _doLogout(); });
+        }
+
 
 
         if (startBtn) {
@@ -321,5 +342,32 @@ const KSessionUI = (() => {
         }
     }
 
-    return { init, getToken, getUserId, getSessionId, loadSessions, joinAndEnter };
+    async function _renameCurrentUser() {
+        const newName = prompt('Enter new display name:', currentUserName);
+        if (!newName || newName.trim() === currentUserName) return;
+        try {
+            const resp = await fetch(`/api/admin/users/${currentUserId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ display_name: newName.trim() }),
+            });
+            if (resp.ok) {
+                currentUserName = newName.trim();
+                document.getElementById('user-info').textContent = `👤 ${currentUserName}`;
+                const dropdown = document.getElementById('user-dropdown');
+                if (dropdown) dropdown.style.display = 'none';
+            } else {
+                alert('Rename failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    function _showUserInfo() {
+        const dropdown = document.getElementById('user-dropdown');
+        if (dropdown) dropdown.style.display = 'none';
+        const sessionId = currentSessionId ? currentSessionId.substring(0, 12) + '…' : 'None';
+        alert(`User: ${currentUserName}\nUser ID: ${currentUserId ? currentUserId.substring(0, 12) + '…' : 'N/A'}\nSession: ${sessionId}`);
+    }
+
+    return { init, getToken, getUserId, getUserName: () => currentUserName, getSessionId, loadSessions, joinAndEnter };
 })();

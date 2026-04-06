@@ -65,10 +65,15 @@ const KSymbols = (() => {
         // unwanted staff/arrow lines extending from the symbol frame).
         const symOpts = { size: size };
 
-        // Optional: show unit size info below symbol
+        // Show unit designation/name if provided
         if (options.infoFields) {
             if (options.infoFields.uniqueDesignation)
                 symOpts.uniqueDesignation = options.infoFields.uniqueDesignation;
+        }
+
+        // For HQ units, add "HQ" as uniqueDesignation if not already set
+        if (options.isHQ && !symOpts.uniqueDesignation) {
+            symOpts.uniqueDesignation = 'HQ';
         }
 
         const sym = new ms.Symbol(sidc, symOpts);

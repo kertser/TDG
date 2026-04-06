@@ -308,6 +308,7 @@ const KUnits = (() => {
                 direction: u.heading_deg || 0,
                 unitType: u.unit_type,
                 zoomScale: zoomScale,
+                isHQ: u.unit_type === 'headquarters' || u.unit_type === 'command_post',
             });
 
             // Admin drag-and-drop: make markers draggable when admin is unlocked
@@ -632,15 +633,15 @@ const KUnits = (() => {
         html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${statusIcon} ${status}</span></div>`;
         html += `</div>`;
 
-        // Stat bars
-        html += `<div class="unit-info-stats">`;
-        html += `<div class="unit-stat-row"><span class="unit-stat-label">STR</span><div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${strPct}%;background:${strClr};"></div></div><span class="unit-stat-value" style="color:${strClr};">${strPct}%</span></div>`;
-        html += `<div class="unit-stat-row"><span class="unit-stat-label">MOR</span><div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${morPct}%;background:${morClr};"></div></div><span class="unit-stat-value" style="color:${morClr};">${morPct}%</span></div>`;
-        html += `<div class="unit-stat-row"><span class="unit-stat-label">AMMO</span><div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${ammPct}%;background:${ammClr};"></div></div><span class="unit-stat-value" style="color:${ammClr};">${ammPct}%</span></div>`;
+        // Compact stat row (horizontal)
+        html += `<div style="padding:2px 10px 4px;display:flex;gap:8px;font-size:10px;">`;
+        html += `<span style="color:${strClr};font-weight:700;">STR ${strPct}%</span>`;
+        html += `<span style="color:${morClr};font-weight:700;">MOR ${morPct}%</span>`;
+        html += `<span style="color:${ammClr};font-weight:700;">AMM ${ammPct}%</span>`;
         html += `</div>`;
 
-        // Ranges and task
-        html += `<div class="unit-info-ranges">`;
+        // Ranges and task (inline)
+        html += `<div class="unit-info-ranges" style="padding:2px 10px 3px;">`;
         html += `<span style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
         html += `<span style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
         if (u.current_task && u.current_task.type) {
@@ -648,27 +649,25 @@ const KUnits = (() => {
         }
         html += `</div>`;
 
-        // Command info
+        // Command info (compact)
         const hasCmdInfo = u.commanding_user_name || (u.assigned_user_names && u.assigned_user_names.length > 0);
         if (hasCmdInfo) {
-            html += `<div class="unit-info-command">`;
+            html += `<div style="padding:1px 10px 3px;font-size:10px;">`;
             if (u.commanding_user_name) {
-                html += `<div class="unit-info-command-line" style="color:#90caf9;">⬆ CO: ${u.commanding_user_name}</div>`;
+                html += `<span style="color:#90caf9;">⬆ CO: ${u.commanding_user_name}</span> `;
             }
             if (u.assigned_user_names && u.assigned_user_names.length > 0) {
                 const meTag = isAssignedToMe ? ' (you)' : '';
-                html += `<div class="unit-info-command-line" style="color:#81c784;">👤 ${u.assigned_user_names.join(', ')}${meTag}</div>`;
+                html += `<span style="color:#81c784;">👤 ${u.assigned_user_names.join(', ')}${meTag}</span>`;
             }
             html += `</div>`;
-        } else {
-            html += `<div class="unit-info-command"><div class="unit-info-command-line" style="color:#666;">Unassigned</div></div>`;
         }
 
         if (u.suppression != null && u.suppression > 0) {
-            html += `<div style="padding:0 12px 4px;font-size:10px;color:#e91e63;">💥 Suppression: ${Math.round(u.suppression * 100)}%</div>`;
+            html += `<div style="padding:0 10px 2px;font-size:10px;color:#e91e63;">💥 Supp: ${Math.round(u.suppression * 100)}%</div>`;
         }
         if (u.comms_status && u.comms_status !== 'operational') {
-            html += `<div style="padding:0 12px 4px;font-size:10px;color:#ff9800;">📡 Comms: ${u.comms_status}</div>`;
+            html += `<div style="padding:0 10px 2px;font-size:10px;color:#ff9800;">📡 ${u.comms_status}</div>`;
         }
 
         html += `</div>`; // end unit-info-card

@@ -28,8 +28,13 @@ const KGrid = (() => {
     // Cached computed internal lines
     let _subLines = null;
     let _subSubLines = null;
+    let _loading = false;  // guard against concurrent loads
 
     async function load(map, sessId) {
+        // Prevent concurrent loads that cause double grid
+        if (_loading) return;
+        _loading = true;
+
         sessionId = sessId;
         _map = map;
 
@@ -42,10 +47,10 @@ const KGrid = (() => {
 
         try {
             const resp = await fetch(`/api/sessions/${sessionId}/grid?depth=0`);
-            if (!resp.ok) return;
+            if (!resp.ok) { _loading = false; return; }
             gridGeoJson = await resp.json();
 
-            if (!gridGeoJson || !gridGeoJson.features || gridGeoJson.features.length === 0) return;
+            if (!gridGeoJson || !gridGeoJson.features || gridGeoJson.features.length === 0) { _loading = false; return; }
 
             // Pre-compute internal lines once
             _subLines = _computeInternalLines(gridGeoJson.features, 3, null);
@@ -56,9 +61,17 @@ const KGrid = (() => {
 
             _zoomHandler = () => _updateZoomVisibility(map);
             map.on('zoomend', _zoomHandler);
+
+            // Clear scenario builder grid preview (session grid takes precedence)
+            try {
+                if (typeof KScenarioBuilder !== 'undefined' && KScenarioBuilder.isActive()) {
+                    KScenarioBuilder.clearGridPreview && KScenarioBuilder.clearGridPreview();
+                }
+            } catch(e) {}
         } catch (err) {
             console.warn('Grid load failed:', err);
         }
+        _loading = false;
     }
 
     /** Remove all grid layers AND the canvas renderer from the map. */

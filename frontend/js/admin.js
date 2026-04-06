@@ -17,6 +17,7 @@ const KAdmin = (() => {
     let _adminUnlocked = false;
     let _adminSelectedSessionId = null;  // admin-chosen session (independent of user's session)
     let _pickingGridOrigin = false;      // map-click pick mode for grid origin
+    let _pendingGodViewEnable = false;   // flag to auto-enable god view once session is available
 
     function init() {
         // ── Admin lock gate ────────────────────────────
@@ -55,6 +56,7 @@ const KAdmin = (() => {
                 else if (panelId === 'admin-monitor-panel') _loadUnitDashboard();
                 else if (panelId === 'admin-session-panel') { _refreshSessions(); _loadParticipants(); }
                 else if (panelId === 'admin-builder-panel') refreshScenarioList();
+                else if (panelId === 'admin-types-panel') _renderUnitTypes();
             });
         });
 
@@ -68,6 +70,10 @@ const KAdmin = (() => {
                 if (info) info.textContent = _adminSelectedSessionId
                     ? `Selected: ${_adminSelectedSessionId.substring(0, 8)}...`
                     : 'No session selected';
+                // Auto-enable god view if pending
+                _tryAutoEnableGodView();
+                // Load grid for the selected session on the map
+                _tryLoadAdminSessionGrid();
             });
         }
 
@@ -132,6 +138,7 @@ const KAdmin = (() => {
         _initCocUserAssignModal();
         _initUnitEditModal();
         _initSessionWizard();
+        _initUnitTypes();
     }
 
     function _bind(id, evt, fn) {
@@ -240,9 +247,11 @@ const KAdmin = (() => {
                 _loadAdminSessions();
                 // Enable admin drag-and-drop on unit markers
                 try { KUnits.setAdminDrag(true); } catch(e) {}
-                // Auto-enable God View by default
+                // Mark god view for auto-enable once a session is available
                 if (!_godViewEnabled) {
-                    setTimeout(() => { try { _toggleGodView(); } catch(e) {} }, 300);
+                    _pendingGodViewEnable = true;
+                    // Try immediately if session already exists
+                    _tryAutoEnableGodView();
                 }
             } else {
                 const data = await resp.json().catch(() => ({}));
@@ -289,6 +298,9 @@ const KAdmin = (() => {
                 sel.value = prev;
             } else if (_getUserSessionId()) {
                 sel.value = _getUserSessionId();
+            } else if (sessions.length > 0 && !sel.value) {
+                // Auto-select first session if nothing else is available
+                sel.value = sessions[0].id;
             }
             _adminSelectedSessionId = sel.value || null;
 
@@ -300,6 +312,11 @@ const KAdmin = (() => {
 
             // Render session list with delete buttons below selector
             _renderAdminSessionList(sessions);
+
+            // Auto-enable god view if pending and a session is now selected
+            _tryAutoEnableGodView();
+            // Auto-load grid for selected session
+            _tryLoadAdminSessionGrid();
         } catch (err) {
             console.warn('Admin sessions load:', err);
         }
@@ -363,6 +380,10 @@ const KAdmin = (() => {
     async function enterSession(sessionId) {
         const token = _getToken();
         if (!token) return;
+
+        // Deactivate scenario builder to avoid duplicate units/grids
+        try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
+
         // Try to join (may already be joined)
         try {
             await fetch(`/api/sessions/${sessionId}/join`, {
@@ -753,6 +774,8 @@ const KAdmin = (() => {
 
     async function _wizardDone() {
         _closeWizard();
+        // Deactivate builder to prevent duplicate grid/units
+        try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
         // Auto-enter the created session so grid + units load on map
         if (_wizardCreatedSessionId) {
             try {
@@ -2678,10 +2701,174 @@ const KAdmin = (() => {
             if (sel) sel.value = sid;
         }
         // Refresh admin sessions list
-        if (_adminUnlocked) _loadAdminSessions();
+        if (_adminUnlocked) {
+            _loadAdminSessions();
+            _tryAutoEnableGodView();
+        }
     }
 
     // ── Helpers ──────────────────────────────────────
+
+    /** Try to auto-enable god view (called when sessions become available). */
+    function _tryAutoEnableGodView() {
+        if (!_pendingGodViewEnable || _godViewEnabled) return;
+        const sid = _getAdminSessionId();
+        const token = _getToken();
+        if (sid && token) {
+            _pendingGodViewEnable = false;
+            _toggleGodView();
+        }
+    }
+
+    /** Load the grid for the admin-selected session onto the map. */
+    async function _tryLoadAdminSessionGrid() {
+        const sid = _getAdminSessionId();
+        if (!sid) return;
+        const map = KMap.getMap();
+        if (!map) return;
+        try {
+            await KGrid.load(map, sid);
+        } catch (e) {
+            console.warn('Admin grid load for selected session:', e);
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Unit Types Management ────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _initUnitTypes() {
+        _bind('admin-add-unit-type', 'click', _addUnitType);
+        _bind('admin-reset-unit-types', 'click', _resetUnitTypes);
+    }
+
+    function _renderUnitTypes() {
+        const el = document.getElementById('admin-types-list');
+        if (!el) return;
+        const types = typeof KScenarioBuilder !== 'undefined' ? KScenarioBuilder.getUnitTypes() : {};
+        const entries = Object.entries(types);
+
+        if (entries.length === 0) {
+            el.innerHTML = '<div class="admin-info">No unit types defined</div>';
+            return;
+        }
+
+        let html = '';
+        entries.forEach(([key, info]) => {
+            const hqClass = info.isHQ ? ' is-hq' : '';
+            const hqBadge = info.isHQ ? '<span style="color:#ff9800;font-size:9px;font-weight:700;"> HQ</span>' : '';
+            const previewSidc = info.sidc_blue || '';
+
+            // Generate a tiny preview icon if milsymbol is available
+            let previewHtml = '<span style="font-size:16px;">🔲</span>';
+            if (previewSidc && window.ms) {
+                try {
+                    const sym = new ms.Symbol(previewSidc, { size: 22 });
+                    previewHtml = sym.asSVG();
+                } catch(e) {}
+            }
+
+            html += `<div class="unit-type-item${hqClass}" data-key="${key}">
+                <div class="unit-type-preview">${previewHtml}</div>
+                <div class="unit-type-info">
+                    <div class="unit-type-label">${info.label || key}${hqBadge}</div>
+                    <div class="unit-type-stats">
+                        👁${info.det || 0}m 🎯${info.fire || 0}m ⚡${info.speed || 0}m/s 👥${info.personnel || 0}
+                    </div>
+                </div>
+                <div class="unit-type-actions">
+                    <button class="admin-btn" onclick="KAdmin.editUnitType('${key}')" style="padding:1px 5px;font-size:9px;" title="Edit type">✏</button>
+                    <button class="admin-btn admin-btn-danger" onclick="KAdmin.removeUnitType('${key}')" style="padding:1px 5px;font-size:9px;" title="Remove type">✕</button>
+                </div>
+            </div>`;
+        });
+        el.innerHTML = html;
+    }
+
+    function _addUnitType() {
+        const key = prompt('Unit type key (e.g. "heavy_mortar"):');
+        if (!key || !key.trim()) return;
+        const label = prompt('Display label:', key);
+        if (!label) return;
+
+        const types = KScenarioBuilder.getUnitTypes();
+        if (types[key.trim()]) { alert('Type already exists'); return; }
+
+        types[key.trim()] = {
+            label: label.trim(),
+            sidc_blue: '10031000151211000000',
+            sidc_red: '10061000151211000000',
+            speed: 4.0,
+            det: 1500,
+            fire: 600,
+            personnel: 20,
+        };
+        _renderUnitTypes();
+        // Refresh unit type dropdown in builder
+        try { _populateUnitTypeDropdown(); } catch(e) {}
+    }
+
+    function editUnitType(key) {
+        const types = KScenarioBuilder.getUnitTypes();
+        const info = types[key];
+        if (!info) { alert('Type not found'); return; }
+
+        const label = prompt('Label:', info.label);
+        if (label !== null) info.label = label.trim();
+
+        const det = prompt('Detection range (m):', info.det);
+        if (det !== null && !isNaN(parseInt(det))) info.det = parseInt(det);
+
+        const fire = prompt('Fire range (m):', info.fire);
+        if (fire !== null && !isNaN(parseInt(fire))) info.fire = parseInt(fire);
+
+        const speed = prompt('Speed (m/s):', info.speed);
+        if (speed !== null && !isNaN(parseFloat(speed))) info.speed = parseFloat(speed);
+
+        const personnel = prompt('Personnel:', info.personnel);
+        if (personnel !== null && !isNaN(parseInt(personnel))) info.personnel = parseInt(personnel);
+
+        const sidc = prompt('SIDC (Blue):', info.sidc_blue);
+        if (sidc !== null && sidc.trim().length === 20) info.sidc_blue = sidc.trim();
+
+        const sidcRed = prompt('SIDC (Red):', info.sidc_red);
+        if (sidcRed !== null && sidcRed.trim().length === 20) info.sidc_red = sidcRed.trim();
+
+        const isHQ = confirm('Is this an HQ unit type?');
+        info.isHQ = isHQ;
+
+        _renderUnitTypes();
+        try { _populateUnitTypeDropdown(); } catch(e) {}
+    }
+
+    function removeUnitType(key) {
+        if (!confirm(`Remove unit type "${key}"?`)) return;
+        const types = KScenarioBuilder.getUnitTypes();
+        delete types[key];
+        _renderUnitTypes();
+        try { _populateUnitTypeDropdown(); } catch(e) {}
+    }
+
+    function _resetUnitTypes() {
+        if (!confirm('Reset all unit types to defaults? Custom types will be lost.')) return;
+        alert('Please reload the page to reset unit types to defaults.');
+    }
+
+    /** Refresh the unit type dropdown in the admin unit edit modal. */
+    function _populateUnitTypeDropdown() {
+        const typeEl = document.getElementById('admin-ue-unit-type');
+        if (!typeEl) return;
+        const currentVal = typeEl.value;
+        typeEl.innerHTML = '';
+        const types = typeof KScenarioBuilder !== 'undefined' ? KScenarioBuilder.getUnitTypes() : {};
+        for (const [key, info] of Object.entries(types)) {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = info.label || key;
+            typeEl.appendChild(opt);
+        }
+        if (currentVal) typeEl.value = currentVal;
+    }
 
     function _showInfo(elementId, message, type = '') {
         const el = document.getElementById(elementId);
@@ -2697,6 +2884,7 @@ const KAdmin = (() => {
         _adminUnlocked = false;
         _godViewEnabled = false;
         _adminSelectedSessionId = null;
+        _pendingGodViewEnable = false;
 
         // Disable admin drag-and-drop
         try { KUnits.setAdminDrag(false); } catch(e) {}
@@ -2733,6 +2921,7 @@ const KAdmin = (() => {
         renameUser, deleteUser, assignUserToSession,
         loadPublicCoC,
         editUnit, focusUnit, deleteUnit, addUnit,
+        editUnitType, removeUnitType,
         wizardRemoveParticipant: _wizardRemoveParticipant,
     };
 })();

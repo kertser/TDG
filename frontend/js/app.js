@@ -22,6 +22,14 @@
     window.onSessionJoined = async (sessionId, token) => {
         console.log('Joined session:', sessionId);
 
+        // Clear existing layers to prevent duplicates
+        try { KGrid.clearAll(); } catch(e) {}
+        try { KUnits.clearAll(); } catch(e) {}
+        try { KContacts.clearAll(); } catch(e) {}
+
+        // Deactivate scenario builder if active (prevents double grid/units)
+        try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
+
         // Load grid overlay
         try {
             await KGrid.load(map, sessionId);

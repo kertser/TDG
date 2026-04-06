@@ -21,8 +21,8 @@ const KScenarioBuilder = (() => {
 
     // ── Unit type registry ──────────────────────────────
     const UNIT_TYPES = {
-        headquarters:      { label: 'Headquarters',       sidc_blue: '10031000151200000000', sidc_red: '10061000151200000000', speed: 3.0, det: 2000, fire: 200,  personnel: 20, isHQ: true },
-        command_post:      { label: 'Command Post',       sidc_blue: '10031000151200000000', sidc_red: '10061000151200000000', speed: 2.0, det: 1500, fire: 100,  personnel: 10, isHQ: true },
+        headquarters:      { label: 'Headquarters',       sidc_blue: '10031002151200000000', sidc_red: '10061002151200000000', speed: 3.0, det: 2000, fire: 200,  personnel: 20, isHQ: true },
+        command_post:      { label: 'Command Post',       sidc_blue: '10031002151200000000', sidc_red: '10061002151200000000', speed: 2.0, det: 1500, fire: 100,  personnel: 10, isHQ: true },
         infantry_platoon:  { label: 'Infantry Platoon',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 4.0, det: 1500, fire: 600,  personnel: 30 },
         infantry_company:  { label: 'Infantry Company',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.5, det: 1500, fire: 800,  personnel: 120 },
         tank_company:      { label: 'Tank Company',       sidc_blue: '10031000151301000000', sidc_red: '10061000151301000000', speed: 8.0, det: 2000, fire: 2500, personnel: 60 },
@@ -257,6 +257,7 @@ const KScenarioBuilder = (() => {
             const icon = KSymbols.createIcon(u.sidc, {
                 direction: 0,
                 unitType: u.unit_type,
+                isHQ: u.unit_type === 'headquarters' || u.unit_type === 'command_post',
             });
 
             const marker = L.marker([u.lat, u.lon], { icon, draggable: true });
@@ -804,10 +805,14 @@ const KScenarioBuilder = (() => {
 
     function getUnitTypes() { return UNIT_TYPES; }
 
+    function clearGridPreview() {
+        if (_gridPreviewLayer) _gridPreviewLayer.clearLayers();
+    }
+
     return {
         init, activate, deactivate, isActive,
         saveScenario, editUnit, removeUnit,
-        getUnitTypes,
+        getUnitTypes, clearGridPreview,
         // For form callbacks
         confirmUnit: _confirmUnit,
         hideUnitForm: _hideUnitForm,
