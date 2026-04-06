@@ -34,10 +34,35 @@ async def submit_order(
     Can include a structured parsed_order for direct task assignment:
       {"type": "move", "target_location": {"lat": 48.85, "lon": 2.35}}
     """
-    # Determine side for the order (admin/observer default to blue)
+    # Observers cannot submit orders (check both side and role)
+    if participant.side.value == "observer" or participant.role == "observer":
+        raise HTTPException(status_code=403, detail="Observers cannot submit orders")
+
+    # Determine side for the order (admin defaults to blue)
     side_val = participant.side.value
     if side_val not in ("blue", "red"):
         side_val = "blue"
+
+    # Validate target units belong to the issuing side
+    if body.target_unit_ids and side_val in ("blue", "red"):
+        from backend.models.unit import Unit
+        for uid_str in body.target_unit_ids:
+            try:
+                uid = uuid.UUID(uid_str)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid unit ID: {uid_str}")
+            result = await db.execute(
+                select(Unit.side).where(Unit.id == uid, Unit.session_id == session_id)
+            )
+            row = result.first()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"Target unit {uid_str} not found")
+            unit_side = row[0].value if hasattr(row[0], 'value') else row[0]
+            if unit_side != side_val:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cannot issue orders to units on another side"
+                )
 
     order = Order(
         session_id=session_id,

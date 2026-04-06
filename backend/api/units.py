@@ -265,7 +265,9 @@ async def assign_unit(
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-    if side in ("admin", "observer"):
+    if side == "observer" or participant.role == "observer":
+        raise HTTPException(status_code=403, detail="Observers cannot assign units")
+    if side == "admin":
         pass
     else:
         if unit.side.value != side:
@@ -290,7 +292,7 @@ async def assign_unit(
                 )
             )
             part = part_result.scalar_one_or_none()
-            if part and part.side == Side.observer:
+            if part and (part.side == Side.observer or part.role == "observer"):
                 raise HTTPException(status_code=400, detail="Cannot assign observer to unit")
     unit.assigned_user_ids = body.assigned_user_ids if body.assigned_user_ids else None
     await db.flush()

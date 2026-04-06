@@ -137,6 +137,14 @@ const KUnits = (() => {
     function _canSelect(unit) {
         const userId = KSessionUI.getUserId();
         if (!userId) return false;
+        const mySide = KSessionUI.getSide();
+        const myRole = KSessionUI.getRole();
+        // Observers cannot select/command units (check both side and role)
+        if (mySide === 'observer' || myRole === 'observer') return false;
+        // Side check: only own-side units are selectable (admin bypass)
+        if (mySide && mySide !== 'admin' && unit.side !== mySide) {
+            return false;
+        }
         // If unit has no assignments, anyone on the same side can select
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
         // If assigned to this user
@@ -149,6 +157,14 @@ const KUnits = (() => {
     function _canAssign(unit) {
         const userId = KSessionUI.getUserId();
         if (!userId) return false;
+        const mySide = KSessionUI.getSide();
+        const myRole = KSessionUI.getRole();
+        // Observers cannot assign units (check both side and role)
+        if (mySide === 'observer' || myRole === 'observer') return false;
+        // Side check: only own-side units can be assigned (admin bypass)
+        if (mySide && mySide !== 'admin' && unit.side !== mySide) {
+            return false;
+        }
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
         if (unit.assigned_user_ids.includes(userId)) return true;
         // Check command authority via parent chain and subordinate user authority

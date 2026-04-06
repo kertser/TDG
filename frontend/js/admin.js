@@ -2344,7 +2344,7 @@ const KAdmin = (() => {
             const bulkUserSel = document.getElementById('coc-bulk-user-select');
             if (bulkUserSel && _cachedParticipants.length > 0) {
                 bulkUserSel.innerHTML = '<option value="">— Select user —</option>';
-                _cachedParticipants.filter(p => p.side !== 'observer').forEach(p => {
+                _cachedParticipants.filter(p => p.side !== 'observer' && p.role !== 'observer').forEach(p => {
                     const opt = document.createElement('option');
                     opt.value = p.user_id;
                     const sideIcon = p.side === 'blue' ? '🔵' : p.side === 'red' ? '🔴' : '⚪';
@@ -2620,7 +2620,7 @@ const KAdmin = (() => {
         if (sel) {
             sel.innerHTML = '';
             const sameSideParticipants = _cachedParticipants.filter(
-                p => (p.side === unit.side || p.side === 'admin') && p.side !== 'observer'
+                p => (p.side === unit.side || p.side === 'admin') && p.side !== 'observer' && p.role !== 'observer'
             );
             if (sameSideParticipants.length === 0) {
                 const opt = document.createElement('option');

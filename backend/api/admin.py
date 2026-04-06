@@ -676,7 +676,7 @@ async def admin_update_unit(
                     )
                 )
                 participant = part_result.scalar_one_or_none()
-                if participant and participant.side == Side.observer:
+                if participant and (participant.side == Side.observer or participant.role == "observer"):
                     raise HTTPException(
                         status_code=400,
                         detail=f"Cannot assign observer to unit — observers do not control units"

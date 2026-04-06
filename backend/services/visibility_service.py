@@ -345,7 +345,7 @@ async def check_command_authority(
     A user has authority if they are assigned to the unit itself
     OR to any proper ancestor in the parent chain.
 
-    Special case: if NO units in the session have any assigned_user_ids,
+    Special case: if NO units *on the same side* have any assigned_user_ids,
     then any player on the correct side has implicit authority (no CoC setup).
     """
     # Check self first
@@ -354,15 +354,19 @@ async def check_command_authority(
 
     # Load lightweight unit data for parent-chain walk
     result = await db.execute(
-        select(Unit.id, Unit.parent_unit_id, Unit.assigned_user_ids).where(
+        select(Unit.id, Unit.parent_unit_id, Unit.assigned_user_ids, Unit.side).where(
             Unit.session_id == session_id, Unit.is_destroyed == False
         )
     )
     rows = result.all()
 
-    # If no units in the session have any assigned_user_ids at all,
-    # grant implicit authority to any player (no CoC configured yet)
-    any_assigned = any(r[2] for r in rows)
+    # If no units *on the same side* have any assigned_user_ids,
+    # grant implicit authority to any player (no CoC configured for this side yet)
+    unit_side = unit.side.value if hasattr(unit.side, 'value') else unit.side
+    any_assigned = any(
+        r[2] for r in rows
+        if (r[3].value if hasattr(r[3], 'value') else r[3]) == unit_side and r[2]
+    )
     if not any_assigned:
         return True
 
