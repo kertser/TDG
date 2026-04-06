@@ -96,6 +96,21 @@ const KMap = (() => {
             tick: document.getElementById('game-clock-tick'),
         };
 
+        // ── Map control buttons (top-right: center, grid toggle, units toggle) ──
+        const MapControlsCtrl = L.Control.extend({
+            options: { position: 'topright' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'map-ctrl-group');
+                container.innerHTML =
+                    '<button id="center-btn" class="topbar-icon-btn" style="display:none;" title="Center on operation area"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><line x1="8" y1="0.5" x2="8" y2="3.5" stroke="currentColor" stroke-width="1.2"/><line x1="8" y1="12.5" x2="8" y2="15.5" stroke="currentColor" stroke-width="1.2"/><line x1="0.5" y1="8" x2="3.5" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="12.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
+                    '<button id="grid-toggle-btn" class="topbar-icon-btn" style="display:none;" title="Show/hide grid"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><line x1="5.5" y1="1" x2="5.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="10.5" y1="1" x2="10.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" stroke-width="0.8"/></svg></button>' +
+                    '<button id="units-toggle-btn" class="topbar-icon-btn" style="display:none;" title="Show/hide units"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2C5.8 2 4 3.6 4 5.5C4 8 8 12 8 12S12 8 12 5.5C12 3.6 10.2 2 8 2Z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><line x1="4" y1="14" x2="12" y2="14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>';
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            },
+        });
+        new MapControlsCtrl().addTo(map);
+
         // ── Measure layer group ─────────────────────────
         measureGroup = L.layerGroup().addTo(map);
 

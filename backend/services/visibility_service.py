@@ -59,6 +59,7 @@ def _serialize_unit(unit: Unit) -> dict:
         "is_destroyed": unit.is_destroyed,
         "assigned_user_ids": unit.assigned_user_ids,
         "unit_status": status,
+        "formation": (unit.capabilities or {}).get("formation"),
     }
 
 
@@ -372,6 +373,61 @@ async def check_command_authority(
         if assigned_ids and user_id in assigned_ids:
             return True
         current_parent_id = parent_parent_id
+
+    return False
+
+
+async def check_subordinate_authority(
+    user_id: str,
+    unit: Unit,
+    session_id: uuid.UUID,
+    db: AsyncSession,
+) -> bool:
+    """
+    Check if a user has authority over a unit via subordinate user relationship.
+
+    User A has authority over unit U if:
+    - U is assigned to user B
+    - And B is subordinate to A (i.e., B is assigned to a unit that is a descendant
+      of a unit assigned to A in the unit hierarchy).
+    """
+    # If the unit has no assigned users, this check doesn't apply
+    unit_assigned = unit.assigned_user_ids
+    if not unit_assigned:
+        return False
+
+    # Load all units with their parent chain and assignments
+    result = await db.execute(
+        select(Unit.id, Unit.parent_unit_id, Unit.assigned_user_ids).where(
+            Unit.session_id == session_id, Unit.is_destroyed == False
+        )
+    )
+    rows = result.all()
+    unit_info = {
+        str(r[0]): (str(r[1]) if r[1] else None, r[2])
+        for r in rows
+    }
+
+    # For each user assigned to the target unit, check if they are subordinate to user_id
+    for assigned_uid in unit_assigned:
+        if assigned_uid == user_id:
+            continue  # Already checked in check_command_authority
+        # Find all units assigned to this subordinate user
+        for uid_str, (parent_id, assigned_ids) in unit_info.items():
+            if not assigned_ids or assigned_uid not in assigned_ids:
+                continue
+            # Walk up this unit's parent chain looking for a unit assigned to user_id
+            current_parent = parent_id
+            visited = set()
+            while current_parent and current_parent not in visited:
+                visited.add(current_parent)
+                info = unit_info.get(current_parent)
+                if info is None:
+                    break
+                pp_id, pp_assigned = info
+                if pp_assigned and user_id in pp_assigned:
+                    return True  # user_id commands an ancestor → subordinate relationship
+                current_parent = pp_id
 
     return False
 

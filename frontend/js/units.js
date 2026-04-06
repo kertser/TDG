@@ -79,6 +79,30 @@ const KUnits = (() => {
         broken: '#9c27b0', destroyed: '#666', supporting: '#4caf50',
     };
 
+    // ── Movement speed labels ─────────────────────────
+    const SPEED_LABELS = {
+        slow: { label: 'Slow', mps: 1.5, desc: '~5 km/h' },
+        average: { label: 'Average', mps: 4.0, desc: '~14 km/h' },
+        fast: { label: 'Fast', mps: 8.0, desc: '~29 km/h' },
+    };
+
+    // ── Formation options ─────────────────────────────
+    const FORMATIONS = [
+        { key: 'column', label: 'Column', icon: '║' },
+        { key: 'line', label: 'Line', icon: '═' },
+        { key: 'wedge', label: 'Wedge', icon: '▽' },
+        { key: 'vee', label: 'Vee', icon: '△' },
+        { key: 'echelon_left', label: 'Echelon L', icon: '╲' },
+        { key: 'echelon_right', label: 'Echelon R', icon: '╱' },
+        { key: 'staggered', label: 'Staggered', icon: '⋮' },
+        { key: 'box', label: 'Box', icon: '▢' },
+        { key: 'diamond', label: 'Diamond', icon: '◇' },
+        { key: 'dispersed', label: 'Dispersed', icon: '·:·' },
+    ];
+
+    // ── Set-move state ──────────────────────────────
+    let _setMovePending = null; // {unitId, speed} while waiting for map click
+
     function init(map) {
         _map = map;
 
@@ -127,15 +151,16 @@ const KUnits = (() => {
         if (!userId) return false;
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
         if (unit.assigned_user_ids.includes(userId)) return true;
-        // Check command authority via parent chain
+        // Check command authority via parent chain and subordinate user authority
         return _hasCommandAuthority(unit, userId);
     }
 
-    /** Check if user has authority over unit via ancestor chain */
+    /** Check if user has authority over unit via ancestor chain or subordinate user */
     function _hasCommandAuthority(unit, userId) {
         const unitMap = {};
         allUnitsData.forEach(u => { unitMap[u.id] = u; });
 
+        // Check 1: Walk up unit hierarchy (direct hierarchy authority)
         let parentId = unit.parent_unit_id;
         const visited = new Set();
         while (parentId && unitMap[parentId]) {
@@ -146,6 +171,42 @@ const KUnits = (() => {
                 return true;
             }
             parentId = parent.parent_unit_id;
+        }
+
+        // Check 2: Subordinate user authority
+        // If the unit is assigned to user B, and B is subordinate to userId
+        // (B's unit has an ancestor assigned to userId), then userId has authority.
+        if (unit.assigned_user_ids && unit.assigned_user_ids.length > 0) {
+            for (const assignedUid of unit.assigned_user_ids) {
+                if (assignedUid === userId) continue;
+                if (_isSubordinateUser(assignedUid, userId, unitMap)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** Check if subordinateUserId is subordinate to superiorUserId via the unit hierarchy */
+    function _isSubordinateUser(subordinateUserId, superiorUserId, unitMap) {
+        // Find all units assigned to the subordinate user
+        const subUnits = Object.values(unitMap).filter(u =>
+            u.assigned_user_ids && u.assigned_user_ids.includes(subordinateUserId)
+        );
+        // For each of those units, walk up the parent chain looking for superiorUserId
+        for (const subUnit of subUnits) {
+            let parentId = subUnit.parent_unit_id;
+            const visited = new Set();
+            while (parentId && unitMap[parentId]) {
+                if (visited.has(parentId)) break;
+                visited.add(parentId);
+                const parent = unitMap[parentId];
+                if (parent.assigned_user_ids && parent.assigned_user_ids.includes(superiorUserId)) {
+                    return true;
+                }
+                parentId = parent.parent_unit_id;
+            }
         }
         return false;
     }
@@ -309,6 +370,7 @@ const KUnits = (() => {
                 unitType: u.unit_type,
                 zoomScale: zoomScale,
                 isHQ: u.unit_type === 'headquarters' || u.unit_type === 'command_post',
+                callsign: u.name || '',
             });
 
             // Admin drag-and-drop: make markers draggable when admin is unlocked
@@ -671,6 +733,14 @@ const KUnits = (() => {
             html += `<div style="padding:1px 12px 3px;font-size:10px;color:${commsClr};">📡 Comms: ${u.comms_status}</div>`;
         }
 
+        // ── Formation info ──
+        const formation = u.formation || (u.capabilities && u.capabilities.formation);
+        if (formation) {
+            const fObj = FORMATIONS.find(f => f.key === formation);
+            const fLabel = fObj ? `${fObj.icon} ${fObj.label}` : formation;
+            html += `<div style="padding:1px 12px 3px;font-size:10px;color:#b39ddb;">🔲 Formation: ${fLabel}</div>`;
+        }
+
         // ── Heading info ──
         if (u.heading_deg != null && u.heading_deg !== 0) {
             html += `<div style="padding:1px 12px 3px;font-size:10px;color:#90caf9;">🧭 Heading: ${Math.round(u.heading_deg)}°</div>`;
@@ -712,6 +782,25 @@ const KUnits = (() => {
         if (canSel) {
             html += `<div class="ctx-item" data-action="rename">✏ Rename</div>`;
         }
+        if (canSel) {
+            // Formation sub-menu
+            const curFormation = u.formation || (u.capabilities && u.capabilities.formation) || '';
+            html += `<div class="ctx-item" data-action="formation">🔲 Formation ▸</div>`;
+        }
+        if (canSel) {
+            html += `<div class="ctx-item" data-action="move">🚶 Set Move ▸</div>`;
+            html += `<div class="ctx-item" data-action="stop">⏹ Stop</div>`;
+        }
+        if (canSel) {
+            html += `<div class="ctx-item" data-action="split">✂ Split Unit</div>`;
+            // Merge: only show if there are other units of the same type selected or nearby
+            const sameTypeUnits = allUnitsData.filter(ou =>
+                ou.id !== u.id && ou.unit_type === u.unit_type && ou.side === u.side && !ou.is_destroyed
+            );
+            if (sameTypeUnits.length > 0) {
+                html += `<div class="ctx-item" data-action="merge">🔗 Merge Unit ▸</div>`;
+            }
+        }
         if (canAsgn) {
             const assignLabel = isAssignedToMe ? '✕ Unassign me' : '+ Assign to me';
             html += `<div class="ctx-item" data-action="assign">${assignLabel}</div>`;
@@ -740,6 +829,16 @@ const KUnits = (() => {
                     _renameUnit(u);
                 } else if (action === 'assign') {
                     assignToMe(u.id);
+                } else if (action === 'formation') {
+                    _showFormationPicker(u, e);
+                } else if (action === 'move') {
+                    _showMovePicker(u, e);
+                } else if (action === 'stop') {
+                    _stopUnit(u);
+                } else if (action === 'split') {
+                    _splitUnit(u);
+                } else if (action === 'merge') {
+                    _showMergePicker(u, e);
                 }
             });
         });
@@ -779,6 +878,268 @@ const KUnits = (() => {
                 alert(d.detail || 'Rename failed');
             }
         } catch (err) { alert(err.message); }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Formation Picker ─────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _showFormationPicker(u, origEvent) {
+        const menu = _createUnitContextMenu();
+        const curFormation = u.formation || (u.capabilities && u.capabilities.formation) || '';
+
+        let html = '<div class="ctx-menu-header">Formation</div>';
+        FORMATIONS.forEach(f => {
+            const active = curFormation === f.key ? ' style="color:#4fc3f7;font-weight:700;"' : '';
+            html += `<div class="ctx-item" data-formation="${f.key}"${active}>${f.icon} ${f.label}</div>`;
+        });
+
+        menu.innerHTML = html;
+        menu.style.left = origEvent.clientX + 'px';
+        menu.style.top = origEvent.clientY + 'px';
+        menu.style.display = 'block';
+
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 5) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
+
+        menu.querySelectorAll('.ctx-item').forEach(item => {
+            item.addEventListener('click', async () => {
+                _closeUnitContextMenu();
+                const formation = item.dataset.formation;
+                const token = KSessionUI.getToken();
+                const sessionId = KSessionUI.getSessionId();
+                if (!token || !sessionId) return;
+                try {
+                    const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/formation`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ formation }),
+                    });
+                    if (resp.ok) {
+                        if (!u.capabilities) u.capabilities = {};
+                        u.capabilities.formation = formation;
+                        u.formation = formation;
+                        KGameLog.addEntry(`${u.name} formation → ${formation}`, 'info');
+                    } else {
+                        const d = await resp.json().catch(() => ({}));
+                        alert(d.detail || 'Set formation failed');
+                    }
+                } catch (err) { alert(err.message); }
+            });
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Move Picker (speed + map click for target) ───
+    // ══════════════════════════════════════════════════
+
+    function _showMovePicker(u, origEvent) {
+        const menu = _createUnitContextMenu();
+        let html = '<div class="ctx-menu-header">Move Speed</div>';
+        for (const [key, info] of Object.entries(SPEED_LABELS)) {
+            html += `<div class="ctx-item" data-speed="${key}">⚡ ${info.label} <span style="color:#888;font-size:10px;">(${info.desc})</span></div>`;
+        }
+        menu.innerHTML = html;
+        menu.style.left = origEvent.clientX + 'px';
+        menu.style.top = origEvent.clientY + 'px';
+        menu.style.display = 'block';
+
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 5) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
+
+        menu.querySelectorAll('.ctx-item').forEach(item => {
+            item.addEventListener('click', () => {
+                _closeUnitContextMenu();
+                const speed = item.dataset.speed;
+                _startMoveTargetPick(u, speed);
+            });
+        });
+    }
+
+    function _startMoveTargetPick(u, speed) {
+        if (!_map) return;
+        _setMovePending = { unitId: u.id, speed, unitName: u.name };
+        _map.getContainer().classList.add('pick-mode-active');
+
+        const banner = document.createElement('div');
+        banner.className = 'pick-mode-banner';
+        banner.id = 'move-pick-banner';
+        banner.textContent = `🖱 Click on map to set move target for ${u.name} — ESC to cancel`;
+        document.body.appendChild(banner);
+
+        const _cancelPick = () => {
+            _setMovePending = null;
+            _map.getContainer().classList.remove('pick-mode-active');
+            const b = document.getElementById('move-pick-banner');
+            if (b) b.remove();
+            _map.off('click', _onMovePickClick);
+            document.removeEventListener('keydown', _onMovePickKey);
+        };
+
+        const _onMovePickClick = async (e) => {
+            if (!_setMovePending) return;
+            const { unitId, speed, unitName } = _setMovePending;
+            _cancelPick();
+
+            const token = KSessionUI.getToken();
+            const sessionId = KSessionUI.getSessionId();
+            if (!token || !sessionId) return;
+
+            try {
+                const resp = await fetch(`/api/sessions/${sessionId}/units/${unitId}/move`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ target_lat: e.latlng.lat, target_lon: e.latlng.lng, speed }),
+                });
+                if (resp.ok) {
+                    const updated = await resp.json();
+                    // Update local data
+                    const idx = allUnitsData.findIndex(au => au.id === unitId);
+                    if (idx >= 0) {
+                        Object.assign(allUnitsData[idx], updated);
+                    }
+                    render(allUnitsData);
+                    KGameLog.addEntry(`${unitName} moving ${speed} → ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`, 'info');
+                } else {
+                    const d = await resp.json().catch(() => ({}));
+                    alert(d.detail || 'Move command failed');
+                }
+            } catch (err) { alert(err.message); }
+        };
+
+        const _onMovePickKey = (e) => {
+            if (e.key === 'Escape') _cancelPick();
+        };
+
+        _map.once('click', _onMovePickClick);
+        document.addEventListener('keydown', _onMovePickKey, { once: true });
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Stop Unit ────────────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    async function _stopUnit(u) {
+        const token = KSessionUI.getToken();
+        const sessionId = KSessionUI.getSessionId();
+        if (!token || !sessionId) return;
+
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/stop`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok) {
+                u.current_task = null;
+                render(allUnitsData);
+                KGameLog.addEntry(`${u.name} stopped`, 'info');
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Stop failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Split Unit ───────────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    async function _splitUnit(u) {
+        const pctStr = prompt(`Split "${u.name}" — what % goes to new unit? (10–90):`, '50');
+        if (!pctStr) return;
+        const pct = parseInt(pctStr);
+        if (isNaN(pct) || pct < 10 || pct > 90) { alert('Enter a number between 10 and 90'); return; }
+        const ratio = pct / 100;
+
+        const newName = prompt('Name for new unit:', `${u.name}/2`);
+        if (!newName) return;
+
+        const token = KSessionUI.getToken();
+        const sessionId = KSessionUI.getSessionId();
+        if (!token || !sessionId) return;
+
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/split`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ ratio, new_name: newName.trim() }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                KGameLog.addEntry(`${u.name} split → ${data.original.name} + ${data.new_unit.name}`, 'info');
+                // Reload units
+                await load(sessionId, token);
+                try { KAdmin.loadPublicCoC(); } catch(e) {}
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Split failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Merge Unit ───────────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _showMergePicker(u, origEvent) {
+        const menu = _createUnitContextMenu();
+        const sameType = allUnitsData.filter(ou =>
+            ou.id !== u.id && ou.unit_type === u.unit_type && ou.side === u.side && !ou.is_destroyed
+        );
+
+        let html = '<div class="ctx-menu-header">Merge Into ' + u.name + '</div>';
+        if (sameType.length === 0) {
+            html += '<div style="padding:6px 12px;font-size:11px;color:#888;">No compatible units</div>';
+        } else {
+            sameType.forEach(ou => {
+                const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
+                html += `<div class="ctx-item" data-merge-id="${ou.id}">${ou.name} <span style="color:#888;font-size:10px;">(${strPct})</span></div>`;
+            });
+        }
+
+        menu.innerHTML = html;
+        menu.style.left = origEvent.clientX + 'px';
+        menu.style.top = origEvent.clientY + 'px';
+        menu.style.display = 'block';
+
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 5) + 'px';
+        if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
+
+        menu.querySelectorAll('.ctx-item').forEach(item => {
+            item.addEventListener('click', async () => {
+                const mergeId = item.dataset.mergeId;
+                _closeUnitContextMenu();
+                if (!mergeId) return;
+
+                const mergeUnit = allUnitsData.find(ou => ou.id === mergeId);
+                if (!mergeUnit) return;
+                if (!confirm(`Merge "${mergeUnit.name}" into "${u.name}"?\nThe merged unit will be removed.`)) return;
+
+                const token = KSessionUI.getToken();
+                const sessionId = KSessionUI.getSessionId();
+                if (!token || !sessionId) return;
+
+                try {
+                    const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/merge`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ merge_with_unit_id: mergeId }),
+                    });
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        KGameLog.addEntry(`${mergeUnit.name} merged into ${u.name}`, 'info');
+                        await load(sessionId, token);
+                        try { KAdmin.loadPublicCoC(); } catch(e) {}
+                    } else {
+                        const d = await resp.json().catch(() => ({}));
+                        alert(d.detail || 'Merge failed');
+                    }
+                } catch (err) { alert(err.message); }
+            });
+        });
     }
 
     function _fmtDist(m) {

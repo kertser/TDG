@@ -2073,6 +2073,8 @@ const KAdmin = (() => {
      * User can manage a unit if:
      *   1. They are directly assigned to a proper ancestor (they command the parent unit).
      *   2. They are directly assigned to this unit (they can reassign it).
+     *   3. The unit is assigned to a subordinate user (a user whose own units
+     *      are descendants of a unit the current user commands).
      * They should NOT be able to manage units above them in the hierarchy.
      */
     function _userCanAssign(unit, allUnitMap) {
@@ -2097,6 +2099,31 @@ const KAdmin = (() => {
             }
             parentId = parent.parent_unit_id;
         }
+
+        // Case 3: Subordinate user authority — unit is assigned to a user who is subordinate
+        if (unit.assigned_user_ids && unit.assigned_user_ids.length > 0) {
+            for (const assignedUid of unit.assigned_user_ids) {
+                if (assignedUid === userId) continue;
+                // Check if assignedUid is subordinate to userId
+                const subUnits = Object.values(allUnitMap).filter(u =>
+                    u.assigned_user_ids && u.assigned_user_ids.includes(assignedUid)
+                );
+                for (const subUnit of subUnits) {
+                    let pid = subUnit.parent_unit_id;
+                    const vis2 = new Set();
+                    while (pid && allUnitMap[pid]) {
+                        if (vis2.has(pid)) break;
+                        vis2.add(pid);
+                        const p = allUnitMap[pid];
+                        if (p.assigned_user_ids && p.assigned_user_ids.includes(userId)) {
+                            return true;
+                        }
+                        pid = p.parent_unit_id;
+                    }
+                }
+            }
+        }
+
         return false;
     }
 

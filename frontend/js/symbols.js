@@ -49,12 +49,14 @@ const KSymbols = (() => {
         const baseSize = options.size || SIZE_MAP[unitType] || DEFAULT_SIZE;
         const scale = options.zoomScale || 1.0;
         const size = Math.max(8, Math.round(baseSize * scale));
+        const callsign = options.callsign || '';
 
         if (!sidc || !window.ms) {
             const r = Math.max(Math.round(size * 0.35), 3);
+            const csHtml = callsign ? `<div class="unit-callsign">${callsign}</div>` : '';
             return L.divIcon({
                 className: 'unit-marker-fallback',
-                html: `<div style="width:${r*2}px;height:${r*2}px;border-radius:50%;background:#4fc3f7;border:2px solid #fff;"></div>`,
+                html: `<div style="width:${r*2}px;height:${r*2}px;border-radius:50%;background:#4fc3f7;border:2px solid #fff;"></div>${csHtml}`,
                 iconSize: [r * 2 + 4, r * 2 + 4],
                 iconAnchor: [r + 2, r + 2],
             });
@@ -81,9 +83,14 @@ const KSymbols = (() => {
         const svg = sym.asSVG();
         const anchor = sym.getAnchor();
 
+        // Build callsign label below the symbol
+        const csHtml = callsign && scale >= 0.5
+            ? `<div class="unit-callsign" style="font-size:${Math.max(8, Math.round(10 * scale))}px;">${callsign}</div>`
+            : '';
+
         return L.divIcon({
             className: 'unit-icon',
-            html: svg,
+            html: svg + csHtml,
             iconSize: [sym.getSize().width, sym.getSize().height],
             iconAnchor: [anchor.x, anchor.y],
         });

@@ -31,12 +31,9 @@
         <span id="coord-display" title="Coordinates under cursor"></span>
         <span id="zoom-display" title="Current zoom level"></span>
 
-        <!-- Right-side controls (pushed right via margin-left:auto on first) -->
-        <button id="center-btn" class="topbar-icon-btn" style="display:none;" title="Center on operation area"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><line x1="8" y1="0.5" x2="8" y2="3.5" stroke="currentColor" stroke-width="1.2"/><line x1="8" y1="12.5" x2="8" y2="15.5" stroke="currentColor" stroke-width="1.2"/><line x1="0.5" y1="8" x2="3.5" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="12.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="1.2"/></svg></button>
-        <button id="grid-toggle-btn" class="topbar-icon-btn" style="display:none;" title="Show/hide grid"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><line x1="5.5" y1="1" x2="5.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="10.5" y1="1" x2="10.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" stroke-width="0.8"/></svg></button>
-        <button id="units-toggle-btn" class="topbar-icon-btn" style="display:none;" title="Show/hide units"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2C5.8 2 4 3.6 4 5.5C4 8 8 12 8 12S12 8 12 5.5C12 3.6 10.2 2 8 2Z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><line x1="4" y1="14" x2="12" y2="14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-        <!-- User name with dropdown menu -->
-        <div id="user-menu-wrapper" style="position:relative;display:inline-flex;align-items:center;">
+        <!-- Right-side controls: user menu and admin button only -->
+        <!-- Center/Grid/Units toggle buttons moved to map control -->
+        <div id="user-menu-wrapper" style="position:relative;display:inline-flex;align-items:center;margin-left:auto;">
             <span id="user-info" style="cursor:pointer;" title="Click for user menu"></span>
             <div id="user-dropdown" class="user-dropdown" style="display:none;">
                 <div id="user-dropdown-header" class="user-dropdown-header">
@@ -479,7 +476,7 @@
                 <div id="coc-user-assign-unit-label" style="font-size:13px;color:#4fc3f7;font-weight:700;margin-bottom:10px;"></div>
                 <div class="admin-modal-row">
                     <label>Assign to Participant</label>
-                    <select id="coc-user-assign-select" class="admin-modal-select" size="6" style="height:auto;min-height:100px;">
+                    <select id="coc-user-assign-select" class="admin-modal-select" size="4" style="height:auto;min-height:60px;">
                     </select>
                 </div>
                 <div id="coc-user-assign-status" class="admin-info" style="margin-top:6px;"></div>

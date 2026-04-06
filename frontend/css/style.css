@@ -128,7 +128,6 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
 }
 
 /* ── Topbar standalone icon buttons ──────────── */
-#center-btn { margin-left: auto; }  /* pushes controls right when visible */
 .topbar-icon-btn {
     width: 30px;
     height: 28px;
@@ -145,6 +144,36 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     transition: all 0.12s;
 }
 .topbar-icon-btn:hover { background: #1a5276; border-color: #4fc3f7; color: #fff; }
+
+/* ── Map control buttons (top-right overlay) ──── */
+.map-ctrl-group {
+    display: flex;
+    gap: 2px;
+    background: rgba(16, 24, 48, 0.85);
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    border-radius: 4px;
+    padding: 2px;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.map-ctrl-group .topbar-icon-btn {
+    width: 28px;
+    height: 26px;
+    font-size: 14px;
+    color: #bbb;
+}
+.map-ctrl-group .topbar-icon-btn:hover {
+    background: rgba(26, 82, 118, 0.8);
+    border-color: #4fc3f7;
+    color: #fff;
+}
+.map-ctrl-group .topbar-icon-btn.toggled-off {
+    opacity: 0.35;
+}
+.map-ctrl-group .topbar-icon-btn.toggled-off:hover {
+    opacity: 0.6;
+}
 
 /* ── Game Clock Control (bottom-right, on map) ── */
 .game-clock-control {
@@ -403,6 +432,7 @@ button:hover { background: #1a5276; }
     image-rendering: auto;
     filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
     transition: filter 0.15s;
+    overflow: visible !important;
 }
 .unit-icon:hover {
     filter: drop-shadow(0 0 6px rgba(79,195,247,0.6)) drop-shadow(0 1px 3px rgba(0,0,0,0.5));
@@ -410,6 +440,25 @@ button:hover { background: #1a5276; }
 .unit-marker-fallback {
     background: none !important;
     border: none !important;
+    overflow: visible !important;
+}
+
+/* ── Unit callsign label (below marker) ──────── */
+.unit-callsign {
+    text-align: center;
+    white-space: nowrap;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    color: #e0e0e0;
+    text-shadow:
+        0 0 3px rgba(0,0,0,1),
+        0 0 6px rgba(0,0,0,0.9),
+        1px 1px 2px rgba(0,0,0,0.95);
+    pointer-events: none;
+    line-height: 1;
+    margin-top: 1px;
+    letter-spacing: 0.3px;
 }
 
 /* ── Unit tooltip (name on hover) ─────────────── */
@@ -1038,8 +1087,8 @@ button:hover { background: #1a5276; }
 }
 .coc-user-assign-btn {
     font-size: 11px;
-    width: 22px;
-    height: 18px;
+    width: 20px;
+    height: 16px;
 }
 .coc-user-assign-btn:hover {
     background: rgba(76, 175, 80, 0.2);
@@ -1215,8 +1264,8 @@ button:hover { background: #1a5276; }
 }
 .admin-modal-select {
     width: 100%;
-    padding: 8px 10px;
-    font-size: 13px;
+    padding: 5px 8px;
+    font-size: 11px;
     background: #1a1a2e;
     color: #e0e0e0;
     border: 1px solid #0f3460;
@@ -1230,7 +1279,8 @@ button:hover { background: #1a5276; }
 .admin-modal-select option {
     background: #1a1a2e;
     color: #e0e0e0;
-    padding: 6px;
+    padding: 4px;
+    font-size: 11px;
 }
 .admin-modal-select option:checked {
     background: #0f3460;
