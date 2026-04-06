@@ -106,25 +106,162 @@ async def admin_delete_user(user_id: uuid.UUID, db: DB):
     await db.flush()
 
 
+class AdminBulkDelete(BaseModel):
+    user_ids: list[str]
+
+
+@router.post("/users/bulk-delete", status_code=200)
+async def admin_bulk_delete_users(body: AdminBulkDelete, db: DB):
+    """Admin: bulk delete multiple users and their session participations."""
+    deleted = 0
+    for uid_str in body.user_ids:
+        try:
+            uid = uuid.UUID(uid_str)
+        except ValueError:
+            continue
+        result = await db.execute(select(User).where(User.id == uid))
+        user = result.scalar_one_or_none()
+        if user is None:
+            continue
+        await db.execute(sa_delete(SessionParticipant).where(SessionParticipant.user_id == uid))
+        await db.delete(user)
+        deleted += 1
+    await db.flush()
+    return {"deleted": deleted, "requested": len(body.user_ids)}
+
+
 # ══════════════════════════════════════════════════════
 # ── Unit Hierarchy (chain of command) ────────────────
 # ══════════════════════════════════════════════════════
 
 @router.get("/sessions/{session_id}/unit-hierarchy")
 async def admin_get_unit_hierarchy(session_id: uuid.UUID, db: DB):
-    """Return all units for a session organized as a hierarchy tree."""
+    """Return all units for a session organized as a hierarchy tree,
+    with assigned user display names and commanding user info."""
     result = await db.execute(
         select(Unit).where(Unit.session_id == session_id, Unit.is_destroyed == False)
     )
     units = result.scalars().all()
 
+    # Fetch all participants for this session to resolve user names
+    part_result = await db.execute(
+        select(SessionParticipant)
+        .options(selectinload(SessionParticipant.user))
+        .where(SessionParticipant.session_id == session_id)
+    )
+    participants = part_result.scalars().all()
+    user_map = {}  # user_id (str) -> display_name
+    for p in participants:
+        if p.user:
+            user_map[str(p.user_id)] = p.user.display_name
+
     from backend.services.visibility_service import _serialize_unit
-    serialized = [_serialize_unit(u) for u in units]
+    serialized = []
+    for u in units:
+        data = _serialize_unit(u)
+        # Add assigned user names
+        names = []
+        if u.assigned_user_ids:
+            for uid in u.assigned_user_ids:
+                name = user_map.get(uid)
+                if name:
+                    names.append(name)
+        data["assigned_user_names"] = names
+        serialized.append(data)
+
+    # Build lookup for resolving commanding user
+    unit_map = {str(u.id): u for u in units}
+
+    # For each unit, walk up the parent chain to find the nearest unit with an assigned user
+    for data in serialized:
+        cmd_name = None
+        current_id = data["id"]
+        visited = set()
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            u = unit_map.get(current_id)
+            if u is None:
+                break
+            if u.assigned_user_ids:
+                for uid in u.assigned_user_ids:
+                    name = user_map.get(uid)
+                    if name:
+                        cmd_name = name
+                        break
+                if cmd_name:
+                    break
+            current_id = str(u.parent_unit_id) if u.parent_unit_id else None
+        data["commanding_user_name"] = cmd_name
+
     return serialized
 
 
 class UnitParentUpdate(BaseModel):
     parent_unit_id: str | None = None
+
+
+# ── Admin Add Participant to Session ─────────────
+
+class AdminAddParticipant(BaseModel):
+    user_id: str
+    side: str = "blue"
+    role: str = "commander"
+
+
+@router.post("/sessions/{session_id}/add-participant")
+async def admin_add_participant(
+    session_id: uuid.UUID, body: AdminAddParticipant, db: DB,
+):
+    """Admin: add a user to a session as a participant with given side/role."""
+    # Verify session exists
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Verify user exists
+    try:
+        uid = uuid.UUID(body.user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    result = await db.execute(select(User).where(User.id == uid))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Check if already a participant
+    existing = await db.execute(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.user_id == uid,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"User '{user.display_name}' already in this session")
+
+    # Validate side
+    try:
+        side = Side(body.side)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid side: {body.side}")
+
+    participant = SessionParticipant(
+        session_id=session_id,
+        user_id=uid,
+        side=side,
+        role=body.role or "commander",
+    )
+    db.add(participant)
+    await db.flush()
+
+    return {
+        "id": str(participant.id),
+        "user_id": str(uid),
+        "display_name": user.display_name,
+        "side": participant.side.value,
+        "role": participant.role,
+    }
 
 
 @router.put("/sessions/{session_id}/units/{unit_id}/parent")
@@ -216,6 +353,33 @@ class TickIntervalUpdate(BaseModel):
 
 
 # ── DB Stats ────────────────────────────────────────
+
+@router.get("/sessions")
+async def admin_list_all_sessions(db: DB):
+    """Admin: list ALL sessions regardless of participation."""
+    result = await db.execute(
+        select(Session).order_by(Session.created_at.desc())
+    )
+    sessions = result.scalars().all()
+    out = []
+    for s in sessions:
+        # Count participants
+        cnt_result = await db.execute(
+            select(func.count()).select_from(SessionParticipant).where(
+                SessionParticipant.session_id == s.id
+            )
+        )
+        cnt = cnt_result.scalar() or 0
+        out.append({
+            "id": str(s.id),
+            "scenario_id": str(s.scenario_id) if s.scenario_id else None,
+            "status": s.status.value,
+            "tick": s.tick,
+            "participant_count": cnt,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+    return out
+
 
 @router.get("/stats")
 async def db_stats(db: DB, user: CurrentUser):
@@ -590,4 +754,64 @@ async def admin_get_all_orders(session_id: uuid.UUID, db: DB, user: CurrentUser)
         }
         for o in orders
     ]
+
+
+# ══════════════════════════════════════════════════════
+# ── Grid Management ──────────────────────────────────
+# ══════════════════════════════════════════════════════
+
+class AdminGridUpdate(BaseModel):
+    origin_lat: float
+    origin_lon: float
+    orientation_deg: float = 0.0
+    base_square_size_m: float = 1000.0
+    columns: int = 8
+    rows: int = 8
+    labeling_scheme: str = "alphanumeric"
+
+
+@router.put("/sessions/{session_id}/grid")
+async def admin_update_grid(
+    session_id: uuid.UUID, body: AdminGridUpdate, db: DB, user: CurrentUser,
+):
+    """Admin: update grid definition for a session."""
+    from geoalchemy2.shape import from_shape
+    from shapely.geometry import Point as ShapelyPoint
+
+    # Clamp grid dimensions
+    columns = max(1, min(20, body.columns))
+    rows = max(1, min(20, body.rows))
+    base_square_size_m = max(100, min(10000, body.base_square_size_m))
+
+    # Verify session exists
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Delete existing grid definition
+    await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
+
+    # Create new grid definition
+    grid_def = GridDefinition(
+        session_id=session_id,
+        origin=from_shape(ShapelyPoint(body.origin_lon, body.origin_lat), srid=4326),
+        orientation_deg=body.orientation_deg,
+        base_square_size_m=base_square_size_m,
+        columns=columns,
+        rows=rows,
+        labeling_scheme=body.labeling_scheme,
+    )
+    db.add(grid_def)
+    await db.flush()
+
+    return {
+        "id": str(grid_def.id),
+        "origin_lat": body.origin_lat,
+        "origin_lon": body.origin_lon,
+        "columns": columns,
+        "rows": rows,
+        "base_square_size_m": base_square_size_m,
+    }
+
 

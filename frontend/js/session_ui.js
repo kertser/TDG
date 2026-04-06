@@ -132,6 +132,11 @@ const KSessionUI = (() => {
             const logoutBtn = document.getElementById('logout-btn');
             if (logoutBtn) logoutBtn.style.display = 'inline-block';
 
+            // Show admin topbar button (any logged-in user can see it;
+            // the password gate inside the admin tab handles security)
+            const adminTopBtn = document.getElementById('admin-topbar-btn');
+            if (adminTopBtn) adminTopBtn.style.display = '';
+
             loadSessions();
         } catch (err) {
             console.error('Auth failed:', err);
@@ -157,6 +162,10 @@ const KSessionUI = (() => {
 
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) logoutBtn.style.display = 'none';
+
+        // Hide admin topbar button
+        const adminTopBtn = document.getElementById('admin-topbar-btn');
+        if (adminTopBtn) adminTopBtn.style.display = 'none';
 
         // Hide toolbar and session controls
         const drawToolbar = document.getElementById('draw-toolbar');

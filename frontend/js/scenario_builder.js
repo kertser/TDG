@@ -17,6 +17,7 @@ const KScenarioBuilder = (() => {
     let _ctxMenuEl = null;   // right-click context menu element
     let _ctxIdx = -1;        // index of unit in context menu
     let _rangePreviewLayer = null; // range preview layer for builder
+    let _gridPreviewLayer = null;  // grid preview layer for builder
 
     // ── Unit type registry ──────────────────────────────
     const UNIT_TYPES = {
@@ -35,7 +36,14 @@ const KScenarioBuilder = (() => {
         _map = map;
         _stagedLayer = L.layerGroup();
         _rangePreviewLayer = L.layerGroup();
+        _gridPreviewLayer = L.layerGroup();
         _initContextMenu();
+
+        // Auto-update grid preview when grid settings change
+        ['sb-grid-origin-lat', 'sb-grid-origin-lon', 'sb-grid-cols', 'sb-grid-rows', 'sb-grid-size'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', () => { if (_active) _updateGridPreview(); });
+        });
     }
 
     // ══════════════════════════════════════════════════
@@ -49,6 +57,7 @@ const KScenarioBuilder = (() => {
         _editingIdx = -1;
         if (!_map.hasLayer(_stagedLayer)) _stagedLayer.addTo(_map);
         if (!_map.hasLayer(_rangePreviewLayer)) _rangePreviewLayer.addTo(_map);
+        if (!_map.hasLayer(_gridPreviewLayer)) _gridPreviewLayer.addTo(_map);
 
         // Install map click handler
         _map.on('click', _onMapClick);
@@ -69,6 +78,8 @@ const KScenarioBuilder = (() => {
         if (scenarioId) _loadScenario(scenarioId);
 
         _refreshUnitList();
+        // Render a client-side grid preview from the form values
+        _updateGridPreview();
     }
 
     function deactivate() {
@@ -78,8 +89,10 @@ const KScenarioBuilder = (() => {
         _editingIdx = -1;
         _stagedLayer.clearLayers();
         _rangePreviewLayer.clearLayers();
+        _gridPreviewLayer.clearLayers();
         if (_map.hasLayer(_stagedLayer)) _map.removeLayer(_stagedLayer);
         if (_map.hasLayer(_rangePreviewLayer)) _map.removeLayer(_rangePreviewLayer);
+        if (_map.hasLayer(_gridPreviewLayer)) _map.removeLayer(_gridPreviewLayer);
 
         _map.off('click', _onMapClick);
         document.removeEventListener('click', _dismissCtxMenu);
@@ -353,9 +366,9 @@ const KScenarioBuilder = (() => {
         // Grid settings
         const gridOriginLat = parseFloat(document.getElementById('sb-grid-origin-lat').value) || center.lat - 0.04;
         const gridOriginLon = parseFloat(document.getElementById('sb-grid-origin-lon').value) || center.lng - 0.04;
-        const gridCols = parseInt(document.getElementById('sb-grid-cols').value) || 8;
-        const gridRows = parseInt(document.getElementById('sb-grid-rows').value) || 8;
-        const gridSize = parseInt(document.getElementById('sb-grid-size').value) || 1000;
+        const gridCols = Math.max(1, Math.min(20, parseInt(document.getElementById('sb-grid-cols').value) || 8));
+        const gridRows = Math.max(1, Math.min(20, parseInt(document.getElementById('sb-grid-rows').value) || 8));
+        const gridSize = Math.max(100, Math.min(10000, parseInt(document.getElementById('sb-grid-size').value) || 1000));
 
         const grid_settings = {
             origin_lat: gridOriginLat,
@@ -482,6 +495,7 @@ const KScenarioBuilder = (() => {
 
             _renderStagedUnits();
             _refreshUnitList();
+            _updateGridPreview();
 
             // Pan to scenario area
             if (_stagedUnits.length > 0) {
@@ -638,6 +652,91 @@ const KScenarioBuilder = (() => {
             _ctxMenuEl.style.display = 'none';
         }
         _ctxIdx = -1;
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Client-Side Grid Preview ─────────────────────
+    // ══════════════════════════════════════════════════
+
+    /**
+     * Compute and render a quick client-side grid preview from the builder's
+     * grid settings form (origin, cols, rows, size). Uses a simple local projection.
+     */
+    function _updateGridPreview() {
+        if (!_gridPreviewLayer || !_map) return;
+        _gridPreviewLayer.clearLayers();
+
+        const originLat = parseFloat(document.getElementById('sb-grid-origin-lat').value);
+        const originLon = parseFloat(document.getElementById('sb-grid-origin-lon').value);
+        const cols = Math.max(1, Math.min(20, parseInt(document.getElementById('sb-grid-cols').value) || 8));
+        const rows = Math.max(1, Math.min(20, parseInt(document.getElementById('sb-grid-rows').value) || 8));
+        const sizeMt = Math.max(100, Math.min(10000, parseFloat(document.getElementById('sb-grid-size').value) || 1000));
+
+        if (isNaN(originLat) || isNaN(originLon)) return;
+
+        // Approximate degree offsets for meters at this latitude
+        const latRad = originLat * Math.PI / 180;
+        const mPerDegLat = 111320;
+        const mPerDegLon = 111320 * Math.cos(latRad);
+
+        const dLat = sizeMt / mPerDegLat;
+        const dLon = sizeMt / mPerDegLon;
+
+        // Draw grid lines
+        for (let c = 0; c <= cols; c++) {
+            const lon = originLon + c * dLon;
+            _gridPreviewLayer.addLayer(L.polyline([
+                [originLat, lon],
+                [originLat + rows * dLat, lon],
+            ], {
+                color: 'rgba(255,255,255,0.35)',
+                weight: c === 0 || c === cols ? 2 : 1,
+                dashArray: c === 0 || c === cols ? null : '6,4',
+                interactive: false,
+            }));
+        }
+        for (let r = 0; r <= rows; r++) {
+            const lat = originLat + r * dLat;
+            _gridPreviewLayer.addLayer(L.polyline([
+                [lat, originLon],
+                [lat, originLon + cols * dLon],
+            ], {
+                color: 'rgba(255,255,255,0.35)',
+                weight: r === 0 || r === rows ? 2 : 1,
+                dashArray: r === 0 || r === rows ? null : '6,4',
+                interactive: false,
+            }));
+        }
+
+        // Column labels (A, B, C...) at top
+        for (let c = 0; c < cols; c++) {
+            const colLabel = String.fromCharCode(65 + c);
+            const cLon = originLon + (c + 0.5) * dLon;
+            const cLat = originLat + rows * dLat + dLat * 0.15;
+            _gridPreviewLayer.addLayer(L.marker([cLat, cLon], {
+                icon: L.divIcon({
+                    className: 'grid-axis-label grid-axis-md',
+                    html: `<span>${colLabel}</span>`,
+                    iconSize: [20, 14],
+                    iconAnchor: [10, 14],
+                }),
+                interactive: false,
+            }));
+        }
+        // Row labels (1, 2, 3...) at left
+        for (let r = 0; r < rows; r++) {
+            const rLat = originLat + (r + 0.5) * dLat;
+            const rLon = originLon - dLon * 0.15;
+            _gridPreviewLayer.addLayer(L.marker([rLat, rLon], {
+                icon: L.divIcon({
+                    className: 'grid-axis-label grid-axis-md',
+                    html: `<span>${r + 1}</span>`,
+                    iconSize: [20, 14],
+                    iconAnchor: [20, 7],
+                }),
+                interactive: false,
+            }));
+        }
     }
 
     // ══════════════════════════════════════════════════

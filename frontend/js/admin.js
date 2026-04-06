@@ -1,19 +1,22 @@
 /**
- * admin.js – Full admin/game-master panel.
+ * admin.js – Full admin/game-master panel (floating window).
  *
  * Sub-tabs: Builder | Session | Monitor | Users | CoC
  *   Builder  – scenario builder toggle, scenario list with edit
- *   Session  – participants, tick controls, reset, event injection
+ *   Session  – participants, tick controls, reset, event injection, grid
  *   Monitor  – god-view toggle, unit dashboard, all orders
- *   Users    – manage registered users (add/rename/delete)
+ *   Users    – manage registered users (add/rename/delete/bulk-delete/assign-to-session)
  *   CoC      – chain of command tree, assign units to parents
  *
  * Admin tab is locked behind a password (ADMIN_PASSWORD in settings).
+ * Admin selects a session via a dropdown — not dependent on user's joined session.
  */
 const KAdmin = (() => {
 
     let _godViewEnabled = false;
     let _adminUnlocked = false;
+    let _adminSelectedSessionId = null;  // admin-chosen session (independent of user's session)
+    let _pickingGridOrigin = false;      // map-click pick mode for grid origin
 
     function init() {
         // ── Admin lock gate ────────────────────────────
@@ -25,6 +28,18 @@ const KAdmin = (() => {
             });
         }
 
+        // ── Admin topbar button ─────────────────────────
+        _bind('admin-topbar-btn', 'click', _onAdminTopbarClick);
+
+        // ── Admin floating window close ─────────────────
+        _bind('admin-window-close', 'click', () => {
+            const win = document.getElementById('admin-window');
+            if (win) win.style.display = 'none';
+        });
+
+        // ── Draggable window header ─────────────────────
+        _initDraggableWindow();
+
         // Sub-tab switching inside admin tab
         document.querySelectorAll('.admin-subtab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -35,6 +50,19 @@ const KAdmin = (() => {
                 if (panel) panel.style.display = 'block';
             });
         });
+
+        // ── Admin Session Selector ──────────────────────
+        _bind('admin-refresh-session-selector', 'click', _loadAdminSessions);
+        const selector = document.getElementById('admin-session-selector');
+        if (selector) {
+            selector.addEventListener('change', () => {
+                _adminSelectedSessionId = selector.value || null;
+                const info = document.getElementById('admin-selected-session-info');
+                if (info) info.textContent = _adminSelectedSessionId
+                    ? `Selected: ${_adminSelectedSessionId.substring(0, 8)}...`
+                    : 'No session selected';
+            });
+        }
 
         // ── Builder sub-tab ─────────────────────────
         _bind('sb-toggle-btn', 'click', _toggleBuilder);
@@ -58,6 +86,9 @@ const KAdmin = (() => {
         _bind('admin-apply-tick-interval', 'click', _applyTickInterval);
         _bind('admin-load-participants', 'click', _loadParticipants);
         _bind('admin-inject-event', 'click', _injectEvent);
+        _bind('admin-apply-grid', 'click', _applyGrid);
+        _bind('admin-grid-from-session', 'click', _loadGridFromSession);
+        _bind('admin-grid-pick-map', 'click', _pickGridFromMap);
 
         // ── Monitor sub-tab ─────────────────────────
         _bind('admin-god-view-toggle', 'click', _toggleGodView);
@@ -68,11 +99,25 @@ const KAdmin = (() => {
         // ── Users sub-tab ───────────────────────────
         _bind('admin-load-users', 'click', _loadUsers);
         _bind('admin-add-user-btn', 'click', _addUser);
+        _bind('admin-bulk-delete-users', 'click', _bulkDeleteUsers);
         const addUserInput = document.getElementById('admin-add-user-name');
         if (addUserInput) addUserInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') _addUser(); });
 
+        // Select-all checkbox for users
+        const selectAllCb = document.getElementById('admin-users-select-all');
+        if (selectAllCb) {
+            selectAllCb.addEventListener('change', () => {
+                document.querySelectorAll('.admin-user-cb').forEach(cb => {
+                    cb.checked = selectAllCb.checked;
+                });
+            });
+        }
+
         // ── Chain of Command sub-tab ────────────────
         _bind('admin-load-coc', 'click', _loadChainOfCommand);
+
+        // ── Public CoC tab refresh ──────────────────
+        _bind('coc-refresh-btn', 'click', loadPublicCoC);
     }
 
     function _bind(id, evt, fn) {
@@ -81,7 +126,62 @@ const KAdmin = (() => {
     }
 
     function _getToken() { return KSessionUI.getToken(); }
-    function _getSessionId() { return KSessionUI.getSessionId(); }
+    function _getUserSessionId() { return KSessionUI.getSessionId(); }
+    /** Admin session: prefer the admin dropdown, fall back to user's session */
+    function _getAdminSessionId() { return _adminSelectedSessionId || _getUserSessionId(); }
+
+    // ══════════════════════════════════════════════════
+    // ── Admin Floating Window (draggable) ────────────
+    // ══════════════════════════════════════════════════
+
+    function _initDraggableWindow() {
+        const win = document.getElementById('admin-window');
+        const header = document.getElementById('admin-window-header');
+        if (!win || !header) return;
+
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+
+        header.addEventListener('pointerdown', (e) => {
+            if (e.target.id === 'admin-window-close') return;
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = win.getBoundingClientRect();
+            startLeft = rect.left;
+            startTop = rect.top;
+            header.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+
+        header.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            win.style.left = (startLeft + dx) + 'px';
+            win.style.top = (startTop + dy) + 'px';
+            win.style.right = 'auto';
+        });
+
+        header.addEventListener('pointerup', () => {
+            isDragging = false;
+        });
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Admin Topbar Button ─────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _onAdminTopbarClick() {
+        const win = document.getElementById('admin-window');
+        if (!win) return;
+        // Toggle visibility
+        if (win.style.display === 'none' || !win.style.display) {
+            win.style.display = 'flex';
+        } else {
+            win.style.display = 'none';
+        }
+    }
 
     // ══════════════════════════════════════════════════
     // ── Admin Password Gate ─────────────────────────
@@ -106,6 +206,11 @@ const KAdmin = (() => {
                 if (gate) gate.style.display = 'none';
                 if (content) content.style.display = 'block';
                 pw.value = '';
+                // Show admin topbar button
+                const topbarBtn = document.getElementById('admin-topbar-btn');
+                if (topbarBtn) topbarBtn.style.display = '';
+                // Load admin sessions dropdown
+                _loadAdminSessions();
             } else {
                 const data = await resp.json().catch(() => ({}));
                 alert(data.detail || 'Incorrect password');
@@ -116,6 +221,50 @@ const KAdmin = (() => {
     }
 
     function isUnlocked() { return _adminUnlocked; }
+
+    // ══════════════════════════════════════════════════
+    // ── Admin Session Selector ──────────────────────
+    // ══════════════════════════════════════════════════
+
+    async function _loadAdminSessions() {
+        try {
+            const token = _getToken();
+            const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+            // Try admin endpoint first, fall back to user endpoint
+            let resp = await fetch('/api/admin/sessions', { headers });
+            if (!resp.ok) {
+                resp = await fetch('/api/sessions', { headers });
+            }
+            if (!resp.ok) return;
+            const sessions = await resp.json();
+            const sel = document.getElementById('admin-session-selector');
+            if (!sel) return;
+
+            const prev = sel.value;
+            sel.innerHTML = '<option value="">— Select session —</option>';
+            sessions.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = `${s.id.substring(0, 8)}… [${s.status}] T${s.tick} (${s.participant_count}p)`;
+                sel.appendChild(opt);
+            });
+
+            // Restore previous selection or auto-select user's session
+            if (prev && sessions.find(s => s.id === prev)) {
+                sel.value = prev;
+            } else if (_getUserSessionId()) {
+                sel.value = _getUserSessionId();
+            }
+            _adminSelectedSessionId = sel.value || null;
+
+            const info = document.getElementById('admin-selected-session-info');
+            if (info) info.textContent = _adminSelectedSessionId
+                ? `Selected: ${_adminSelectedSessionId.substring(0, 8)}...`
+                : `${sessions.length} session(s) available`;
+        } catch (err) {
+            console.warn('Admin sessions load:', err);
+        }
+    }
 
     // ══════════════════════════════════════════════════
     // ── Scenario Builder Toggle ──────────────────────
@@ -245,6 +394,7 @@ const KAdmin = (() => {
             });
             if (resp.ok || resp.status === 204) {
                 _showInfo('admin-session-count', '✓ All sessions deleted', 'success');
+                _adminSelectedSessionId = null;
                 KWebSocket.disconnect();
                 document.getElementById('session-info').textContent = '';
                 const startBtn = document.getElementById('start-session-btn');
@@ -253,6 +403,7 @@ const KAdmin = (() => {
                 if (tickBtn) tickBtn.style.display = 'none';
                 KSessionUI.loadSessions();
                 KGameLog.addEntry('All sessions deleted (admin)', 'info');
+                _loadAdminSessions();
             } else {
                 const data = await resp.json().catch(() => ({}));
                 _showInfo('admin-session-count', `✗ ${data.detail || resp.status}`, 'error');
@@ -272,14 +423,15 @@ const KAdmin = (() => {
             const sessions = await resp.json();
             _showInfo('admin-session-count', `${sessions.length} session(s)`);
             KSessionUI.loadSessions();
+            _loadAdminSessions();
         } catch (err) {
             _showInfo('admin-session-count', `✗ ${err.message}`, 'error');
         }
     }
 
     async function _pauseSession() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
         try {
             const resp = await fetch(`/api/sessions/${sid}/pause`, {
                 method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
@@ -292,8 +444,8 @@ const KAdmin = (() => {
     }
 
     async function _resetSession() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
         if (!confirm('⚠ Reset session to tick 0? All progress will be lost.')) return;
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/reset`, {
@@ -308,8 +460,8 @@ const KAdmin = (() => {
     }
 
     async function _applyTickInterval() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
         const val = parseInt(document.getElementById('admin-tick-interval').value);
         if (!val || val < 1) { alert('Invalid interval'); return; }
         try {
@@ -324,11 +476,122 @@ const KAdmin = (() => {
         }
     }
 
+    // ── Grid Management ─────────────────────────────
+
+    async function _applyGrid() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-grid-status', 'Select a session first', 'error'); return; }
+        const lat = parseFloat(document.getElementById('admin-grid-origin-lat').value);
+        const lon = parseFloat(document.getElementById('admin-grid-origin-lon').value);
+        const cols = Math.max(1, Math.min(20, parseInt(document.getElementById('admin-grid-cols').value) || 8));
+        const rows = Math.max(1, Math.min(20, parseInt(document.getElementById('admin-grid-rows').value) || 8));
+        const size = Math.max(100, Math.min(10000, parseInt(document.getElementById('admin-grid-size').value) || 1000));
+        if (isNaN(lat) || isNaN(lon)) { _showInfo('admin-grid-status', 'Invalid origin coordinates', 'error'); return; }
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/grid`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    origin_lat: lat, origin_lon: lon,
+                    columns: cols, rows: rows,
+                    base_square_size_m: size,
+                }),
+            });
+            if (resp.ok) {
+                _showInfo('admin-grid-status', '✓ Grid updated', 'success');
+                // Reload grid on map if this is the active session
+                if (sid === _getUserSessionId()) {
+                    const map = KMap.getMap();
+                    await KGrid.load(map, sid);
+                }
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                _showInfo('admin-grid-status', `✗ ${d.detail || resp.status}`, 'error');
+            }
+        } catch (err) {
+            _showInfo('admin-grid-status', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    /** Load grid settings from the currently selected session's existing grid. */
+    async function _loadGridFromSession() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-grid-status', 'Select a session first', 'error'); return; }
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/grid/meta`);
+            if (!resp.ok) {
+                _showInfo('admin-grid-status', 'No grid defined for this session', 'error');
+                return;
+            }
+            const meta = await resp.json();
+            const latEl = document.getElementById('admin-grid-origin-lat');
+            const lonEl = document.getElementById('admin-grid-origin-lon');
+            const colsEl = document.getElementById('admin-grid-cols');
+            const rowsEl = document.getElementById('admin-grid-rows');
+            const sizeEl = document.getElementById('admin-grid-size');
+            if (latEl) latEl.value = meta.origin_lat != null ? meta.origin_lat.toFixed(5) : '';
+            if (lonEl) lonEl.value = meta.origin_lon != null ? meta.origin_lon.toFixed(5) : '';
+            if (colsEl) colsEl.value = meta.columns || 8;
+            if (rowsEl) rowsEl.value = meta.rows || 8;
+            if (sizeEl) sizeEl.value = meta.base_square_size_m || 1000;
+            _showInfo('admin-grid-status', '✓ Loaded from session grid', 'success');
+        } catch (err) {
+            _showInfo('admin-grid-status', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    /** Enter map-click pick mode to set grid origin from a map click. */
+    function _pickGridFromMap() {
+        const map = KMap.getMap();
+        if (!map) { _showInfo('admin-grid-status', 'Map not ready', 'error'); return; }
+        if (_pickingGridOrigin) return;
+
+        _pickingGridOrigin = true;
+        map.getContainer().classList.add('pick-mode-active');
+
+        // Show banner
+        const banner = document.createElement('div');
+        banner.className = 'pick-mode-banner';
+        banner.id = 'pick-mode-banner';
+        banner.textContent = '🖱 Click on map to set grid origin — ESC to cancel';
+        document.body.appendChild(banner);
+
+        const _cancelPick = () => {
+            _pickingGridOrigin = false;
+            map.getContainer().classList.remove('pick-mode-active');
+            const b = document.getElementById('pick-mode-banner');
+            if (b) b.remove();
+            map.off('click', _onPickClick);
+            document.removeEventListener('keydown', _onPickKey);
+        };
+
+        const _onPickClick = (e) => {
+            const latEl = document.getElementById('admin-grid-origin-lat');
+            const lonEl = document.getElementById('admin-grid-origin-lon');
+            if (latEl) latEl.value = e.latlng.lat.toFixed(5);
+            if (lonEl) lonEl.value = e.latlng.lng.toFixed(5);
+            _showInfo('admin-grid-status', `✓ Origin set: ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`, 'success');
+            _cancelPick();
+        };
+
+        const _onPickKey = (e) => {
+            if (e.key === 'Escape') {
+                _cancelPick();
+                _showInfo('admin-grid-status', 'Pick cancelled');
+            }
+        };
+
+        map.once('click', _onPickClick);
+        document.addEventListener('keydown', _onPickKey, { once: true });
+
+        _showInfo('admin-grid-status', 'Click on map to set origin…');
+    }
+
     // ── Participants ─────────────────────────────────
 
     async function _loadParticipants() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) { _showInfo('admin-participants-list', 'No session'); return; }
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-participants-list', 'Select a session first'); return; }
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/participants`, {
                 headers: { 'Authorization': `Bearer ${token}` },
@@ -360,7 +623,7 @@ const KAdmin = (() => {
     }
 
     async function kickParticipant(participantId) {
-        const token = _getToken(), sid = _getSessionId();
+        const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
         if (!confirm('Kick this participant?')) return;
         try {
@@ -374,8 +637,8 @@ const KAdmin = (() => {
     // ── Event Injection ──────────────────────────────
 
     async function _injectEvent() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-event-status', 'Select a session first', 'error'); return; }
         const text = document.getElementById('admin-event-text').value.trim();
         const type = document.getElementById('admin-event-type').value || 'custom';
         if (!text) { alert('Enter event text'); return; }
@@ -399,8 +662,8 @@ const KAdmin = (() => {
     // ══════════════════════════════════════════════════
 
     async function _toggleGodView() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-god-status', 'Select a session first', 'error'); return; }
 
         _godViewEnabled = !_godViewEnabled;
         const btn = document.getElementById('admin-god-view-toggle');
@@ -410,29 +673,49 @@ const KAdmin = (() => {
         }
 
         if (_godViewEnabled) {
-            // Load all units (admin endpoint)
-            try {
-                const resp = await fetch(`/api/admin/sessions/${sid}/units`, {
-                    headers: { 'Authorization': `Bearer ${token}` },
-                });
-                const units = await resp.json();
-                KUnits.render(units);
-                _showInfo('admin-god-status', `Showing all ${units.length} units`, 'success');
-            } catch (err) {
-                _showInfo('admin-god-status', `✗ ${err.message}`, 'error');
-            }
+            await _refreshGodView();
         } else {
-            // Reload normal fog-of-war view
-            await KUnits.load(sid, token);
-            _showInfo('admin-god-status', 'Normal view restored');
+            // Reload normal fog-of-war view — both units and contacts
+            const userSid = _getUserSessionId();
+            if (userSid) {
+                await KUnits.load(userSid, token);
+                await KContacts.load(userSid, token);
+            }
+            _showInfo('admin-god-status', 'Normal view restored (blue fog-of-war)');
+        }
+    }
+
+    /** Fetch and render all units (god view). Called on toggle and on state_update. */
+    async function _refreshGodView() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) return;
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/units`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            const units = await resp.json();
+            KUnits.render(units);
+            _showInfo('admin-god-status', `Showing all ${units.length} units`, 'success');
+        } catch (err) {
+            _showInfo('admin-god-status', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    function isGodViewEnabled() { return _godViewEnabled; }
+
+    /** Called by app.js when a state_update arrives via WebSocket.
+     *  If god view is on, re-fetch admin units instead of using fog-of-war data. */
+    async function onStateUpdate(data) {
+        if (_godViewEnabled) {
+            await _refreshGodView();
         }
     }
 
     // ── Unit Dashboard ───────────────────────────────
 
     async function _loadUnitDashboard() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-unit-dashboard', 'Select a session first'); return; }
 
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/units`, {
@@ -474,8 +757,8 @@ const KAdmin = (() => {
     // ── All Orders ───────────────────────────────────
 
     async function _loadAllOrders() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) return;
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-orders-list', 'Select a session first'); return; }
 
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/orders`, {
@@ -543,6 +826,10 @@ const KAdmin = (() => {
             const el = document.getElementById('admin-users-list');
             if (!el) return;
 
+            // Reset select-all
+            const selectAllCb = document.getElementById('admin-users-select-all');
+            if (selectAllCb) selectAllCb.checked = false;
+
             if (users.length === 0) {
                 el.innerHTML = '<div class="admin-info">No registered users</div>';
                 return;
@@ -552,11 +839,15 @@ const KAdmin = (() => {
             users.forEach(u => {
                 const created = u.created_at ? new Date(u.created_at).toLocaleDateString() : '';
                 html += `<div class="admin-item">
-                    <div style="flex:1;min-width:0;">
-                        <b title="User ID: ${u.id}">${u.display_name}</b>
-                        <span class="admin-item-meta" title="Registered on ${created}">${created}</span>
+                    <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+                        <input type="checkbox" class="admin-user-cb" data-user-id="${u.id}" style="cursor:pointer;flex-shrink:0;" />
+                        <div style="min-width:0;">
+                            <b title="User ID: ${u.id}">${u.display_name}</b>
+                            <span class="admin-item-meta" title="Registered on ${created}">${created}</span>
+                        </div>
                     </div>
                     <div style="display:flex;gap:3px;">
+                        <button class="admin-btn" onclick="KAdmin.assignUserToSession('${u.id}','${u.display_name.replace(/'/g, "\\'")}')" style="padding:2px 6px;font-size:10px;" title="Assign this user to the selected session">🎯</button>
                         <button class="admin-btn" onclick="KAdmin.renameUser('${u.id}','${u.display_name.replace(/'/g, "\\'")}')" style="padding:2px 6px;font-size:10px;" title="Rename this user">✏</button>
                         <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteUser('${u.id}','${u.display_name.replace(/'/g, "\\'")}')" style="padding:2px 6px;font-size:10px;" title="Delete this user">✕</button>
                     </div>
@@ -566,6 +857,29 @@ const KAdmin = (() => {
         } catch (err) {
             _showInfo('admin-users-list', `✗ ${err.message}`, 'error');
         }
+    }
+
+    async function _bulkDeleteUsers() {
+        const checkboxes = document.querySelectorAll('.admin-user-cb:checked');
+        if (checkboxes.length === 0) { alert('No users selected'); return; }
+        if (!confirm(`⚠ Delete ${checkboxes.length} selected user(s)?`)) return;
+
+        const userIds = Array.from(checkboxes).map(cb => cb.dataset.userId);
+        try {
+            const resp = await fetch('/api/admin/users/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_ids: userIds }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                _showInfo('admin-users-list', `✓ Deleted ${data.deleted} user(s)`, 'success');
+                setTimeout(_loadUsers, 500);
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Bulk delete failed');
+            }
+        } catch (err) { alert(err.message); }
     }
 
     async function _addUser() {
@@ -611,13 +925,49 @@ const KAdmin = (() => {
         } catch (err) { alert(err.message); }
     }
 
+    // ── Assign User to Session (from Users panel) ────
+
+    async function assignUserToSession(userId, displayName) {
+        const sid = _getAdminSessionId();
+        if (!sid) { alert('Select a session first in the admin session selector.'); return; }
+
+        const side = prompt(
+            `Assign "${displayName}" to session ${sid.substring(0, 8)}…\n\nSide (blue / red / observer / admin):`,
+            'blue'
+        );
+        if (!side) return;
+        if (!['blue', 'red', 'observer', 'admin'].includes(side.toLowerCase())) {
+            alert('Invalid side. Use: blue, red, observer, or admin');
+            return;
+        }
+
+        const role = prompt('Role (e.g. commander, plt_commander, observer):', 'commander');
+        if (role === null) return;
+
+        const token = _getToken();
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/add-participant`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ user_id: userId, side: side.toLowerCase(), role: role || 'commander' }),
+            });
+            if (resp.ok) {
+                alert(`✓ ${displayName} added to session as ${side} / ${role || 'commander'}`);
+                _loadParticipants();
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Failed to add participant');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
     // ══════════════════════════════════════════════════
-    // ── Chain of Command (CoC) ───────────────────────
+    // ── Chain of Command (CoC) – Admin Sub-Tab ──────
     // ══════════════════════════════════════════════════
 
     async function _loadChainOfCommand() {
-        const token = _getToken(), sid = _getSessionId();
-        if (!token || !sid) { _showInfo('admin-coc-tree', 'Join a session first'); return; }
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-coc-tree', 'Select a session first'); return; }
 
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/unit-hierarchy`, {
@@ -625,14 +975,49 @@ const KAdmin = (() => {
             });
             if (!resp.ok) { _showInfo('admin-coc-tree', 'Failed to load', 'error'); return; }
             const units = await resp.json();
-            _renderCoCTree(units);
+            _renderCoCTree(units, 'admin-coc-tree', true, units);
         } catch (err) {
             _showInfo('admin-coc-tree', `✗ ${err.message}`, 'error');
         }
     }
 
-    function _renderCoCTree(units) {
-        const el = document.getElementById('admin-coc-tree');
+    // ══════════════════════════════════════════════════
+    // ── Chain of Command – Public Tab ────────────────
+    // ══════════════════════════════════════════════════
+
+    async function loadPublicCoC() {
+        const token = _getToken(), sid = _getUserSessionId();
+        if (!token || !sid) {
+            const el = document.getElementById('coc-tree-public');
+            if (el) el.innerHTML = '<div class="admin-info">Join a session first</div>';
+            return;
+        }
+
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/unit-hierarchy`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!resp.ok) {
+                const el = document.getElementById('coc-tree-public');
+                if (el) el.innerHTML = '<div class="admin-info">Could not load hierarchy</div>';
+                return;
+            }
+            const allUnits = await resp.json();
+            // Public view: Blue force only (Red is admin-only)
+            const visibleUnits = _adminUnlocked ? allUnits : allUnits.filter(u => u.side === 'blue');
+            _renderCoCTree(visibleUnits, 'coc-tree-public', _adminUnlocked, allUnits);
+        } catch (err) {
+            const el = document.getElementById('coc-tree-public');
+            if (el) el.innerHTML = `<div class="admin-info admin-error">✗ ${err.message}</div>`;
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── CoC Tree Rendering (shared) ─────────────────
+    // ══════════════════════════════════════════════════
+
+    function _renderCoCTree(units, targetElId, editable, allUnits) {
+        const el = document.getElementById(targetElId);
         if (!el) return;
 
         if (units.length === 0) {
@@ -640,7 +1025,12 @@ const KAdmin = (() => {
             return;
         }
 
-        // Build tree structure
+        // Build a lookup map from ALL units (including ones not in 'units')
+        // so we can resolve parent names even if parent is filtered out
+        const allUnitMap = {};
+        (allUnits || units).forEach(u => { allUnitMap[u.id] = u; });
+
+        // Build tree structure from the visible units
         const unitMap = {};
         units.forEach(u => { unitMap[u.id] = { ...u, children: [] }; });
 
@@ -664,41 +1054,68 @@ const KAdmin = (() => {
         // Render tree
         let html = '<div class="coc-tree">';
 
-        // Side headers
         const blueRoots = roots.filter(u => u.side === 'blue');
         const redRoots = roots.filter(u => u.side === 'red');
 
         if (blueRoots.length > 0) {
             html += '<div class="coc-side-header" style="color:#4fc3f7;">BLUE FORCE</div>';
-            blueRoots.forEach(u => { html += _renderCoCNode(u, 0, units); });
+            blueRoots.forEach(u => { html += _renderCoCNode(u, 0, units, editable, allUnitMap); });
         }
         if (redRoots.length > 0) {
             html += '<div class="coc-side-header" style="color:#ef5350;margin-top:8px;">RED FORCE</div>';
-            redRoots.forEach(u => { html += _renderCoCNode(u, 0, units); });
+            redRoots.forEach(u => { html += _renderCoCNode(u, 0, units, editable, allUnitMap); });
         }
 
         html += '</div>';
         el.innerHTML = html;
 
-        // Bind drag/drop and assign buttons
-        el.querySelectorAll('.coc-assign-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const unitId = btn.dataset.unitId;
-                _showParentPicker(unitId, units);
+        if (editable) {
+            // Bind assign/unassign buttons
+            el.querySelectorAll('.coc-assign-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const unitId = btn.dataset.unitId;
+                    _showParentPicker(unitId, units);
+                });
             });
-        });
 
-        el.querySelectorAll('.coc-unassign-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const unitId = btn.dataset.unitId;
-                _setUnitParent(unitId, null);
+            el.querySelectorAll('.coc-unassign-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const unitId = btn.dataset.unitId;
+                    _setUnitParent(unitId, null);
+                });
             });
-        });
+        }
     }
 
-    function _renderCoCNode(unit, depth, allUnits) {
+    /**
+     * Find the nearest commanding user for a unit by walking up the parent chain.
+     * Returns the display name of the user assigned to the nearest ancestor (or self).
+     */
+    function _findCommandingUser(unit, allUnitMap) {
+        let current = unit;
+        const visited = new Set();
+        while (current) {
+            if (visited.has(current.id)) break; // prevent infinite loop
+            visited.add(current.id);
+            if (current.commanding_user_name) {
+                return current.commanding_user_name;
+            }
+            // Also check assigned_user_ids for a direct assignment label
+            if (current.assigned_user_names && current.assigned_user_names.length > 0) {
+                return current.assigned_user_names[0];
+            }
+            if (current.parent_unit_id && allUnitMap[current.parent_unit_id]) {
+                current = allUnitMap[current.parent_unit_id];
+            } else {
+                break;
+            }
+        }
+        return null;
+    }
+
+    function _renderCoCNode(unit, depth, allUnits, editable, allUnitMap) {
         const indent = depth * 20;
         const sideColor = unit.side === 'blue' ? '#4fc3f7' : '#ef5350';
         const strPct = unit.strength != null ? (unit.strength * 100).toFixed(0) + '%' : '?';
@@ -706,23 +1123,50 @@ const KAdmin = (() => {
         const hasChildren = unit.children && unit.children.length > 0;
         const expandIcon = hasChildren ? '▼' : '·';
 
-        let html = `<div class="coc-node" style="margin-left:${indent}px;" title="${unit.unit_type} — Str: ${strPct}">
+        // Resolve commanding officer (lowest rank parent in the chain)
+        let cmdInfo = '';
+        if (unit.parent_unit_id && allUnitMap) {
+            const parent = allUnitMap[unit.parent_unit_id];
+            if (parent) {
+                cmdInfo = `<span class="coc-cmd" title="Commanded by: ${parent.name}" style="font-size:9px;color:#90caf9;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:middle;">⬆ ${parent.name}</span>`;
+            }
+        }
+
+        // Find assigned users for this unit
+        let userBadge = '';
+        if (unit.assigned_user_names && unit.assigned_user_names.length > 0) {
+            const names = unit.assigned_user_names.join(', ');
+            userBadge = `<span class="coc-user-badge" title="Assigned to: ${names}">👤 ${names}</span>`;
+        }
+
+        // Find the commanding user (lowest-rank user up the chain)
+        let cmdUserTitle = '';
+        const cmdUser = _findCommandingUser(unit, allUnitMap);
+        if (cmdUser) {
+            cmdUserTitle = `\nCommanding user: ${cmdUser}`;
+        }
+
+        let html = `<div class="coc-node" style="margin-left:${indent}px;" title="${unit.unit_type} — Str: ${strPct}${unit.parent_unit_id && allUnitMap && allUnitMap[unit.parent_unit_id] ? '\nCommander unit: ' + allUnitMap[unit.parent_unit_id].name : ''}${cmdUserTitle}">
             <span class="coc-expand">${expandIcon}</span>
             <span class="coc-connector" style="background:${sideColor};"></span>
             <span class="coc-name" style="color:#e0e0e0;">${unit.name}</span>
+            ${userBadge}
+            ${cmdInfo}
             <span class="coc-type" title="${unit.unit_type}">${unit.unit_type}</span>
-            <span class="coc-str" style="color:${strClr};" title="Strength">${strPct}</span>
-            <button class="coc-assign-btn" data-unit-id="${unit.id}" title="Assign to a parent commander">⬆</button>`;
+            <span class="coc-str" style="color:${strClr};" title="Strength">${strPct}</span>`;
 
-        if (unit.parent_unit_id) {
-            html += `<button class="coc-unassign-btn" data-unit-id="${unit.id}" title="Remove from parent chain of command">✕</button>`;
+        if (editable) {
+            html += `<button class="coc-assign-btn" data-unit-id="${unit.id}" title="Assign to a parent commander">⬆</button>`;
+            if (unit.parent_unit_id) {
+                html += `<button class="coc-unassign-btn" data-unit-id="${unit.id}" title="Remove from parent chain of command">✕</button>`;
+            }
         }
 
         html += `</div>`;
 
         if (hasChildren) {
             unit.children.forEach(child => {
-                html += _renderCoCNode(child, depth + 1, allUnits);
+                html += _renderCoCNode(child, depth + 1, allUnits, editable, allUnitMap);
             });
         }
 
@@ -733,7 +1177,6 @@ const KAdmin = (() => {
         const unit = allUnits.find(u => u.id === unitId);
         if (!unit) return;
 
-        // Show list of possible parents (same side, not self, not current children)
         const candidates = allUnits.filter(u =>
             u.id !== unitId && u.side === unit.side
         );
@@ -756,7 +1199,7 @@ const KAdmin = (() => {
     }
 
     async function _setUnitParent(unitId, parentId) {
-        const token = _getToken(), sid = _getSessionId();
+        const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
 
         try {
@@ -767,6 +1210,7 @@ const KAdmin = (() => {
             });
             if (resp.ok) {
                 _loadChainOfCommand();
+                loadPublicCoC();
             } else {
                 const d = await resp.json().catch(() => ({}));
                 alert(d.detail || 'Failed');
@@ -777,11 +1221,19 @@ const KAdmin = (() => {
     // ── Session Context Update ───────────────────────
 
     function updateSessionContext() {
-        const sid = _getSessionId();
+        const sid = _getUserSessionId();
         const statusEl = document.getElementById('admin-session-status');
         if (statusEl) {
             statusEl.textContent = sid ? `Active: ${sid.substring(0, 8)}...` : 'No active session';
         }
+        // Auto-select in admin dropdown if no selection
+        if (sid && !_adminSelectedSessionId) {
+            _adminSelectedSessionId = sid;
+            const sel = document.getElementById('admin-session-selector');
+            if (sel) sel.value = sid;
+        }
+        // Refresh admin sessions list
+        if (_adminUnlocked) _loadAdminSessions();
     }
 
     // ── Helpers ──────────────────────────────────────
@@ -796,8 +1248,10 @@ const KAdmin = (() => {
     }
 
     return {
-        init, updateSessionContext, refreshScenarioList, isUnlocked,
+        init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
+        onStateUpdate,
         editScenario, deleteScenario, kickParticipant,
-        renameUser, deleteUser,
+        renameUser, deleteUser, assignUserToSession,
+        loadPublicCoC,
     };
 })();

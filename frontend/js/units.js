@@ -10,8 +10,10 @@
  *  On selection, the following overlays are shown per-unit:
  *    • Detection/visibility range  (outer dashed circle)
  *    • Effective fire range        (inner dashed circle, amber)
- *    • Movement line to target     (if unit has a movement task)
  *    • Heading indicator           (if unit is stationary but has heading)
+ *
+ *  Movement arrows are always shown for units with movement tasks,
+ *  drawn from unit center on a pane beneath unit markers.
  *
  *  Assignment: user can only select units assigned to them (or unassigned).
  */
@@ -20,6 +22,7 @@ const KUnits = (() => {
     let unitsLayer = null;         // L.layerGroup for unit markers
     let _selectionLayer = null;    // L.layerGroup for selection overlays (range, direction)
     let _hoverLayer = null;        // L.layerGroup for hover range circles
+    let _movementArrowsLayer = null; // L.layerGroup for movement arrows (below markers)
     let allUnitsData = [];
     let selectedUnitIds = new Set();
     let _map = null;
@@ -50,9 +53,15 @@ const KUnits = (() => {
 
     function init(map) {
         _map = map;
+
+        // Create a custom pane for movement arrows below the default marker pane (z=600)
+        map.createPane('movementArrowsPane');
+        map.getPane('movementArrowsPane').style.zIndex = 350;
+
         unitsLayer = L.layerGroup().addTo(map);
         _selectionLayer = L.layerGroup().addTo(map);
         _hoverLayer = L.layerGroup().addTo(map);
+        _movementArrowsLayer = L.layerGroup().addTo(map);
         _initRubberBandSelection();
     }
 
@@ -89,10 +98,12 @@ const KUnits = (() => {
                 if (unitsLayer && !_map.hasLayer(unitsLayer)) _map.addLayer(unitsLayer);
                 if (_selectionLayer && !_map.hasLayer(_selectionLayer)) _map.addLayer(_selectionLayer);
                 if (_hoverLayer && !_map.hasLayer(_hoverLayer)) _map.addLayer(_hoverLayer);
+                if (_movementArrowsLayer && !_map.hasLayer(_movementArrowsLayer)) _map.addLayer(_movementArrowsLayer);
             } else {
                 if (unitsLayer && _map.hasLayer(unitsLayer)) _map.removeLayer(unitsLayer);
                 if (_selectionLayer && _map.hasLayer(_selectionLayer)) _map.removeLayer(_selectionLayer);
                 if (_hoverLayer && _map.hasLayer(_hoverLayer)) _map.removeLayer(_hoverLayer);
+                if (_movementArrowsLayer && _map.hasLayer(_movementArrowsLayer)) _map.removeLayer(_movementArrowsLayer);
             }
         }
         return _visible;
@@ -282,7 +293,9 @@ const KUnits = (() => {
             unitMarkers[u.id] = marker;
         });
 
-        // Redraw selection overlays (ranges, movement lines)
+        // Draw movement arrows for ALL moving units (on lower pane)
+        _drawMovementArrows();
+        // Redraw selection overlays (ranges, heading)
         _drawSelectionOverlays();
     }
 
@@ -446,7 +459,93 @@ const KUnits = (() => {
     }
 
     // ══════════════════════════════════════════════════
-    // ── Selection Overlays (range circles, movement) ─
+    // ── Movement Arrows (all moving units, below markers)
+    // ══════════════════════════════════════════════════
+
+    /** Draw movement arrows for ALL units that have a movement/attack task. */
+    function _drawMovementArrows() {
+        if (!_movementArrowsLayer) return;
+        _movementArrowsLayer.clearLayers();
+
+        allUnitsData.forEach(u => {
+            if (u.lat == null || u.lon == null || u.is_destroyed) return;
+            const target = _extractTarget(u);
+            if (!target) return;
+
+            // Check if unit has a movement-type task
+            const taskType = u.current_task && u.current_task.type;
+            const isMoving = taskType && ['move', 'attack', 'advance', 'retreat', 'withdraw'].includes(taskType);
+            if (!isMoving && !target) return;
+
+            const from = L.latLng(u.lat, u.lon);
+            const to = L.latLng(target.lat, target.lon);
+            const isBlue = u.side === 'blue';
+            const accent = isBlue ? '#4fc3f7' : '#ef5350';
+
+            _drawMovementArrow(from, to, accent);
+        });
+    }
+
+    /** Draw a single movement arrow from unit center to target on the movement pane. */
+    function _drawMovementArrow(from, target, accent) {
+        const to = target;
+
+        const dLat = to.lat - from.lat;
+        const dLon = to.lng - from.lng;
+        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+
+        if (dist < 0.0001) return;
+
+        // Dashed movement line from unit center (no offset!)
+        _movementArrowsLayer.addLayer(L.polyline([from, to], {
+            color: '#ffd740',
+            weight: 2,
+            dashArray: '8,6',
+            opacity: 0.7,
+            interactive: false,
+            pane: 'movementArrowsPane',
+        }));
+
+        // Arrowhead at target end
+        const ahSize = Math.min(dist * 0.12, 0.001);
+        _drawArrowheadOnPane(from.lat, from.lng, to.lat, to.lng, '#ffd740', ahSize);
+
+        // Target crosshair
+        _movementArrowsLayer.addLayer(L.circleMarker(to, {
+            radius: 5,
+            color: '#ffd740',
+            weight: 2,
+            fillColor: '#ffd740',
+            fillOpacity: 0.2,
+            interactive: false,
+            pane: 'movementArrowsPane',
+        }));
+    }
+
+    /** Draw arrowhead on the movement arrows pane. */
+    function _drawArrowheadOnPane(fromLat, fromLon, toLat, toLon, color, size) {
+        size = size || 0.0005;
+        const dLat = toLat - fromLat;
+        const dLon = toLon - fromLon;
+        const angle = Math.atan2(dLon, dLat);
+        const spread = 0.5;
+
+        const tip   = [toLat, toLon];
+        const left  = [toLat - size * Math.cos(angle - spread), toLon - size * Math.sin(angle - spread)];
+        const right = [toLat - size * Math.cos(angle + spread), toLon - size * Math.sin(angle + spread)];
+
+        _movementArrowsLayer.addLayer(L.polygon([tip, left, right], {
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.7,
+            weight: 1,
+            interactive: false,
+            pane: 'movementArrowsPane',
+        }));
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Selection Overlays (range circles, heading) ──
     // ══════════════════════════════════════════════════
 
     function _drawSelectionOverlays() {
@@ -499,11 +598,9 @@ const KUnits = (() => {
                 }));
             }
 
-            // ── Movement direction OR heading indicator ──
+            // ── Heading indicator (only if NOT moving — arrows handle movement) ──
             const target = _extractTarget(u);
-            if (target) {
-                _drawMovementLine(pos, target, accent);
-            } else if (u.heading_deg != null && u.heading_deg !== 0) {
+            if (!target && u.heading_deg != null && u.heading_deg !== 0) {
                 _drawHeadingIndicator(pos, u.heading_deg, accent);
             }
         });
@@ -520,49 +617,6 @@ const KUnits = (() => {
             return { lat: t.target_lat, lon: t.target_lon };
         }
         return null;
-    }
-
-    /** Draw a dashed movement line from unit to target with arrowhead. */
-    function _drawMovementLine(from, target, accent) {
-        const to = L.latLng(target.lat, target.lon);
-
-        // Compute direction and offset the start point to avoid drawing under the unit marker
-        const dLat = target.lat - from.lat;
-        const dLon = target.lon - from.lng;
-        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
-
-        if (dist < 0.0001) return; // too close
-
-        // Offset start ~60 meters from unit center (rough pixel margin)
-        const offsetDeg = 0.0006;
-        const startLat = from.lat + (dLat / dist) * offsetDeg;
-        const startLon = from.lng + (dLon / dist) * offsetDeg;
-        const lineStart = L.latLng(startLat, startLon);
-
-        // Dashed movement line (from offset start to target)
-        _selectionLayer.addLayer(L.polyline([lineStart, to], {
-            color: '#ffd740',
-            weight: 2,
-            dashArray: '8,6',
-            opacity: 0.7,
-            interactive: false,
-        }));
-
-        // Arrowhead at target end
-        if (dist > 0) {
-            const ahSize = Math.min(dist * 0.12, 0.001);
-            _drawArrowhead(startLat, startLon, target.lat, target.lon, '#ffd740', ahSize);
-        }
-
-        // Target crosshair
-        _selectionLayer.addLayer(L.circleMarker(to, {
-            radius: 5,
-            color: '#ffd740',
-            weight: 2,
-            fillColor: '#ffd740',
-            fillOpacity: 0.2,
-            interactive: false,
-        }));
     }
 
     /** Draw a short heading indicator line (no movement target). */
@@ -586,7 +640,7 @@ const KUnits = (() => {
         _drawArrowhead(pos.lat, pos.lng, endLat, endLon, color, 0.00025);
     }
 
-    /** Draw a small triangular arrowhead at (toLat, toLon). */
+    /** Draw a small triangular arrowhead at (toLat, toLon) on the selection layer. */
     function _drawArrowhead(fromLat, fromLon, toLat, toLon, color, size) {
         size = size || 0.0005;
         const dLat = toLat - fromLat;

@@ -88,7 +88,13 @@
 
         // Register WS handlers
         KWebSocket.on('state_update', (data) => {
-            if (data.units) KUnits.update(data.units);
+            // If god view is enabled, re-fetch all units from admin endpoint
+            // instead of using fog-of-war filtered data
+            if (KAdmin.isGodViewEnabled()) {
+                KAdmin.onStateUpdate(data);
+            } else {
+                if (data.units) KUnits.update(data.units);
+            }
             if (data.contacts) KContacts.render(data.contacts);
             // Update game clock from state update
             if (data.tick !== undefined) {
@@ -139,5 +145,8 @@
 
         // Update admin panel context
         KAdmin.updateSessionContext();
+
+        // Load public chain of command
+        KAdmin.loadPublicCoC();
     };
 })();
