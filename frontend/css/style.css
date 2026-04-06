@@ -443,6 +443,79 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     white-space: nowrap;
 }
 
+/* ── Compass Rose (bottom-right, above game clock) ── */
+.compass-control {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.55;
+    transition: opacity 0.3s ease;
+    margin-bottom: -4px !important;
+    margin-right: 4px !important;
+}
+.compass-control:hover {
+    opacity: 0.85;
+}
+.compass-rose {
+    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.5));
+}
+.compass-label {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    fill: rgba(180, 210, 240, 0.7);
+    letter-spacing: 0.5px;
+}
+.compass-n {
+    fill: rgba(239, 83, 80, 0.9);
+    font-size: 11px;
+}
+.compass-s {
+    fill: rgba(150, 170, 200, 0.5);
+}
+.compass-needle-n {
+    fill: rgba(239, 83, 80, 0.75);
+    stroke: rgba(239, 83, 80, 0.3);
+    stroke-width: 0.5;
+    transform-origin: 50px 50px;
+    animation: compass-tremble 12s ease-in-out infinite;
+}
+.compass-needle-s {
+    fill: rgba(30, 50, 80, 0.7);
+    stroke: rgba(79, 195, 247, 0.15);
+    stroke-width: 0.5;
+    transform-origin: 50px 50px;
+    animation: compass-tremble 12s ease-in-out infinite;
+}
+/* Needle trembles: mostly still, with brief magnetic jitter bursts */
+@keyframes compass-tremble {
+    0%   { transform: rotate(0deg); }
+    /* still */
+    18%  { transform: rotate(0deg); }
+    /* first jitter burst */
+    19%  { transform: rotate(1.2deg); }
+    20%  { transform: rotate(-0.8deg); }
+    21%  { transform: rotate(0.5deg); }
+    22%  { transform: rotate(-0.3deg); }
+    23%  { transform: rotate(0deg); }
+    /* still */
+    54%  { transform: rotate(0deg); }
+    /* second jitter burst (subtler) */
+    55%  { transform: rotate(-0.7deg); }
+    56%  { transform: rotate(0.4deg); }
+    57%  { transform: rotate(-0.2deg); }
+    58%  { transform: rotate(0deg); }
+    /* still */
+    79%  { transform: rotate(0deg); }
+    /* third tiny tick */
+    80%  { transform: rotate(0.6deg); }
+    81%  { transform: rotate(-0.3deg); }
+    82%  { transform: rotate(0deg); }
+    /* settle */
+    100% { transform: rotate(0deg); }
+}
+
 /* ── Drawing Toolbar (inside topbar) ─────────── */
 #draw-toolbar {
     display: flex;
