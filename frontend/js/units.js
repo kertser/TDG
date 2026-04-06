@@ -19,10 +19,12 @@ const KUnits = (() => {
     let unitMarkers = {};          // unit_id → Leaflet marker
     let unitsLayer = null;         // L.layerGroup for unit markers
     let _selectionLayer = null;    // L.layerGroup for selection overlays (range, direction)
+    let _hoverLayer = null;        // L.layerGroup for hover range circles
     let allUnitsData = [];
     let selectedUnitIds = new Set();
     let _map = null;
     let _visible = true;
+    let _hoveredUnitId = null;     // currently hovered unit ID
 
     // ── Rubber-band selection state ──────────────────
     let _selectRect = null;
@@ -50,6 +52,7 @@ const KUnits = (() => {
         _map = map;
         unitsLayer = L.layerGroup().addTo(map);
         _selectionLayer = L.layerGroup().addTo(map);
+        _hoverLayer = L.layerGroup().addTo(map);
         _initRubberBandSelection();
     }
 
@@ -85,9 +88,11 @@ const KUnits = (() => {
             if (_visible) {
                 if (unitsLayer && !_map.hasLayer(unitsLayer)) _map.addLayer(unitsLayer);
                 if (_selectionLayer && !_map.hasLayer(_selectionLayer)) _map.addLayer(_selectionLayer);
+                if (_hoverLayer && !_map.hasLayer(_hoverLayer)) _map.addLayer(_hoverLayer);
             } else {
                 if (unitsLayer && _map.hasLayer(unitsLayer)) _map.removeLayer(unitsLayer);
                 if (_selectionLayer && _map.hasLayer(_selectionLayer)) _map.removeLayer(_selectionLayer);
+                if (_hoverLayer && _map.hasLayer(_hoverLayer)) _map.removeLayer(_hoverLayer);
             }
         }
         return _visible;
@@ -232,12 +237,30 @@ const KUnits = (() => {
             // Detail popup (right-click)
             marker.bindPopup(_buildPopupHtml(u));
 
-            // Tooltip with unit name
-            marker.bindTooltip(u.name, {
+            // Tooltip with unit name + range summary
+            const detR = u.detection_range_m || 2000;
+            const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
+            const tooltipHtml = `<b>${u.name}</b><br>`
+                + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}</span> `
+                + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
+            marker.bindTooltip(tooltipHtml, {
                 permanent: false,
                 direction: 'top',
                 offset: [0, -18],
                 className: 'unit-tooltip',
+            });
+
+            // HOVER: show range circles
+            marker.on('mouseover', () => {
+                if (selectedUnitIds.has(u.id)) return; // already shown via selection
+                _hoveredUnitId = u.id;
+                _drawHoverRanges(u);
+            });
+            marker.on('mouseout', () => {
+                if (_hoveredUnitId === u.id) {
+                    _hoveredUnitId = null;
+                    _hoverLayer.clearLayers();
+                }
             });
 
             // LEFT-CLICK: select (replace, or shift-add)
@@ -261,6 +284,42 @@ const KUnits = (() => {
 
         // Redraw selection overlays (ranges, movement lines)
         _drawSelectionOverlays();
+    }
+
+    /** Draw hover range circles for a unit (transient, cleared on mouseout). */
+    function _drawHoverRanges(u) {
+        _hoverLayer.clearLayers();
+        const pos = L.latLng(u.lat, u.lon);
+        const isBlue = u.side === 'blue';
+        const accent = isBlue ? '#4fc3f7' : '#ef5350';
+
+        // Detection range
+        const detRange = u.detection_range_m || 2000;
+        _hoverLayer.addLayer(L.circle(pos, {
+            radius: detRange,
+            color: accent,
+            weight: 1,
+            opacity: 0.3,
+            dashArray: '6,8',
+            fillColor: accent,
+            fillOpacity: 0.02,
+            interactive: false,
+        }));
+
+        // Fire range
+        const fireRange = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
+        if (fireRange < detRange * 0.95) {
+            _hoverLayer.addLayer(L.circle(pos, {
+                radius: fireRange,
+                color: '#ff9800',
+                weight: 1,
+                opacity: 0.35,
+                dashArray: '4,5',
+                fillColor: '#ff9800',
+                fillOpacity: 0.03,
+                interactive: false,
+            }));
+        }
     }
 
     function _buildPopupHtml(u) {
@@ -467,8 +526,21 @@ const KUnits = (() => {
     function _drawMovementLine(from, target, accent) {
         const to = L.latLng(target.lat, target.lon);
 
-        // Dashed movement line
-        _selectionLayer.addLayer(L.polyline([from, to], {
+        // Compute direction and offset the start point to avoid drawing under the unit marker
+        const dLat = target.lat - from.lat;
+        const dLon = target.lon - from.lng;
+        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+
+        if (dist < 0.0001) return; // too close
+
+        // Offset start ~60 meters from unit center (rough pixel margin)
+        const offsetDeg = 0.0006;
+        const startLat = from.lat + (dLat / dist) * offsetDeg;
+        const startLon = from.lng + (dLon / dist) * offsetDeg;
+        const lineStart = L.latLng(startLat, startLon);
+
+        // Dashed movement line (from offset start to target)
+        _selectionLayer.addLayer(L.polyline([lineStart, to], {
             color: '#ffd740',
             weight: 2,
             dashArray: '8,6',
@@ -476,13 +548,10 @@ const KUnits = (() => {
             interactive: false,
         }));
 
-        // Arrowhead at target
-        const dLat = target.lat - from.lat;
-        const dLon = target.lon - from.lng;
-        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+        // Arrowhead at target end
         if (dist > 0) {
             const ahSize = Math.min(dist * 0.12, 0.001);
-            _drawArrowhead(from.lat, from.lng, target.lat, target.lon, '#ffd740', ahSize);
+            _drawArrowhead(startLat, startLon, target.lat, target.lon, '#ffd740', ahSize);
         }
 
         // Target crosshair

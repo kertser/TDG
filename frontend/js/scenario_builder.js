@@ -14,6 +14,9 @@ const KScenarioBuilder = (() => {
     let _stagedLayer = null; // L.layerGroup for staged unit markers
     let _editingIdx = -1;    // index in _stagedUnits currently being edited
     let _scenarioId = null;  // if editing an existing scenario
+    let _ctxMenuEl = null;   // right-click context menu element
+    let _ctxIdx = -1;        // index of unit in context menu
+    let _rangePreviewLayer = null; // range preview layer for builder
 
     // ── Unit type registry ──────────────────────────────
     const UNIT_TYPES = {
@@ -31,6 +34,8 @@ const KScenarioBuilder = (() => {
     function init(map) {
         _map = map;
         _stagedLayer = L.layerGroup();
+        _rangePreviewLayer = L.layerGroup();
+        _initContextMenu();
     }
 
     // ══════════════════════════════════════════════════
@@ -43,9 +48,13 @@ const KScenarioBuilder = (() => {
         _stagedUnits = [];
         _editingIdx = -1;
         if (!_map.hasLayer(_stagedLayer)) _stagedLayer.addTo(_map);
+        if (!_map.hasLayer(_rangePreviewLayer)) _rangePreviewLayer.addTo(_map);
 
         // Install map click handler
         _map.on('click', _onMapClick);
+
+        // Dismiss context menu on any click
+        document.addEventListener('click', _dismissCtxMenu);
 
         // Show the builder panel
         const panel = document.getElementById('sb-panel');
@@ -68,9 +77,13 @@ const KScenarioBuilder = (() => {
         _stagedUnits = [];
         _editingIdx = -1;
         _stagedLayer.clearLayers();
+        _rangePreviewLayer.clearLayers();
         if (_map.hasLayer(_stagedLayer)) _map.removeLayer(_stagedLayer);
+        if (_map.hasLayer(_rangePreviewLayer)) _map.removeLayer(_rangePreviewLayer);
 
         _map.off('click', _onMapClick);
+        document.removeEventListener('click', _dismissCtxMenu);
+        _dismissCtxMenu();
 
         const panel = document.getElementById('sb-panel');
         if (panel) panel.style.display = 'none';
@@ -196,6 +209,7 @@ const KScenarioBuilder = (() => {
 
     function _renderStagedUnits() {
         _stagedLayer.clearLayers();
+        _rangePreviewLayer.clearLayers();
 
         _stagedUnits.forEach((u, idx) => {
             const icon = KSymbols.createIcon(u.sidc, {
@@ -205,11 +219,39 @@ const KScenarioBuilder = (() => {
 
             const marker = L.marker([u.lat, u.lon], { icon, draggable: true });
 
-            marker.bindTooltip(`${u.name} [${u.side}]`, {
+            // Tooltip with unit info + ranges
+            const info = UNIT_TYPES[u.unit_type] || {};
+            const detR = u.detection_range_m || info.det || 1500;
+            const fireR = info.fire || 600;
+            const tooltipHtml = `<b>${u.name}</b> <span style="color:${u.side === 'red' ? '#ef5350' : '#4fc3f7'}">[${u.side}]</span><br>`
+                + `<span style="font-size:10px;color:#aaa">${info.label || u.unit_type}</span><br>`
+                + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}</span> `
+                + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
+            marker.bindTooltip(tooltipHtml, {
                 permanent: false,
                 direction: 'top',
                 offset: [0, -18],
                 className: 'unit-tooltip',
+            });
+
+            // Hover: show range circles
+            marker.on('mouseover', () => {
+                _rangePreviewLayer.clearLayers();
+                const pos = L.latLng(u.lat, u.lon);
+                const accent = u.side === 'red' ? '#ef5350' : '#4fc3f7';
+                _rangePreviewLayer.addLayer(L.circle(pos, {
+                    radius: detR, color: accent, weight: 1, opacity: 0.3,
+                    dashArray: '6,8', fillColor: accent, fillOpacity: 0.02, interactive: false,
+                }));
+                if (fireR < detR * 0.95) {
+                    _rangePreviewLayer.addLayer(L.circle(pos, {
+                        radius: fireR, color: '#ff9800', weight: 1, opacity: 0.35,
+                        dashArray: '4,5', fillColor: '#ff9800', fillOpacity: 0.03, interactive: false,
+                    }));
+                }
+            });
+            marker.on('mouseout', () => {
+                _rangePreviewLayer.clearLayers();
             });
 
             // Drag to reposition
@@ -226,15 +268,20 @@ const KScenarioBuilder = (() => {
                 _showUnitForm(u.lat, u.lon, idx);
             });
 
-            // Right-click to delete
+            // Right-click to show context menu
             marker.on('contextmenu', (e) => {
                 L.DomEvent.stopPropagation(e);
                 L.DomEvent.preventDefault(e);
-                if (confirm(`Delete ${u.name}?`)) _deleteUnit(idx);
+                const origEvt = e.originalEvent || e;
+                _showUnitCtxMenu(idx, origEvt.clientX, origEvt.clientY);
             });
 
             _stagedLayer.addLayer(marker);
         });
+    }
+
+    function _fmtDist(m) {
+        return m >= 1000 ? (m / 1000).toFixed(1) + 'km' : m + 'm';
     }
 
     // ══════════════════════════════════════════════════
@@ -453,6 +500,144 @@ const KScenarioBuilder = (() => {
     function _setVal(id, val) {
         const el = document.getElementById(id);
         if (el && val != null) el.value = val;
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Elegant Right-Click Context Menu ─────────────
+    // ══════════════════════════════════════════════════
+
+    function _initContextMenu() {
+        // Create the context menu element once
+        _ctxMenuEl = document.createElement('div');
+        _ctxMenuEl.className = 'sb-ctx-menu ctx-menu';
+        _ctxMenuEl.style.display = 'none';
+        document.body.appendChild(_ctxMenuEl);
+    }
+
+    function _showUnitCtxMenu(idx, x, y) {
+        _ctxIdx = idx;
+        const u = _stagedUnits[idx];
+        if (!u || !_ctxMenuEl) return;
+
+        const info = UNIT_TYPES[u.unit_type] || {};
+        const sideColor = u.side === 'red' ? '#ef5350' : '#4fc3f7';
+        const oppositeSide = u.side === 'red' ? 'blue' : 'red';
+        const oppositeSideColor = oppositeSide === 'red' ? '#ef5350' : '#4fc3f7';
+
+        _ctxMenuEl.innerHTML = `
+            <div class="ctx-menu-header" style="border-left:3px solid ${sideColor};padding-left:8px;">
+                <div style="font-size:12px;font-weight:700;color:#e0e0e0;">${u.name}</div>
+                <div style="font-size:10px;color:#aaa;margin-top:1px;">${info.label || u.unit_type} · <span style="color:${sideColor}">${u.side.toUpperCase()}</span></div>
+            </div>
+            <div class="ctx-menu-section" style="padding:2px 0;">
+                <button class="ctx-item" data-action="edit" title="Edit unit properties">
+                    <svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:6px;"><path d="M11.5 1.5L14.5 4.5L5 14H2V11L11.5 1.5Z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>
+                    Edit Properties
+                </button>
+                <button class="ctx-item" data-action="duplicate" title="Create a copy of this unit nearby">
+                    <svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:6px;"><rect x="1" y="4" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="5" y="1" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+                    Duplicate Unit
+                </button>
+                <button class="ctx-item" data-action="toggleside" title="Switch unit to ${oppositeSide} side">
+                    <svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:6px;"><path d="M4 8H12M12 8L9 5M12 8L9 11" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Switch to <span style="color:${oppositeSideColor};font-weight:700;">${oppositeSide.toUpperCase()}</span>
+                </button>
+                <button class="ctx-item" data-action="center" title="Pan map to this unit">
+                    <svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:6px;"><circle cx="8" cy="8" r="5" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg>
+                    Center on Unit
+                </button>
+            </div>
+            <div class="ctx-menu-section" style="padding:2px 0;border-top:1px solid rgba(15,52,96,0.4);">
+                <button class="ctx-item" data-action="strength100" title="Set strength to 100%">💪 Full Strength</button>
+                <button class="ctx-item" data-action="strength50" title="Set strength to 50%">⚠ Half Strength</button>
+                <button class="ctx-item" data-action="strength25" title="Set strength to 25%">🩸 Quarter Strength</button>
+            </div>
+            <div class="ctx-menu-section" style="padding:2px 0;border-top:1px solid rgba(15,52,96,0.4);">
+                <button class="ctx-item ctx-item-danger" data-action="delete" title="Remove this unit">
+                    <svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:6px;"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    Delete Unit
+                </button>
+            </div>`;
+
+        // Bind actions
+        _ctxMenuEl.querySelectorAll('.ctx-item').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const action = btn.dataset.action;
+                _handleCtxAction(action, _ctxIdx);
+                _dismissCtxMenu();
+            });
+        });
+
+        _ctxMenuEl.style.display = 'block';
+
+        // Position on screen
+        const menuW = _ctxMenuEl.offsetWidth;
+        const menuH = _ctxMenuEl.offsetHeight;
+        const posX = (x + menuW > window.innerWidth) ? x - menuW : x;
+        const posY = (y + menuH > window.innerHeight) ? Math.max(0, y - menuH) : y;
+        _ctxMenuEl.style.left = posX + 'px';
+        _ctxMenuEl.style.top = posY + 'px';
+    }
+
+    function _handleCtxAction(action, idx) {
+        const u = _stagedUnits[idx];
+        if (!u) return;
+
+        switch (action) {
+            case 'edit':
+                _showUnitForm(u.lat, u.lon, idx);
+                _map.panTo([u.lat, u.lon]);
+                break;
+            case 'duplicate': {
+                const info = UNIT_TYPES[u.unit_type] || {};
+                const clone = {
+                    ...u,
+                    tempId: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+                    name: u.name + ' (copy)',
+                    lat: u.lat + 0.001 * (Math.random() - 0.5),
+                    lon: u.lon + 0.001 * (Math.random() - 0.5),
+                };
+                _stagedUnits.push(clone);
+                _renderStagedUnits();
+                _refreshUnitList();
+                break;
+            }
+            case 'toggleside': {
+                const newSide = u.side === 'red' ? 'blue' : 'red';
+                const info = UNIT_TYPES[u.unit_type] || {};
+                u.side = newSide;
+                u.sidc = newSide === 'red' ? (info.sidc_red || '') : (info.sidc_blue || '');
+                _renderStagedUnits();
+                _refreshUnitList();
+                break;
+            }
+            case 'center':
+                _map.panTo([u.lat, u.lon]);
+                break;
+            case 'strength100':
+                u.strength = 1.0;
+                _refreshUnitList();
+                break;
+            case 'strength50':
+                u.strength = 0.5;
+                _refreshUnitList();
+                break;
+            case 'strength25':
+                u.strength = 0.25;
+                _refreshUnitList();
+                break;
+            case 'delete':
+                _deleteUnit(idx);
+                break;
+        }
+    }
+
+    function _dismissCtxMenu() {
+        if (_ctxMenuEl) {
+            _ctxMenuEl.style.display = 'none';
+        }
+        _ctxIdx = -1;
     }
 
     // ══════════════════════════════════════════════════

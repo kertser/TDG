@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-to-a-random-secret-string-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     ALGORITHM: str = "HS256"
+    ADMIN_PASSWORD: str = "admin"  # password to unlock admin panel
 
     # ── OpenAI ────────────────────────────────────────
     OPENAI_API_KEY: str = ""

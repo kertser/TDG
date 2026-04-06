@@ -1,4 +1,4 @@
-"""Admin API endpoints – god-view, unit CRUD, participants, event injection, DB stats."""
+"""Admin API endpoints – god-view, unit CRUD, participants, event injection, DB stats, user management."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.orm import selectinload
 
 from backend.api.deps import DB, CurrentUser
+from backend.config import settings
 from backend.models.session import Session, SessionParticipant, SessionStatus, Side
 from backend.models.scenario import Scenario
 from backend.models.unit import Unit
@@ -25,6 +26,136 @@ from backend.models.user import User
 from backend.services.visibility_service import get_visible_units
 
 router = APIRouter()
+
+
+# ── Admin Password Verification ─────────────────────
+
+class AdminPasswordCheck(BaseModel):
+    password: str
+
+
+@router.post("/verify-password")
+async def verify_admin_password(body: AdminPasswordCheck):
+    """Verify admin password – returns {ok: true} if correct."""
+    if body.password == settings.ADMIN_PASSWORD:
+        return {"ok": True}
+    raise HTTPException(status_code=403, detail="Invalid admin password")
+
+
+# ══════════════════════════════════════════════════════
+# ── User Management ──────────────────────────────────
+# ══════════════════════════════════════════════════════
+
+@router.get("/users")
+async def admin_list_users(db: DB):
+    """List all registered users."""
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    users = result.scalars().all()
+    return [
+        {
+            "id": str(u.id),
+            "display_name": u.display_name,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+        }
+        for u in users
+    ]
+
+
+class AdminUserCreate(BaseModel):
+    display_name: str
+
+
+@router.post("/users")
+async def admin_create_user(body: AdminUserCreate, db: DB):
+    """Admin: create a new user."""
+    if not body.display_name.strip():
+        raise HTTPException(status_code=400, detail="display_name required")
+    user = User(display_name=body.display_name.strip())
+    db.add(user)
+    await db.flush()
+    return {"id": str(user.id), "display_name": user.display_name}
+
+
+class AdminUserUpdate(BaseModel):
+    display_name: str | None = None
+
+
+@router.put("/users/{user_id}")
+async def admin_update_user(user_id: uuid.UUID, body: AdminUserUpdate, db: DB):
+    """Admin: rename a user."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body.display_name is not None:
+        user.display_name = body.display_name.strip()
+    await db.flush()
+    return {"id": str(user.id), "display_name": user.display_name}
+
+
+@router.delete("/users/{user_id}", status_code=204)
+async def admin_delete_user(user_id: uuid.UUID, db: DB):
+    """Admin: delete a user and all their session participations."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Remove participations
+    await db.execute(sa_delete(SessionParticipant).where(SessionParticipant.user_id == user_id))
+    await db.delete(user)
+    await db.flush()
+
+
+# ══════════════════════════════════════════════════════
+# ── Unit Hierarchy (chain of command) ────────────────
+# ══════════════════════════════════════════════════════
+
+@router.get("/sessions/{session_id}/unit-hierarchy")
+async def admin_get_unit_hierarchy(session_id: uuid.UUID, db: DB):
+    """Return all units for a session organized as a hierarchy tree."""
+    result = await db.execute(
+        select(Unit).where(Unit.session_id == session_id, Unit.is_destroyed == False)
+    )
+    units = result.scalars().all()
+
+    from backend.services.visibility_service import _serialize_unit
+    serialized = [_serialize_unit(u) for u in units]
+    return serialized
+
+
+class UnitParentUpdate(BaseModel):
+    parent_unit_id: str | None = None
+
+
+@router.put("/sessions/{session_id}/units/{unit_id}/parent")
+async def admin_set_unit_parent(
+    session_id: uuid.UUID, unit_id: uuid.UUID,
+    body: UnitParentUpdate, db: DB,
+):
+    """Admin: set or clear a unit's parent (chain of command)."""
+    result = await db.execute(
+        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
+    )
+    unit = result.scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+
+    if body.parent_unit_id:
+        parent_uuid = uuid.UUID(body.parent_unit_id)
+        # Verify parent exists in same session
+        pr = await db.execute(select(Unit).where(Unit.id == parent_uuid, Unit.session_id == session_id))
+        if pr.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Parent unit not found in session")
+        # Prevent self-reference
+        if parent_uuid == unit_id:
+            raise HTTPException(status_code=400, detail="Unit cannot be its own parent")
+        unit.parent_unit_id = parent_uuid
+    else:
+        unit.parent_unit_id = None
+
+    await db.flush()
+    from backend.services.visibility_service import _serialize_unit
+    return _serialize_unit(unit)
 
 
 # ── Schemas ─────────────────────────────────────────
