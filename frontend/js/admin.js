@@ -1,12 +1,13 @@
 /**
  * admin.js – Full admin/game-master panel (floating window).
  *
- * Sub-tabs: Builder | Session | Monitor | Users | CoC
- *   Builder  – scenario builder toggle, scenario list with edit
+ * Sub-tabs: Session | Monitor | Builder | CoC | Users | Types
  *   Session  – participants, tick controls, reset, event injection, grid
  *   Monitor  – god-view toggle, unit dashboard, all orders
- *   Users    – manage registered users (add/rename/delete/bulk-delete/assign-to-session)
+ *   Builder  – scenario builder toggle, scenario list with edit
  *   CoC      – chain of command tree, assign units to parents
+ *   Users    – manage registered users (add/rename/delete/bulk-delete/assign-to-session)
+ *   Types    – manage unit type definitions
  *
  * Admin tab is locked behind a password (ADMIN_PASSWORD in settings).
  * Admin selects a session via a dropdown — not dependent on user's joined session.
@@ -208,13 +209,36 @@ const KAdmin = (() => {
         }
     }
 
-    /** Close admin window — disable admin drag but keep god view. */
+    /** Close admin window — disable god view and admin drag, then redraw normal view. */
     async function _closeAdminWindow() {
         const win = document.getElementById('admin-window');
         if (win) win.style.display = 'none';
 
         // Disable admin drag-and-drop when admin window is closed
         try { KUnits.setAdminDrag(false); } catch(e) {}
+
+        // Disable god view if it was on
+        if (_godViewEnabled) {
+            _godViewEnabled = false;
+            const btn = document.getElementById('admin-god-view-toggle');
+            if (btn) {
+                btn.textContent = '👁 God View OFF';
+                btn.classList.remove('admin-btn-active');
+            }
+            _removeGodViewBanner();
+
+            // Reload normal fog-of-war view
+            const token = _getToken();
+            const userSid = _getUserSessionId();
+            if (userSid && token) {
+                try {
+                    await KUnits.load(userSid, token);
+                    await KContacts.load(userSid, token);
+                } catch (e) {
+                    console.warn('Admin close — reload normal view error:', e);
+                }
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════

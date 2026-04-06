@@ -7,6 +7,7 @@ when it starts, and other session management operations.
 
 from __future__ import annotations
 
+import math
 import uuid
 
 from geoalchemy2.shape import from_shape
@@ -19,6 +20,32 @@ from backend.models.scenario import Scenario
 from backend.models.unit import Unit
 from backend.models.grid import GridDefinition
 from backend.models.red_agent import RedAgent
+
+
+def _resolve_unit_position(unit_data: dict, grid_settings: dict | None) -> Point | None:
+    """
+    Resolve unit position.  If the unit has grid-relative offsets
+    (grid_offset_x, grid_offset_y in meters), compute absolute lat/lon
+    from the session's grid origin.  Falls back to raw lat/lon.
+    """
+    gs = grid_settings or {}
+    offset_x = unit_data.get("grid_offset_x")
+    offset_y = unit_data.get("grid_offset_y")
+
+    if offset_x is not None and offset_y is not None and gs:
+        origin_lat = float(gs.get("origin_lat", 0))
+        origin_lon = float(gs.get("origin_lon", 0))
+        lat_rad = math.radians(origin_lat)
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * math.cos(lat_rad) if lat_rad != 0 else 111320.0
+        unit_lat = origin_lat + float(offset_y) / m_per_deg_lat
+        unit_lon = origin_lon + float(offset_x) / m_per_deg_lon
+        return Point(unit_lon, unit_lat)
+
+    if "lat" in unit_data and "lon" in unit_data:
+        return Point(unit_data["lon"], unit_data["lat"])
+
+    return None
 
 
 async def initialize_session_from_scenario(
@@ -62,19 +89,19 @@ async def initialize_session_from_scenario(
     # Create units from scenario initial_units
     if scenario.initial_units:
         unit_name_to_id: dict[str, uuid.UUID] = {}
+        gs = scenario.grid_settings  # grid settings for position resolution
 
         for side_name in ("blue", "red"):
             for unit_data in scenario.initial_units.get(side_name, []):
+                position_point = _resolve_unit_position(unit_data, gs)
                 unit = Unit(
                     session_id=session.id,
                     side=side_name,
                     name=unit_data["name"],
                     unit_type=unit_data["unit_type"],
                     sidc=unit_data.get("sidc", ""),
-                    position=from_shape(
-                        Point(unit_data["lon"], unit_data["lat"]),
-                        srid=4326,
-                    ) if "lat" in unit_data and "lon" in unit_data else None,
+                    position=from_shape(position_point, srid=4326)
+                    if position_point else None,
                     strength=unit_data.get("strength", 1.0),
                     ammo=unit_data.get("ammo", 1.0),
                     morale=unit_data.get("morale", 0.9),

@@ -23,18 +23,18 @@ const KScenarioBuilder = (() => {
     const UNIT_TYPES = {
         headquarters:      { label: 'Headquarters',       sidc_blue: '10031002151200000000', sidc_red: '10061002151200000000', speed: 3.0, det: 2000, fire: 200,  personnel: 20, isHQ: true },
         command_post:      { label: 'Command Post',       sidc_blue: '10031002151200000000', sidc_red: '10061002151200000000', speed: 2.0, det: 1500, fire: 100,  personnel: 10, isHQ: true },
-        infantry_platoon:  { label: 'Infantry Platoon',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 4.0, det: 1500, fire: 600,  personnel: 30 },
+        infantry_platoon:  { label: 'Infantry Platoon',   sidc_blue: '10031000141211000000', sidc_red: '10061000141211000000', speed: 4.0, det: 1500, fire: 600,  personnel: 30 },
         infantry_company:  { label: 'Infantry Company',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.5, det: 1500, fire: 800,  personnel: 120 },
         tank_company:      { label: 'Tank Company',       sidc_blue: '10031000151301000000', sidc_red: '10061000151301000000', speed: 8.0, det: 2000, fire: 2500, personnel: 60 },
         mech_company:      { label: 'Mech Infantry Co',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 7.0, det: 1800, fire: 1500, personnel: 100 },
         artillery_battery: { label: 'Artillery Battery',  sidc_blue: '10031000151303000000', sidc_red: '10061000151303000000', speed: 3.0, det: 1200, fire: 5000, personnel: 40 },
-        mortar_section:    { label: 'Mortar Section',     sidc_blue: '10031000151215000000', sidc_red: '10061000151215000000', speed: 3.0, det: 1000, fire: 3500, personnel: 12 },
-        at_team:           { label: 'Anti-Tank Team',     sidc_blue: '10031000151211004000', sidc_red: '10061000151211004000', speed: 3.5, det: 2000, fire: 2000, personnel: 6 },
-        recon_team:        { label: 'Recon Team',         sidc_blue: '10031000151213000000', sidc_red: '10061000151213000000', speed: 5.0, det: 3000, fire: 400,  personnel: 6 },
-        observation_post:  { label: 'Observation Post',   sidc_blue: '10031000151213000000', sidc_red: '10061000151213000000', speed: 5.0, det: 4000, fire: 300,  personnel: 4 },
-        sniper_team:       { label: 'Sniper Team',        sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.0, det: 2500, fire: 1000, personnel: 2 },
-        engineer_platoon:  { label: 'Engineer Platoon',   sidc_blue: '10031000151206000000', sidc_red: '10061000151206000000', speed: 3.5, det: 1200, fire: 400,  personnel: 30 },
-        logistics_unit:    { label: 'Logistics Unit',     sidc_blue: '10031000151207000000', sidc_red: '10061000151207000000', speed: 5.0, det: 800,  fire: 100,  personnel: 20 },
+        mortar_section:    { label: 'Mortar Section',     sidc_blue: '10031000131215000000', sidc_red: '10061000131215000000', speed: 3.0, det: 1000, fire: 3500, personnel: 12 },
+        at_team:           { label: 'Anti-Tank Team',     sidc_blue: '10031000111211004000', sidc_red: '10061000111211004000', speed: 3.5, det: 2000, fire: 2000, personnel: 6 },
+        recon_team:        { label: 'Recon Team',         sidc_blue: '10031000111213000000', sidc_red: '10061000111213000000', speed: 5.0, det: 3000, fire: 400,  personnel: 6 },
+        observation_post:  { label: 'Observation Post',   sidc_blue: '10031000111213000000', sidc_red: '10061000111213000000', speed: 5.0, det: 4000, fire: 300,  personnel: 4 },
+        sniper_team:       { label: 'Sniper Team',        sidc_blue: '10031000111211000000', sidc_red: '10061000111211000000', speed: 3.0, det: 2500, fire: 1000, personnel: 2 },
+        engineer_platoon:  { label: 'Engineer Platoon',   sidc_blue: '10031000141206000000', sidc_red: '10061000141206000000', speed: 3.5, det: 1200, fire: 400,  personnel: 30 },
+        logistics_unit:    { label: 'Logistics Unit',     sidc_blue: '10031000141207000000', sidc_red: '10061000141207000000', speed: 5.0, det: 800,  fire: 100,  personnel: 20 },
     };
 
     function init(map) {
@@ -474,12 +474,28 @@ const KScenarioBuilder = (() => {
     }
 
     function _unitToPayload(u) {
+        // Compute grid-relative offset (meters from grid origin)
+        const originLat = parseFloat(document.getElementById('sb-grid-origin-lat').value);
+        const originLon = parseFloat(document.getElementById('sb-grid-origin-lon').value);
+
+        let grid_offset_x = null;
+        let grid_offset_y = null;
+        if (!isNaN(originLat) && !isNaN(originLon)) {
+            const latRad = originLat * Math.PI / 180;
+            const mPerDegLat = 111320;
+            const mPerDegLon = 111320 * Math.cos(latRad);
+            grid_offset_x = (u.lon - originLon) * mPerDegLon; // meters east of origin
+            grid_offset_y = (u.lat - originLat) * mPerDegLat; // meters north of origin
+        }
+
         return {
             name: u.name,
             unit_type: u.unit_type,
             sidc: u.sidc,
             lat: u.lat,
             lon: u.lon,
+            grid_offset_x: grid_offset_x,
+            grid_offset_y: grid_offset_y,
             strength: u.strength,
             ammo: u.ammo,
             morale: u.morale,
@@ -518,17 +534,34 @@ const KScenarioBuilder = (() => {
             // Load units
             _stagedUnits = [];
             if (s.initial_units) {
+                // Grid origin for resolving grid-relative offsets
+                const gOriginLat = s.grid_settings ? s.grid_settings.origin_lat : null;
+                const gOriginLon = s.grid_settings ? s.grid_settings.origin_lon : null;
+
                 for (const side of ['blue', 'red']) {
                     for (const u of (s.initial_units[side] || [])) {
                         const info = UNIT_TYPES[u.unit_type] || {};
+
+                        // Resolve position: prefer grid offsets, fall back to raw lat/lon
+                        let unitLat = u.lat;
+                        let unitLon = u.lon;
+                        if (u.grid_offset_x != null && u.grid_offset_y != null
+                            && gOriginLat != null && gOriginLon != null) {
+                            const latRad = gOriginLat * Math.PI / 180;
+                            const mPerDegLat = 111320;
+                            const mPerDegLon = 111320 * Math.cos(latRad);
+                            unitLat = gOriginLat + u.grid_offset_y / mPerDegLat;
+                            unitLon = gOriginLon + u.grid_offset_x / mPerDegLon;
+                        }
+
                         _stagedUnits.push({
                             tempId: 'u_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
                             side,
                             name: u.name,
                             unit_type: u.unit_type,
                             sidc: u.sidc || (side === 'red' ? info.sidc_red : info.sidc_blue) || '',
-                            lat: u.lat,
-                            lon: u.lon,
+                            lat: unitLat,
+                            lon: unitLon,
                             strength: u.strength ?? 1.0,
                             ammo: u.ammo ?? 1.0,
                             morale: u.morale ?? 0.9,

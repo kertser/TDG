@@ -28,28 +28,103 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     top: 100%;
     right: 0;
     margin-top: 4px;
-    min-width: 150px;
+    min-width: 200px;
     background: #1a1a2e;
     border: 1px solid #0f3460;
-    border-radius: 6px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.7);
     z-index: 9999;
-    padding: 4px 0;
+    padding: 0;
     font-size: 12px;
+    overflow: hidden;
+}
+.user-dropdown-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: rgba(15, 27, 56, 0.8);
+    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+}
+.user-dropdown-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0d3460, #1a5276);
+    border: 2px solid #4fc3f7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+.user-dropdown-identity {
+    flex: 1;
+    min-width: 0;
+}
+.user-dropdown-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.user-dropdown-session {
+    font-size: 10px;
+    color: #81c784;
+    margin-top: 2px;
 }
 .user-dropdown-item {
-    padding: 7px 12px;
+    padding: 8px 14px;
     color: #e0e0e0;
     cursor: pointer;
     transition: background 0.12s;
     white-space: nowrap;
+    font-size: 12px;
 }
 .user-dropdown-item:hover { background: #1a5276; color: #fff; }
 .user-dropdown-danger:hover { background: #5a2020; color: #ef9a9a; }
 .user-dropdown-sep {
     height: 1px;
     background: rgba(15, 52, 96, 0.5);
-    margin: 3px 0;
+    margin: 0;
+}
+
+/* ── Settings Toggle ──────────────────────── */
+.settings-section {
+    margin-bottom: 14px;
+}
+.settings-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #90caf9;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.4);
+}
+.settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 4px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #ccc;
+    transition: color 0.12s;
+    border-radius: 3px;
+}
+.settings-toggle:hover {
+    color: #fff;
+    background: rgba(15, 52, 96, 0.2);
+}
+.settings-toggle input[type="checkbox"] {
+    accent-color: #4fc3f7;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
 }
 
 /* ── Topbar standalone icon buttons ──────────── */
@@ -493,18 +568,6 @@ button:hover { background: #1a5276; }
 }
 
 
-/* ── Logout Button ───────────────────────────── */
-#logout-btn {
-    background: #37474f;
-    color: #ccc;
-    border-radius: 3px;
-    border: 1px solid #546e7a;
-}
-#logout-btn:hover {
-    background: #b71c1c;
-    color: #fff;
-    border-color: #e53935;
-}
 
 /* ── Selected Units Display ──────────────────── */
 #selected-units-display {

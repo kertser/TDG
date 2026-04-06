@@ -15,7 +15,6 @@ const KSessionUI = (() => {
     async function init() {
         const registerBtn = document.getElementById('register-btn');
         const nameInput = document.getElementById('display-name-input');
-        const logoutBtn = document.getElementById('logout-btn');
         const startBtn = document.getElementById('start-session-btn');
         const turnBtn = document.getElementById('turn-btn');
 
@@ -24,9 +23,6 @@ const KSessionUI = (() => {
             if (e.key === 'Enter') _doLogin(nameInput.value.trim());
         });
 
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', _doLogout);
-        }
 
         // ── User Dropdown Menu ──────────────────
         const userInfo = document.getElementById('user-info');
@@ -34,6 +30,8 @@ const KSessionUI = (() => {
         if (userInfo && userDropdown) {
             userInfo.addEventListener('click', (e) => {
                 e.stopPropagation();
+                // Update dropdown header info
+                _updateDropdownHeader();
                 userDropdown.style.display = userDropdown.style.display === 'none' ? 'block' : 'none';
             });
             document.addEventListener('click', () => { userDropdown.style.display = 'none'; });
@@ -41,13 +39,14 @@ const KSessionUI = (() => {
 
             const renameBtn = document.getElementById('user-menu-rename');
             if (renameBtn) renameBtn.addEventListener('click', _renameCurrentUser);
-            const infoBtn = document.getElementById('user-menu-info');
-            if (infoBtn) infoBtn.addEventListener('click', _showUserInfo);
             const settingsBtn = document.getElementById('user-menu-settings');
-            if (settingsBtn) settingsBtn.addEventListener('click', () => alert('Settings coming soon'));
+            if (settingsBtn) settingsBtn.addEventListener('click', _openSettings);
             const menuLogout = document.getElementById('user-menu-logout');
             if (menuLogout) menuLogout.addEventListener('click', () => { userDropdown.style.display = 'none'; _doLogout(); });
         }
+
+        // ── User Settings Modal ──────────────────
+        _initSettingsModal();
 
 
 
@@ -158,9 +157,6 @@ const KSessionUI = (() => {
             document.getElementById('auth-panel').style.display = 'none';
             document.getElementById('session-panel').style.display = 'block';
 
-            // Show logout button
-            const logoutBtn = document.getElementById('logout-btn');
-            if (logoutBtn) logoutBtn.style.display = 'inline-block';
 
             // Show admin topbar button (any logged-in user can see it;
             // the password gate inside the admin tab handles security)
@@ -190,8 +186,6 @@ const KSessionUI = (() => {
         document.getElementById('session-info').textContent = '';
         document.getElementById('display-name-input').value = '';
 
-        const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn) logoutBtn.style.display = 'none';
 
         // Hide admin topbar button and close admin window
         const adminTopBtn = document.getElementById('admin-topbar-btn');
@@ -362,12 +356,103 @@ const KSessionUI = (() => {
         } catch (err) { alert(err.message); }
     }
 
-    function _showUserInfo() {
-        const dropdown = document.getElementById('user-dropdown');
-        if (dropdown) dropdown.style.display = 'none';
-        const sessionId = currentSessionId ? currentSessionId.substring(0, 12) + '…' : 'None';
-        alert(`User: ${currentUserName}\nUser ID: ${currentUserId ? currentUserId.substring(0, 12) + '…' : 'N/A'}\nSession: ${sessionId}`);
+    /** Update the dropdown header with current user/session info. */
+    function _updateDropdownHeader() {
+        const nameEl = document.getElementById('user-dropdown-name');
+        const sessionEl = document.getElementById('user-dropdown-session');
+        if (nameEl) nameEl.textContent = currentUserName || 'Unknown';
+        if (sessionEl) {
+            if (currentSessionId) {
+                sessionEl.textContent = '🟢 In session';
+            } else {
+                sessionEl.textContent = '⚪ No session';
+            }
+        }
     }
 
-    return { init, getToken, getUserId, getUserName: () => currentUserName, getSessionId, loadSessions, joinAndEnter };
+    /** Load settings from localStorage. */
+    function _loadSettings() {
+        const defaults = {
+            showCoords: true,
+            showSnail: true,
+            showZoom: true,
+            unitTooltips: true,
+            hoverRanges: true,
+            eventSound: false,
+        };
+        try {
+            const saved = JSON.parse(localStorage.getItem('kshu_settings') || '{}');
+            return { ...defaults, ...saved };
+        } catch { return defaults; }
+    }
+
+    /** Save settings to localStorage and apply. */
+    function _saveSettings(settings) {
+        localStorage.setItem('kshu_settings', JSON.stringify(settings));
+        _applySettings(settings);
+    }
+
+    /** Apply settings to the UI. */
+    function _applySettings(settings) {
+        const coordEl = document.getElementById('coord-display');
+        const snailEl = document.getElementById('snail-display');
+        const zoomEl = document.getElementById('zoom-display');
+        if (coordEl) coordEl.style.display = settings.showCoords ? '' : 'none';
+        if (snailEl) snailEl.style.display = settings.showSnail ? '' : 'none';
+        if (zoomEl) zoomEl.style.display = settings.showZoom ? '' : 'none';
+    }
+
+    function _initSettingsModal() {
+        const modal = document.getElementById('user-settings-modal');
+        const closeBtn = document.getElementById('settings-modal-close');
+        const saveBtn = document.getElementById('settings-save-btn');
+        const cancelBtn = document.getElementById('settings-cancel-btn');
+
+        if (closeBtn) closeBtn.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
+        if (cancelBtn) cancelBtn.addEventListener('click', () => { if (modal) modal.style.display = 'none'; });
+        if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                const settings = {
+                    showCoords: document.getElementById('setting-show-coords')?.checked ?? true,
+                    showSnail: document.getElementById('setting-show-snail')?.checked ?? true,
+                    showZoom: document.getElementById('setting-show-zoom')?.checked ?? true,
+                    unitTooltips: document.getElementById('setting-unit-tooltips')?.checked ?? true,
+                    hoverRanges: document.getElementById('setting-hover-ranges')?.checked ?? true,
+                    eventSound: document.getElementById('setting-event-sound')?.checked ?? false,
+                };
+                _saveSettings(settings);
+                if (modal) modal.style.display = 'none';
+            });
+        }
+
+        // Apply saved settings on init
+        _applySettings(_loadSettings());
+    }
+
+    function _openSettings() {
+        const dropdown = document.getElementById('user-dropdown');
+        if (dropdown) dropdown.style.display = 'none';
+
+        const settings = _loadSettings();
+        const setCb = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
+        setCb('setting-show-coords', settings.showCoords);
+        setCb('setting-show-snail', settings.showSnail);
+        setCb('setting-show-zoom', settings.showZoom);
+        setCb('setting-unit-tooltips', settings.unitTooltips);
+        setCb('setting-hover-ranges', settings.hoverRanges);
+        setCb('setting-event-sound', settings.eventSound);
+
+        const modal = document.getElementById('user-settings-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    /** Get a specific setting value. */
+    function getSetting(key) {
+        const settings = _loadSettings();
+        return settings[key];
+    }
+
+    return { init, getToken, getUserId, getUserName: () => currentUserName, getSessionId, loadSessions, joinAndEnter, getSetting };
 })();

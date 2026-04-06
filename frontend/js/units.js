@@ -615,64 +615,96 @@ const KUnits = (() => {
         const strPct = u.strength != null ? Math.round(u.strength * 100) : 100;
         const morPct = u.morale != null ? Math.round(u.morale * 100) : 90;
         const ammPct = u.ammo != null ? Math.round(u.ammo * 100) : 100;
+        const supPct = u.suppression != null ? Math.round(u.suppression * 100) : 0;
 
         const strClr = strPct > 60 ? '#4caf50' : strPct > 30 ? '#ff9800' : '#f44336';
         const morClr = morPct > 60 ? '#64b5f6' : morPct > 30 ? '#ff9800' : '#f44336';
         const ammClr = ammPct > 50 ? '#81c784' : ammPct > 20 ? '#ff9800' : '#f44336';
+        const supClr = supPct > 50 ? '#f44336' : supPct > 20 ? '#ff9800' : '#aaa';
 
         const statusBg = statusColor + '22';
 
-        // Build elegant card
+        // Build elegant card with stat bars
         let html = `<div class="unit-info-card">`;
         html += `<div class="unit-info-header">`;
         html += `<div class="unit-info-side-bar" style="background:${sideColor};"></div>`;
         html += `<div class="unit-info-title">`;
         html += `<div class="unit-info-name">${u.name}</div>`;
-        html += `<div class="unit-info-type">${u.unit_type} · ${pers} pers</div>`;
+        html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${pers} personnel</div>`;
         html += `</div>`;
         html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${statusIcon} ${status}</span></div>`;
         html += `</div>`;
 
-        // Compact stat row (horizontal)
-        html += `<div style="padding:2px 10px 4px;display:flex;gap:8px;font-size:10px;">`;
-        html += `<span style="color:${strClr};font-weight:700;">STR ${strPct}%</span>`;
-        html += `<span style="color:${morClr};font-weight:700;">MOR ${morPct}%</span>`;
-        html += `<span style="color:${ammClr};font-weight:700;">AMM ${ammPct}%</span>`;
-        html += `</div>`;
-
-        // Ranges and task (inline)
-        html += `<div class="unit-info-ranges" style="padding:2px 10px 3px;">`;
-        html += `<span style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
-        html += `<span style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
-        if (u.current_task && u.current_task.type) {
-            html += `<span style="color:#ffd740;">📋 ${u.current_task.type}</span>`;
+        // ── Stat bars (visual & compact) ──
+        html += `<div class="unit-info-stats">`;
+        html += _buildStatBar('STR', strPct, strClr);
+        html += _buildStatBar('MOR', morPct, morClr);
+        html += _buildStatBar('AMM', ammPct, ammClr);
+        if (supPct > 0) {
+            html += _buildStatBar('SUP', supPct, supClr);
         }
         html += `</div>`;
 
-        // Command info (compact)
-        const hasCmdInfo = u.commanding_user_name || (u.assigned_user_names && u.assigned_user_names.length > 0);
-        if (hasCmdInfo) {
-            html += `<div style="padding:1px 10px 3px;font-size:10px;">`;
-            if (u.commanding_user_name) {
-                html += `<span style="color:#90caf9;">⬆ CO: ${u.commanding_user_name}</span> `;
-            }
-            if (u.assigned_user_names && u.assigned_user_names.length > 0) {
-                const meTag = isAssignedToMe ? ' (you)' : '';
-                html += `<span style="color:#81c784;">👤 ${u.assigned_user_names.join(', ')}${meTag}</span>`;
+        // ── Ranges and capabilities ──
+        html += `<div class="unit-info-ranges">`;
+        html += `<span title="Detection range" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
+        html += `<span title="Fire range" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
+        if (u.move_speed_mps) {
+            html += `<span title="Movement speed" style="color:#81c784;">⚡ ${u.move_speed_mps.toFixed(1)}m/s</span>`;
+        }
+        html += `</div>`;
+
+        // ── Current task ──
+        if (u.current_task && u.current_task.type) {
+            const taskType = u.current_task.type;
+            html += `<div style="padding:2px 12px 3px;font-size:10px;">`;
+            html += `<span style="color:#ffd740;">📋 Task: <b>${taskType}</b></span>`;
+            if (u.current_task.target_location) {
+                html += ` <span style="color:#aaa;">→ ${u.current_task.target_location.lat?.toFixed(4)}, ${u.current_task.target_location.lon?.toFixed(4)}</span>`;
             }
             html += `</div>`;
         }
 
-        if (u.suppression != null && u.suppression > 0) {
-            html += `<div style="padding:0 10px 2px;font-size:10px;color:#e91e63;">💥 Supp: ${Math.round(u.suppression * 100)}%</div>`;
-        }
+        // ── Communications status ──
         if (u.comms_status && u.comms_status !== 'operational') {
-            html += `<div style="padding:0 10px 2px;font-size:10px;color:#ff9800;">📡 ${u.comms_status}</div>`;
+            const commsClr = u.comms_status === 'degraded' ? '#ff9800' : '#f44336';
+            html += `<div style="padding:1px 12px 3px;font-size:10px;color:${commsClr};">📡 Comms: ${u.comms_status}</div>`;
+        }
+
+        // ── Heading info ──
+        if (u.heading_deg != null && u.heading_deg !== 0) {
+            html += `<div style="padding:1px 12px 3px;font-size:10px;color:#90caf9;">🧭 Heading: ${Math.round(u.heading_deg)}°</div>`;
+        }
+
+        // ── Command & assignment info ──
+        const hasCmdInfo = u.commanding_user_name || (u.assigned_user_names && u.assigned_user_names.length > 0);
+        if (hasCmdInfo) {
+            html += `<div class="unit-info-command">`;
+            if (u.commanding_user_name) {
+                const isSelfCO = u.assigned_user_names && u.assigned_user_names.includes(u.commanding_user_name);
+                const coColor = isSelfCO ? '#81c784' : '#90caf9';
+                html += `<div class="unit-info-command-line"><span style="color:${coColor};">⬆ CO: <b>${u.commanding_user_name}</b></span></div>`;
+            }
+            if (u.assigned_user_names && u.assigned_user_names.length > 0) {
+                const meTag = isAssignedToMe ? ' <span style="color:#4fc3f7;">(you)</span>' : '';
+                html += `<div class="unit-info-command-line"><span style="color:#81c784;">👤 Assigned: <b>${u.assigned_user_names.join(', ')}</b>${meTag}</span></div>`;
+            }
+            html += `</div>`;
+        } else {
+            html += `<div style="padding:2px 12px 4px;font-size:10px;color:#555;">Unassigned</div>`;
+        }
+
+        // ── Parent unit info ──
+        if (u.parent_unit_id) {
+            const parent = allUnitsData.find(p => p.id === u.parent_unit_id);
+            if (parent) {
+                html += `<div style="padding:0 12px 4px;font-size:10px;color:#777;">↳ Part of: ${parent.name}</div>`;
+            }
         }
 
         html += `</div>`; // end unit-info-card
 
-        // Action items
+        // ── Action items ──
         if (canSel) {
             const selLabel = isSel ? '✓ Deselect' : '☐ Select';
             html += `<div class="ctx-item" data-action="select">${selLabel}</div>`;
@@ -711,6 +743,15 @@ const KUnits = (() => {
                 }
             });
         });
+    }
+
+    /** Build an HTML stat bar row for the unit info card. */
+    function _buildStatBar(label, pct, color) {
+        return `<div class="unit-stat-row">
+            <span class="unit-stat-label">${label}</span>
+            <div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${pct}%;background:${color};"></div></div>
+            <span class="unit-stat-value" style="color:${color};">${pct}%</span>
+        </div>`;
     }
 
     /** Rename a unit via API. */
