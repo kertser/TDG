@@ -1121,7 +1121,7 @@ if unit.ammo <= 0:
 
 ## Appendix A: Implementation Status
 
-> Last updated: 2026-04-06
+> Last updated: 2026-04-07
 
 ### Phases Completed / In Progress
 
@@ -1267,6 +1267,7 @@ KShU/
 │   │       ├── landcover_analyzer.py ← ESA WorldCover COG reader
 │   │       ├── esa_tiles.py       ← ESA tile URL index
 │   │       ├── elevation_analyzer.py ← SRTM/Open-Elevation height fetcher
+│   │       ├── srtm_tiles.py      ← SRTM tile URL index
 │   │       └── merger.py          ← Priority merge: OSM+ESA+Elevation+Manual
 │   ├── engine/
 │   │   ├── __init__.py
@@ -1310,6 +1311,10 @@ KShU/
 │       ├── admin.js              ← Admin panel (3200+ lines): dashboard, CoC, wizard, god view, users, types
 │       ├── terrain.js            ← NEW: Terrain overlay rendering, legend, elevation heatmap
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
+├── frontend/
+│   ├── ...
+│   └── static/
+│       └── topbar-pattern.svg    ← Decorative SVG pattern for UI top bar
 └── scripts/
     ├── __init__.py
     ├── seed_scenario.py

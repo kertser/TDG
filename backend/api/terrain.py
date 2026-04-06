@@ -142,9 +142,10 @@ async def estimate_cell_count(
         raise HTTPException(status_code=404, detail="No grid definition")
 
     total_squares = grid_def.columns * grid_def.rows
-    cells_per_square = 9 ** depth if depth > 0 else 1
+    rec_base = getattr(grid_def, "recursion_base", 3) or 3
+    cells_per_square = (rec_base ** 2) ** depth if depth > 0 else 1
     total_cells = total_squares * cells_per_square
-    cell_size_m = grid_def.base_square_size_m / (3 ** depth) if depth > 0 else grid_def.base_square_size_m
+    cell_size_m = grid_def.base_square_size_m / (rec_base ** depth) if depth > 0 else grid_def.base_square_size_m
 
     return {
         "depth": depth,
@@ -186,16 +187,24 @@ async def get_terrain_compact(
     cells = result.scalars().all()
 
     if not cells:
-        return {"cells": [], "cell_size_deg": 0, "colors": TERRAIN_COLORS}
+        return {"cells": [], "cell_size_lat": 0, "cell_size_lon": 0, "colors": TERRAIN_COLORS}
 
-    # Compute approximate cell size in degrees from the grid
-    # Use the most common depth among returned cells
+    # Compute cell size in degrees using the grid's AEQD projection
+    # (the same projection used to place centroids in enumerate_cells).
+    # This avoids the ~0.8 m/cell error that the simple degree formula has.
     cell_depth = cells[0].depth if cells else 1
-    cell_size_m = grid_def.base_square_size_m / (3 ** cell_depth)
-    # Approximate degrees (varies by latitude, use grid center)
-    avg_lat = sum(c.centroid_lat for c in cells) / len(cells) if cells else 49.0
-    lat_deg = cell_size_m / 111320.0
-    lon_deg = cell_size_m / (111320.0 * max(0.1, abs(math.cos(math.radians(avg_lat)))))
+    rec_base = getattr(grid_def, "recursion_base", 3) or 3
+    cell_size_m = grid_def.base_square_size_m / (rec_base ** cell_depth)
+
+    grid_service = GridService(grid_def)
+    # Measure one cell step at the grid center (most representative)
+    cx = (grid_def.columns / 2) * grid_def.base_square_size_m
+    cy = (grid_def.rows / 2) * grid_def.base_square_size_m
+    _c_lon, _c_lat = grid_service._to_geo.transform(cx, cy)
+    _e_lon, _e_lat = grid_service._to_geo.transform(cx + cell_size_m, cy)
+    _n_lon, _n_lat = grid_service._to_geo.transform(cx, cy + cell_size_m)
+    lon_deg = abs(_e_lon - _c_lon)
+    lat_deg = abs(_n_lat - _c_lat)
 
     compact_cells = []
     for cell in cells:
@@ -521,13 +530,14 @@ async def clear_terrain(
     if keep_manual:
         query = query.where(TerrainCell.source != "manual")
     result = await db.execute(query)
+    deleted_count = getattr(result, "rowcount", 0)
 
     # Also clear elevation cells
     await db.execute(
         delete(ElevationCell).where(ElevationCell.session_id == session_id)
     )
 
-    return {"deleted": result.rowcount, "kept_manual": keep_manual}
+    return {"deleted": deleted_count, "kept_manual": keep_manual}
 
 
 # ── Elevation endpoints ──────────────────────────────────────
