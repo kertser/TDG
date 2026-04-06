@@ -56,7 +56,8 @@ const KSessionUI = (() => {
         // ── User Settings Modal ──────────────────
         _initSettingsModal();
 
-
+        // ── Rules & Instructions Modal ──────────
+        _initRulesModal();
 
         // ── Clickable session name → show scenario description ──
         const sessionInfoEl = document.getElementById('session-info');
@@ -474,6 +475,16 @@ const KSessionUI = (() => {
         if (coordEl) coordEl.style.display = settings.showCoords ? '' : 'none';
         if (snailEl) snailEl.style.display = settings.showSnail ? '' : 'none';
         if (zoomEl) zoomEl.style.display = settings.showZoom ? '' : 'none';
+
+        // Hide/show separators intelligently based on visible items
+        const control = document.querySelector('.coord-info-control');
+        if (control) {
+            const seps = control.querySelectorAll('.coord-sep');
+            const items = [settings.showSnail, settings.showCoords, settings.showZoom];
+            // Separators sit between items; show only if both neighbors are visible
+            if (seps[0]) seps[0].style.display = (items[0] && items[1]) ? '' : 'none';
+            if (seps[1]) seps[1].style.display = (items[1] && items[2]) ? '' : 'none';
+        }
     }
 
     function _initSettingsModal() {
@@ -526,6 +537,20 @@ const KSessionUI = (() => {
     function getSetting(key) {
         const settings = _loadSettings();
         return settings[key];
+    }
+
+    function _initRulesModal() {
+        const btn = document.getElementById('rules-topbar-btn');
+        const modal = document.getElementById('rules-modal');
+        const closeBtn = document.getElementById('rules-modal-close');
+        const okBtn = document.getElementById('rules-modal-ok');
+
+        const hideModal = () => { if (modal) modal.style.display = 'none'; };
+
+        if (btn) btn.addEventListener('click', () => { if (modal) modal.style.display = 'flex'; });
+        if (closeBtn) closeBtn.addEventListener('click', hideModal);
+        if (okBtn) okBtn.addEventListener('click', hideModal);
+        if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
     }
 
     return {

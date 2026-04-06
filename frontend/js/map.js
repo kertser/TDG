@@ -101,6 +101,23 @@ const KMap = (() => {
         // ── Measure layer group ─────────────────────────
         measureGroup = L.layerGroup().addTo(map);
 
+        // ── Coordinate + Zoom info bar (bottom-left, on map) ──
+        const CoordInfoControl = L.Control.extend({
+            options: { position: 'bottomleft' },
+            onAdd: function () {
+                const container = L.DomUtil.create('div', 'coord-info-control');
+                container.innerHTML =
+                    '<span id="snail-display" title="Snail address under cursor"></span>' +
+                    '<span class="coord-sep">│</span>' +
+                    '<span id="coord-display" title="Coordinates under cursor"></span>' +
+                    '<span class="coord-sep">│</span>' +
+                    '<span id="zoom-display" title="Current zoom level"></span>';
+                L.DomEvent.disableClickPropagation(container);
+                return container;
+            },
+        });
+        new CoordInfoControl().addTo(map);
+
         // ── Coordinate + Zoom display ───────────────────
         const zoomEl = document.getElementById('zoom-display');
         const coordEl = document.getElementById('coord-display');
