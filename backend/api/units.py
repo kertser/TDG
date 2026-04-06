@@ -35,6 +35,11 @@ async def get_units(
     """Return units visible to the requester's side (fog-of-war filtered),
     enriched with commanding officer info."""
     side = participant.side.value
+    # Force fog-of-war for regular gameplay: only blue or red get filtered view.
+    # Admin/observer participants should use the admin god-view endpoint for all units.
+    # Here we give them the blue view by default so they don't accidentally leak intel.
+    if side not in ("blue", "red"):
+        side = "blue"
     units = await get_visible_units(session_id, side, db)
     # Enrich with commanding user names for popups
     units = await enrich_units_with_command_info(units, session_id, db, requesting_side=side)
@@ -157,4 +162,6 @@ async def get_contacts(
 ):
     """Return contacts visible to the requester's side."""
     side = participant.side.value
+    if side not in ("blue", "red"):
+        side = "blue"
     return await get_visible_contacts(session_id, side, db)

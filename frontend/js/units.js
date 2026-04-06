@@ -28,6 +28,7 @@ const KUnits = (() => {
     let _map = null;
     let _visible = true;
     let _hoveredUnitId = null;     // currently hovered unit ID
+    let _lastZoomBucket = null;    // track zoom bucket for marker size changes
 
     // ── Rubber-band selection state ──────────────────
     let _selectRect = null;
@@ -63,6 +64,18 @@ const KUnits = (() => {
         _hoverLayer = L.layerGroup().addTo(map);
         _movementArrowsLayer = L.layerGroup().addTo(map);
         _initRubberBandSelection();
+
+        // Track zoom for marker size scaling
+        _lastZoomBucket = KSymbols.getZoomBucket(map.getZoom());
+        map.on('zoomend', () => {
+            const bucket = KSymbols.getZoomBucket(map.getZoom());
+            if (bucket !== _lastZoomBucket) {
+                _lastZoomBucket = bucket;
+                if (allUnitsData.length > 0) {
+                    render(allUnitsData);
+                }
+            }
+        });
     }
 
     // ══════════════════════════════════════════════════
@@ -257,6 +270,9 @@ const KUnits = (() => {
         unitMarkers = {};
         allUnitsData = units;
 
+        // Compute zoom scale factor for current zoom level
+        const zoomScale = _map ? KSymbols.getZoomScale(_map.getZoom()) : 1.0;
+
         units.forEach(u => {
             if (u.lat == null || u.lon == null) return;
             if (u.is_destroyed) return;
@@ -264,6 +280,7 @@ const KUnits = (() => {
             const icon = KSymbols.createIcon(u.sidc, {
                 direction: u.heading_deg || 0,
                 unitType: u.unit_type,
+                zoomScale: zoomScale,
             });
 
             const marker = L.marker([u.lat, u.lon], { icon });

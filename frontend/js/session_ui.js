@@ -16,7 +16,6 @@ const KSessionUI = (() => {
         const registerBtn = document.getElementById('register-btn');
         const nameInput = document.getElementById('display-name-input');
         const logoutBtn = document.getElementById('logout-btn');
-        const createBtn = document.getElementById('create-session-btn');
         const startBtn = document.getElementById('start-session-btn');
         const turnBtn = document.getElementById('turn-btn');
 
@@ -29,7 +28,6 @@ const KSessionUI = (() => {
             logoutBtn.addEventListener('click', _doLogout);
         }
 
-        createBtn.addEventListener('click', _createSession);
 
 
         if (startBtn) {
@@ -40,6 +38,11 @@ const KSessionUI = (() => {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${currentToken}` },
                     });
+                    if (!resp.ok) {
+                        const errData = await resp.json().catch(() => ({}));
+                        KGameLog.addEntry(`Start failed: ${errData.detail || resp.status}`, 'error');
+                        return;
+                    }
                     const data = await resp.json();
                     KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
                     startBtn.style.display = 'none';
@@ -72,6 +75,9 @@ const KSessionUI = (() => {
 
                     await KUnits.load(currentSessionId, currentToken);
                     await KContacts.load(currentSessionId, currentToken);
+
+                    // Refresh chain of command tree after start
+                    try { KAdmin.loadPublicCoC(); } catch(e) {}
                 } catch (err) {
                     console.error('Start session failed:', err);
                 }
@@ -95,6 +101,9 @@ const KSessionUI = (() => {
                     await KUnits.load(currentSessionId, currentToken);
                     await KContacts.load(currentSessionId, currentToken);
                     await KEvents.load(currentSessionId, currentToken);
+
+                    // Refresh chain of command tree after turn
+                    try { KAdmin.loadPublicCoC(); } catch(e) {}
                 } catch (err) {
                     console.error('Turn advance failed:', err);
                 }
@@ -229,70 +238,9 @@ const KSessionUI = (() => {
     }
 
     async function _createSession() {
-        if (!currentToken) return;
-        try {
-            // First ensure a scenario exists
-            let scenResp = await fetch('/api/scenarios');
-            let scenarios = await scenResp.json();
-
-            if (scenarios.length === 0) {
-                // Create a default scenario with units in the Reims operational area
-                scenResp = await fetch('/api/scenarios', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        title: 'Training Exercise Alpha',
-                        description: 'Combined-arms training exercise near Reims area',
-                        map_center_lat: 49.0582,
-                        map_center_lon: 4.49547,
-                        map_zoom: 13,
-                        grid_settings: {
-                            origin_lat: 49.025,
-                            origin_lon: 4.44,
-                            orientation_deg: 0,
-                            base_square_size_m: 1000,
-                            columns: 8,
-                            rows: 8,
-                            labeling_scheme: 'alphanumeric',
-                        },
-                        initial_units: {
-                            blue: [
-                                { name: '1st Platoon, A Company', unit_type: 'infantry_platoon', sidc: '10031000151211000000', lat: 49.035, lon: 4.465, strength: 1.0, ammo: 1.0, morale: 0.9, move_speed_mps: 4.0, detection_range_m: 1500, capabilities: { has_atgm: false } },
-                                { name: '2nd Platoon, A Company', unit_type: 'infantry_platoon', sidc: '10031000151211000000', lat: 49.035, lon: 4.475, strength: 1.0, ammo: 1.0, morale: 0.9, move_speed_mps: 4.0, detection_range_m: 1500, capabilities: { has_atgm: false } },
-                                { name: '3rd Platoon, A Company', unit_type: 'infantry_platoon', sidc: '10031000151211000000', lat: 49.033, lon: 4.470, strength: 1.0, ammo: 1.0, morale: 0.9, move_speed_mps: 4.0, detection_range_m: 1500, capabilities: { has_atgm: false } },
-                                { name: 'Mortar Section', unit_type: 'mortar_section', sidc: '10031000151215000000', lat: 49.032, lon: 4.468, strength: 1.0, ammo: 1.0, morale: 0.85, move_speed_mps: 3.0, detection_range_m: 1000, capabilities: { has_mortar: true } },
-                                { name: 'Recon Team', unit_type: 'recon_team', sidc: '10031000151213000000', lat: 49.038, lon: 4.472, strength: 1.0, ammo: 0.8, morale: 0.95, move_speed_mps: 5.0, detection_range_m: 3000, capabilities: { is_recon: true } },
-                            ],
-                            red: [
-                                { name: '1st Red Platoon', unit_type: 'infantry_platoon', sidc: '10061000151211000000', lat: 49.055, lon: 4.490, strength: 1.0, ammo: 1.0, morale: 0.8, move_speed_mps: 4.0, detection_range_m: 1500, capabilities: {} },
-                                { name: 'Red AT Group', unit_type: 'at_team', sidc: '10061000151211004000', lat: 49.060, lon: 4.500, strength: 1.0, ammo: 0.9, morale: 0.75, move_speed_mps: 3.5, detection_range_m: 2000, capabilities: { has_atgm: true } },
-                                { name: 'Red Observation Post', unit_type: 'observation_post', sidc: '10061000151213000000', lat: 49.065, lon: 4.485, strength: 0.5, ammo: 0.5, morale: 0.7, move_speed_mps: 5.0, detection_range_m: 4000, capabilities: { is_recon: true } },
-                            ],
-                            red_agents: [
-                                { name: 'Red Company Commander', doctrine_profile: { aggression: 0.4, caution: 0.7, initiative: 0.5 }, mission_intent: { objective: 'Defend assigned sector' }, risk_posture: 'cautious', controlled_units: ['1st Red Platoon', 'Red AT Group', 'Red Observation Post'] },
-                            ],
-                        },
-                    }),
-                });
-                const newScen = await scenResp.json();
-                scenarios = [newScen];
-            }
-
-            // Create session from most recent scenario
-            const resp = await fetch('/api/sessions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${currentToken}`,
-                },
-                body: JSON.stringify({ scenario_id: scenarios[scenarios.length - 1].id }),
-            });
-            const session = await resp.json();
-            await loadSessions();
-            joinAndEnter(session.id);
-        } catch (err) {
-            console.error('Create session failed:', err);
-        }
+        // Session creation is admin-only. This function is a no-op.
+        // Use the admin panel to create sessions and assign users.
+        console.warn('Session creation is admin-only. Use Admin panel.');
     }
 
 
@@ -307,14 +255,15 @@ const KSessionUI = (() => {
             listEl.innerHTML = '';
 
             if (sessions.length === 0) {
-                listEl.innerHTML = '<div style="color:#888;font-size:12px;padding:8px;">No sessions yet. Create one!</div>';
+                listEl.innerHTML = '<div style="color:#888;font-size:12px;padding:8px;">No sessions available. Ask admin to create one and assign you.</div>';
             }
 
             sessions.forEach(s => {
                 const card = document.createElement('div');
                 card.className = 'session-card';
+                const statusIcon = s.status === 'running' ? '🟢' : s.status === 'paused' ? '🟡' : s.status === 'lobby' ? '⚪' : '🔴';
                 card.innerHTML = `
-                    <div class="title">Session ${s.id.substring(0, 8)}...</div>
+                    <div class="title">${statusIcon} Session ${s.id.substring(0, 8)}...</div>
                     <div class="meta">Status: ${s.status} | Turn: ${s.tick} | Players: ${s.participant_count}</div>
                 `;
                 card.addEventListener('click', () => joinAndEnter(s.id));

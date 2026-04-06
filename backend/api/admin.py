@@ -28,6 +28,19 @@ from backend.services.visibility_service import get_visible_units
 router = APIRouter()
 
 
+async def _remove_user_from_unit_assignments(user_id: uuid.UUID, db):
+    """Remove a user ID from all Unit.assigned_user_ids JSONB arrays."""
+    user_id_str = str(user_id)
+    result = await db.execute(
+        select(Unit).where(Unit.assigned_user_ids.isnot(None))
+    )
+    units = result.scalars().all()
+    for unit in units:
+        if unit.assigned_user_ids and user_id_str in unit.assigned_user_ids:
+            new_ids = [uid for uid in unit.assigned_user_ids if uid != user_id_str]
+            unit.assigned_user_ids = new_ids if new_ids else None
+
+
 # ── Admin Password Verification ─────────────────────
 
 class AdminPasswordCheck(BaseModel):
@@ -95,13 +108,18 @@ async def admin_update_user(user_id: uuid.UUID, body: AdminUserUpdate, db: DB):
 
 @router.delete("/users/{user_id}", status_code=204)
 async def admin_delete_user(user_id: uuid.UUID, db: DB):
-    """Admin: delete a user and all their session participations."""
+    """Admin: delete a user and all their dependent data."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    # Remove participations
+    # Remove FK references before deleting user
+    await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.author_user_id == user_id))
+    from sqlalchemy import update as sa_update
+    await db.execute(sa_update(Order).where(Order.issued_by_user_id == user_id).values(issued_by_user_id=None))
     await db.execute(sa_delete(SessionParticipant).where(SessionParticipant.user_id == user_id))
+    # Clean up assigned_user_ids in units (JSONB array containing user ID)
+    await _remove_user_from_unit_assignments(user_id, db)
     await db.delete(user)
     await db.flush()
 
@@ -112,7 +130,8 @@ class AdminBulkDelete(BaseModel):
 
 @router.post("/users/bulk-delete", status_code=200)
 async def admin_bulk_delete_users(body: AdminBulkDelete, db: DB):
-    """Admin: bulk delete multiple users and their session participations."""
+    """Admin: bulk delete multiple users and their dependent data."""
+    from sqlalchemy import update as sa_update
     deleted = 0
     for uid_str in body.user_ids:
         try:
@@ -123,7 +142,10 @@ async def admin_bulk_delete_users(body: AdminBulkDelete, db: DB):
         user = result.scalar_one_or_none()
         if user is None:
             continue
+        await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.author_user_id == uid))
+        await db.execute(sa_update(Order).where(Order.issued_by_user_id == uid).values(issued_by_user_id=None))
         await db.execute(sa_delete(SessionParticipant).where(SessionParticipant.user_id == uid))
+        await _remove_user_from_unit_assignments(uid, db)
         await db.delete(user)
         deleted += 1
     await db.flush()
@@ -379,6 +401,62 @@ async def admin_list_all_sessions(db: DB):
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })
     return out
+
+
+class AdminSessionCreate(BaseModel):
+    scenario_id: str
+    settings: dict | None = None
+
+
+@router.post("/sessions")
+async def admin_create_session(body: AdminSessionCreate, db: DB):
+    """Admin: create a new session from a scenario (no auto-join)."""
+    result = await db.execute(select(Scenario).where(Scenario.id == uuid.UUID(body.scenario_id)))
+    scenario = result.scalar_one_or_none()
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+
+    session = Session(
+        scenario_id=scenario.id,
+        status=SessionStatus.lobby,
+        tick=0,
+        tick_interval=60,
+        current_time=datetime.now(timezone.utc),
+        settings=body.settings,
+    )
+    db.add(session)
+    await db.flush()
+
+    return {
+        "id": str(session.id),
+        "scenario_id": str(session.scenario_id),
+        "status": session.status.value,
+        "tick": session.tick,
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+    }
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def admin_delete_session(session_id: uuid.UUID, db: DB):
+    """Admin: delete a single session and all its dependent data."""
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Delete all children first to avoid FK violations
+    await db.execute(sa_delete(LocationReference).where(LocationReference.session_id == session_id))
+    await db.execute(sa_delete(Event).where(Event.session_id == session_id))
+    await db.execute(sa_delete(Report).where(Report.session_id == session_id))
+    await db.execute(sa_delete(Contact).where(Contact.session_id == session_id))
+    await db.execute(sa_delete(Order).where(Order.session_id == session_id))
+    await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.session_id == session_id))
+    await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
+    await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
+    await db.execute(sa_delete(SessionParticipant).where(SessionParticipant.session_id == session_id))
+    await db.delete(session)
+    await db.flush()
 
 
 @router.get("/stats")

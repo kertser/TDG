@@ -107,6 +107,11 @@ async def get_visible_units(
         )
         return [_serialize_unit(u) for u in result.scalars().all()]
 
+    # Normalize side to only allow blue/red for fog-of-war
+    if side not in ("blue", "red"):
+        # Unknown side — show nothing to prevent data leaks
+        return []
+
     # Own-side units — always visible
     own_result = await db.execute(
         select(Unit).where(

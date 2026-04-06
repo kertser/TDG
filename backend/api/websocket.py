@@ -57,6 +57,10 @@ async def websocket_endpoint(
             await websocket.close(code=4003, reason="Not a participant")
             return
         side = participant.side.value
+        # Map admin/observer to blue for WS broadcast filtering
+        # so they receive fog-of-war filtered state_updates.
+        # Admin god-view is handled separately via the admin API.
+        ws_side = side if side in ("blue", "red") else "blue"
 
     await websocket.accept()
 
@@ -65,7 +69,7 @@ async def websocket_endpoint(
         session_id=session_id,
         user_id=user.id,
         display_name=user.display_name,
-        side=side,
+        side=ws_side,
         websocket=websocket,
     )
 
@@ -77,7 +81,7 @@ async def websocket_endpoint(
             "data": {
                 "user_id": str(user.id),
                 "display_name": user.display_name,
-                "side": side,
+                "side": ws_side,
             },
         },
         exclude_user=user.id,

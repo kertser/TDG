@@ -11,6 +11,14 @@ const KWebSocket = (() => {
     let _disconnecting = false;
 
     function connect(sessId, authToken) {
+        // Close existing connection if any
+        if (ws) {
+            _disconnecting = true;
+            clearTimeout(reconnectTimer);
+            try { ws.close(); } catch(e) {}
+            ws = null;
+        }
+
         sessionId = sessId;
         token = authToken;
         _disconnecting = false;

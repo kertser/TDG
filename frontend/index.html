@@ -64,9 +64,6 @@
                     <button id="register-btn" title="Register a new account or login with existing name">Register / Login</button>
                 </div>
                 <div id="session-panel" style="display:none;">
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <button id="create-session-btn" title="Create a new game session from the latest scenario">+ New Session</button>
-                    </div>
                     <button id="start-session-btn" style="display:none;" title="Start the session (creates units from scenario)">Start Session</button>
                     <button id="turn-btn" style="display:none;" title="Advance simulation by one turn">▶ Next Turn</button>
                     <div id="session-list"></div>
@@ -245,6 +242,7 @@
                         <button id="admin-refresh-sessions" class="admin-btn" title="Refresh session list and count">🔄 Refresh</button>
                     </div>
                     <div id="admin-session-count" class="admin-info"></div>
+                    <div id="admin-session-list" style="max-height:200px;overflow-y:auto;margin-top:4px;"></div>
                 </div>
 
                 <div class="admin-section">

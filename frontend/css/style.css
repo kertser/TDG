@@ -1142,3 +1142,28 @@ button:hover { background: #1a5276; }
     background: rgba(15, 20, 40, 0.3);
 }
 
+/* ── God View Banner (persistent warning) ─────── */
+.god-view-banner {
+    position: fixed;
+    top: 42px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    background: rgba(244, 67, 54, 0.85);
+    color: #fff;
+    padding: 4px 20px;
+    border-radius: 0 0 6px 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 2px 8px rgba(244, 67, 54, 0.4);
+    animation: god-view-pulse 2s ease-in-out infinite;
+}
+.god-view-banner:hover { background: rgba(244, 67, 54, 1); }
+@keyframes god-view-pulse {
+    0%, 100% { opacity: 0.85; }
+    50%      { opacity: 1; }
+}
+

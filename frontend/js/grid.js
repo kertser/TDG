@@ -19,6 +19,8 @@ const KGrid = (() => {
     let _zoomHandler = null;
     let _visible = true;
     let _subSubVisible = false;
+    let _mouseTracker = null;
+    let _mouseOutTracker = null;
 
     // Shared canvas renderer for all grid line layers (much faster than SVG)
     let _gridCanvas = null;
@@ -31,9 +33,11 @@ const KGrid = (() => {
         sessionId = sessId;
         _map = map;
 
+        // Fully clean up previous grid (layers + canvas + zoom handler)
         _removeLayers(map);
         _subLines = null;
         _subSubLines = null;
+        _visible = true;  // Always show grid after a fresh load
         if (_zoomHandler) { map.off('zoomend', _zoomHandler); _zoomHandler = null; }
 
         try {
@@ -42,9 +46,6 @@ const KGrid = (() => {
             gridGeoJson = await resp.json();
 
             if (!gridGeoJson || !gridGeoJson.features || gridGeoJson.features.length === 0) return;
-
-            // Create canvas renderer (shared by all grid layers)
-            _gridCanvas = L.canvas({ padding: 0.5 });
 
             // Pre-compute internal lines once
             _subLines = _computeInternalLines(gridGeoJson.features, 3, null);
@@ -60,23 +61,36 @@ const KGrid = (() => {
         }
     }
 
+    /** Remove all grid layers AND the canvas renderer from the map. */
     function _removeLayers(map) {
-        if (gridLayer)       { map.removeLayer(gridLayer);       gridLayer = null; }
-        if (subGridLayer)    { map.removeLayer(subGridLayer);    subGridLayer = null; }
-        if (subSubGridLayer) { map.removeLayer(subSubGridLayer); subSubGridLayer = null; }
-        if (labelLayer)      { map.removeLayer(labelLayer);      labelLayer = null; }
+        if (gridLayer)       { try { map.removeLayer(gridLayer); } catch(e){} gridLayer = null; }
+        if (subGridLayer)    { try { map.removeLayer(subGridLayer); } catch(e){} subGridLayer = null; }
+        if (subSubGridLayer) { try { map.removeLayer(subSubGridLayer); } catch(e){} subSubGridLayer = null; }
+        if (labelLayer)      { try { map.removeLayer(labelLayer); } catch(e){} labelLayer = null; }
+        // Always destroy the canvas renderer to prevent ghost layers
+        if (_gridCanvas) {
+            try { map.removeLayer(_gridCanvas); } catch(e){}
+            _gridCanvas = null;
+        }
+        _subSubVisible = false;
     }
 
-    /** Create all layers once – called only on load, not on zoom. */
+    /** Create all layers with a FRESH canvas renderer – called on load and toggle-on. */
     function _createAllLayers(map) {
         if (!_visible || !gridGeoJson) return;
+
+        // Always create a fresh canvas renderer to avoid stale/ghost canvas
+        if (_gridCanvas) {
+            try { map.removeLayer(_gridCanvas); } catch(e){}
+        }
+        _gridCanvas = L.canvas({ padding: 0.5 });
 
         // ── Depth 0: Major grid – solid lines
         gridLayer = L.geoJSON(gridGeoJson, {
             renderer: _gridCanvas,
             style: () => ({
-                color: 'rgba(0, 0, 0, 0.55)',
-                weight: 2,
+                color: '#1a3a5c',
+                weight: 2.5,
                 fillColor: 'transparent',
                 fillOpacity: 0,
             }),
@@ -87,8 +101,8 @@ const KGrid = (() => {
         if (_subLines && _subLines.length > 0) {
             subGridLayer = L.polyline(_subLines, {
                 renderer: _gridCanvas,
-                color: 'rgba(0, 0, 0, 0.3)',
-                weight: 0.8,
+                color: 'rgba(26, 58, 92, 0.55)',
+                weight: 1,
                 dashArray: '6,4',
                 interactive: false,
             }).addTo(map);
@@ -98,8 +112,8 @@ const KGrid = (() => {
         if (_subSubLines && _subSubLines.length > 0) {
             subSubGridLayer = L.polyline(_subSubLines, {
                 renderer: _gridCanvas,
-                color: 'rgba(0, 0, 0, 0.15)',
-                weight: 0.5,
+                color: 'rgba(26, 58, 92, 0.3)',
+                weight: 0.6,
                 dashArray: '3,3',
                 interactive: false,
             });
@@ -299,7 +313,13 @@ const KGrid = (() => {
         const display = document.getElementById('snail-display');
         let debounceTimer = null;
 
-        map.on('mousemove', (e) => {
+        // Remove previous tracker if any
+        if (_mouseTracker) {
+            map.off('mousemove', _mouseTracker);
+            map.off('mouseout', _mouseOutTracker);
+        }
+
+        _mouseTracker = async (e) => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(async () => {
                 const result = await getSnailAtPoint(e.latlng.lat, e.latlng.lng, 2);
@@ -309,12 +329,15 @@ const KGrid = (() => {
                     display.textContent = '';
                 }
             }, 400);
-        });
+        };
 
-        map.on('mouseout', () => {
+        _mouseOutTracker = () => {
             clearTimeout(debounceTimer);
             display.textContent = '';
-        });
+        };
+
+        map.on('mousemove', _mouseTracker);
+        map.on('mouseout', _mouseOutTracker);
     }
 
     function getGridGeoJson() { return gridGeoJson; }
@@ -324,11 +347,12 @@ const KGrid = (() => {
         if (!_map) return _visible;
 
         if (_visible) {
+            // Recreate layers (and fresh canvas) from cached data
             _createAllLayers(_map);
             _updateZoomVisibility(_map);
         } else {
+            // Remove all layers including canvas renderer
             _removeLayers(_map);
-            _subSubVisible = false;
         }
         return _visible;
     }
@@ -340,6 +364,8 @@ const KGrid = (() => {
         if (_map) {
             _removeLayers(_map);
             if (_zoomHandler) { _map.off('zoomend', _zoomHandler); _zoomHandler = null; }
+            if (_mouseTracker) { _map.off('mousemove', _mouseTracker); _mouseTracker = null; }
+            if (_mouseOutTracker) { _map.off('mouseout', _mouseOutTracker); _mouseOutTracker = null; }
         }
         gridGeoJson = null;
         sessionId = null;

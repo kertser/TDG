@@ -3,6 +3,7 @@
  *
  * Icons use L.divIcon → fixed pixel size regardless of map zoom.
  * Size varies by unit echelon: company-level → larger, team/individual → smaller.
+ * At low zoom levels, markers are scaled down to prevent clutter.
  */
 const KSymbols = (() => {
 
@@ -20,12 +21,37 @@ const KSymbols = (() => {
     };
     const DEFAULT_SIZE = 28;
 
+    /** Compute zoom-based scale factor for unit markers. */
+    function getZoomScale(zoom) {
+        if (zoom >= 13) return 1.0;
+        if (zoom >= 12) return 0.85;
+        if (zoom >= 11) return 0.7;
+        if (zoom >= 10) return 0.55;
+        if (zoom >= 9)  return 0.4;
+        if (zoom >= 8)  return 0.3;
+        return 0.22;
+    }
+
+    /**
+     * Get the zoom "bucket" — only re-render when bucket changes.
+     * This prevents re-rendering on every fractional zoom step.
+     */
+    function getZoomBucket(zoom) {
+        if (zoom >= 13) return 'full';
+        if (zoom >= 11) return 'large';
+        if (zoom >= 10) return 'medium';
+        if (zoom >= 8)  return 'small';
+        return 'tiny';
+    }
+
     function createIcon(sidc, options = {}) {
         const unitType = options.unitType || '';
-        const size = options.size || SIZE_MAP[unitType] || DEFAULT_SIZE;
+        const baseSize = options.size || SIZE_MAP[unitType] || DEFAULT_SIZE;
+        const scale = options.zoomScale || 1.0;
+        const size = Math.max(8, Math.round(baseSize * scale));
 
         if (!sidc || !window.ms) {
-            const r = Math.max(Math.round(size * 0.35), 5);
+            const r = Math.max(Math.round(size * 0.35), 3);
             return L.divIcon({
                 className: 'unit-marker-fallback',
                 html: `<div style="width:${r*2}px;height:${r*2}px;border-radius:50%;background:#4fc3f7;border:2px solid #fff;"></div>`,
@@ -50,6 +76,6 @@ const KSymbols = (() => {
         });
     }
 
-    return { createIcon };
+    return { createIcon, getZoomScale, getZoomBucket };
 })();
 
