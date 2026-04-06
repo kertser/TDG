@@ -842,7 +842,8 @@ const KUnits = (() => {
 
         // Bind actions
         menu.querySelectorAll('.ctx-item').forEach(item => {
-            item.addEventListener('click', () => {
+            item.addEventListener('click', (evt) => {
+                evt.stopPropagation(); // Prevent document handler from closing sub-menus
                 const action = item.dataset.action;
                 _closeUnitContextMenu();
                 if (action === 'select') {
@@ -926,7 +927,8 @@ const KUnits = (() => {
         if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
 
         menu.querySelectorAll('.ctx-item').forEach(item => {
-            item.addEventListener('click', async () => {
+            item.addEventListener('click', async (evt) => {
+                evt.stopPropagation();
                 _closeUnitContextMenu();
                 const formation = item.dataset.formation;
                 const token = KSessionUI.getToken();
@@ -972,7 +974,8 @@ const KUnits = (() => {
         if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
 
         menu.querySelectorAll('.ctx-item').forEach(item => {
-            item.addEventListener('click', () => {
+            item.addEventListener('click', (evt) => {
+                evt.stopPropagation();
                 _closeUnitContextMenu();
                 const speed = item.dataset.speed;
                 _startMoveTargetPick(u, speed);
@@ -1134,7 +1137,8 @@ const KUnits = (() => {
         if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
 
         menu.querySelectorAll('.ctx-item').forEach(item => {
-            item.addEventListener('click', async () => {
+            item.addEventListener('click', async (evt) => {
+                evt.stopPropagation();
                 const mergeId = item.dataset.mergeId;
                 _closeUnitContextMenu();
                 if (!mergeId) return;

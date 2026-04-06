@@ -220,16 +220,9 @@ const KOverlays = (() => {
         sessionId = sessId;
         token = authToken;
 
-        const toolbar = document.getElementById('draw-toolbar');
-        if (toolbar) toolbar.style.display = 'flex';
-        const centerBtn = document.getElementById('center-btn');
-        if (centerBtn) centerBtn.style.display = 'inline-flex';
-        const gridToggleBtn = document.getElementById('grid-toggle-btn');
-        if (gridToggleBtn) gridToggleBtn.style.display = 'inline-flex';
-        const unitsToggleBtn = document.getElementById('units-toggle-btn');
-        if (unitsToggleBtn) unitsToggleBtn.style.display = 'inline-flex';
-        const overlaysToggleBtn = document.getElementById('overlays-toggle-btn');
-        if (overlaysToggleBtn) overlaysToggleBtn.style.display = 'inline-flex';
+        // Show drawing tools group (inside map control overlay)
+        const drawGroup = document.getElementById('map-draw-group');
+        if (drawGroup) drawGroup.style.display = '';
     }
 
     // ══════════════════════════════════════════════════

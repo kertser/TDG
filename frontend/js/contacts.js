@@ -4,8 +4,11 @@
  */
 const KContacts = (() => {
     let contactsLayer = null;
+    let _visible = true;
+    let _map = null;
 
     function init(map) {
+        _map = map;
         contactsLayer = L.layerGroup().addTo(map);
     }
 
@@ -80,10 +83,24 @@ const KContacts = (() => {
         });
     }
 
+    /** Toggle contacts layer visibility. Returns new state. */
+    function toggle() {
+        _visible = !_visible;
+        if (_map || (contactsLayer && contactsLayer._map)) {
+            const m = _map || contactsLayer._map;
+            if (_visible) {
+                if (contactsLayer && !m.hasLayer(contactsLayer)) m.addLayer(contactsLayer);
+            } else {
+                if (contactsLayer && m.hasLayer(contactsLayer)) m.removeLayer(contactsLayer);
+            }
+        }
+        return _visible;
+    }
+
     /** Clear all contacts from map (used on logout). */
     function clearAll() {
         if (contactsLayer) contactsLayer.clearLayers();
     }
 
-    return { init, load, render, clearAll };
+    return { init, load, render, clearAll, toggle };
 })();

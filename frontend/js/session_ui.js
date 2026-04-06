@@ -239,9 +239,9 @@ const KSessionUI = (() => {
         const adminWindow = document.getElementById('admin-window');
         if (adminWindow) adminWindow.style.display = 'none';
 
-        // Hide toolbar and session controls
-        const drawToolbar = document.getElementById('draw-toolbar');
-        if (drawToolbar) drawToolbar.style.display = 'none';
+        // Hide drawing tools group and session controls
+        const drawGroup = document.getElementById('map-draw-group');
+        if (drawGroup) drawGroup.style.display = 'none';
 
         // Reset game clock
         KMap.setGameTime(0, null);

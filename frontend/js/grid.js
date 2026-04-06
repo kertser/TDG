@@ -290,6 +290,9 @@ const KGrid = (() => {
         });
 
         labelLayer.addTo(map);
+        if (!_labelsVisible) {
+            map.removeLayer(labelLayer);
+        }
     }
 
     // ── Public helpers
@@ -355,6 +358,8 @@ const KGrid = (() => {
 
     function getGridGeoJson() { return gridGeoJson; }
 
+    let _labelsVisible = true;
+
     function toggle() {
         _visible = !_visible;
         if (!_map) return _visible;
@@ -368,6 +373,18 @@ const KGrid = (() => {
             _removeLayers(_map);
         }
         return _visible;
+    }
+
+    /** Toggle just the grid axis/corner labels. */
+    function toggleLabels() {
+        _labelsVisible = !_labelsVisible;
+        if (!_map) return _labelsVisible;
+        if (_labelsVisible) {
+            if (labelLayer && !_map.hasLayer(labelLayer) && _visible) labelLayer.addTo(_map);
+        } else {
+            if (labelLayer && _map.hasLayer(labelLayer)) _map.removeLayer(labelLayer);
+        }
+        return _labelsVisible;
     }
 
     function isVisible() { return _visible; }
@@ -387,5 +404,5 @@ const KGrid = (() => {
         _subSubVisible = false;
     }
 
-    return { load, getSnailAtPoint, setupMouseTracker, getGridGeoJson, toggle, isVisible, clearAll };
+    return { load, getSnailAtPoint, setupMouseTracker, getGridGeoJson, toggle, toggleLabels, isVisible, clearAll };
 })();
