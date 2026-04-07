@@ -1618,6 +1618,249 @@ button:hover { background: #1a5276; }
     background: rgba(15, 20, 40, 0.3);
 }
 
+/* ── Unit Edit Floating Window ──────────────────── */
+.ue-float {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 420px;
+    z-index: 10000;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(79,195,247,0.1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: ueFloatIn 0.18s ease-out;
+}
+@keyframes ueFloatIn {
+    from { transform: translate(-50%, -50%) scale(0.95); opacity: 0; }
+    to   { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+.ue-float.ue-dragged {
+    /* Once dragged, remove centering transform */
+    transform: none;
+    animation: none;
+}
+.ue-float-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #0f1b38;
+    border-bottom: 1px solid #0f3460;
+    cursor: grab;
+    user-select: none;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #ff9800;
+}
+.ue-float-header:active { cursor: grabbing; }
+.ue-float-close {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    font-size: 14px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #888;
+    cursor: pointer;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ue-float-close:hover { background: #5a2020; color: #ef9a9a; border-color: #e53935; }
+.ue-float-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+    max-height: calc(100vh - 180px);
+}
+.ue-float-footer {
+    display: flex;
+    gap: 8px;
+    padding: 8px 14px;
+    border-top: 1px solid #0f3460;
+    background: rgba(15, 20, 40, 0.3);
+}
+.ue-btn-save {
+    flex: 1;
+    background: #1b5e20 !important;
+    color: #a5d6a7 !important;
+    font-weight: 700;
+    border: 1px solid #2e7d32 !important;
+}
+.ue-btn-save:hover { background: #2e7d32 !important; }
+.ue-btn-cancel { flex: 1; }
+
+/* Preview row: symbol + label */
+.ue-preview-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(79,195,247,0.1);
+}
+.ue-symbol-box {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.ue-symbol-box svg { max-width: 44px; max-height: 44px; }
+.ue-preview-info { flex: 1; min-width: 0; }
+.ue-unit-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #4fc3f7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ue-unit-id {
+    font-size: 10px;
+    color: #555;
+    font-family: monospace;
+    margin-top: 2px;
+}
+
+/* Two-column field grid */
+.ue-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+}
+.ue-field { display: flex; flex-direction: column; }
+.ue-span2 { grid-column: span 2; }
+.ue-field label {
+    font-size: 10px;
+    color: #90caf9;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 3px;
+    font-weight: 600;
+}
+.ue-input {
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 11px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    outline: none;
+    box-sizing: border-box;
+}
+.ue-input:focus { border-color: #4fc3f7; }
+.ue-input option { background: #1a1a2e; color: #e0e0e0; }
+
+/* Stat bar row (range slider + value) */
+.ue-stat-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.ue-stat-val {
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 36px;
+    text-align: right;
+    font-family: monospace;
+    color: #e0e0e0;
+}
+/* Range slider custom styling */
+.ue-range {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: #1a1a2e;
+    outline: none;
+    cursor: pointer;
+}
+.ue-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #e0e0e0;
+    border: 2px solid #4fc3f7;
+    cursor: pointer;
+}
+.ue-range::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #e0e0e0;
+    border: 2px solid #4fc3f7;
+    cursor: pointer;
+}
+/* Color-coded track fills via JS-set background gradients */
+.ue-range-str { accent-color: #4caf50; }
+.ue-range-mor { accent-color: #2196f3; }
+.ue-range-ammo { accent-color: #ff9800; }
+.ue-range-sup { accent-color: #f44336; }
+
+/* Position row */
+.ue-pos-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+.ue-pos-input { flex: 1; min-width: 0; }
+.ue-pick-btn {
+    padding: 4px 8px;
+    font-size: 14px;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    color: #e0e0e0;
+    cursor: pointer;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.ue-pick-btn:hover { background: #0f3460; border-color: #4fc3f7; }
+
+/* Destroyed checkbox */
+.ue-check-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    color: #ef5350 !important;
+    cursor: pointer;
+    padding: 4px 0;
+}
+.ue-check-label input[type="checkbox"] {
+    accent-color: #f44336;
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+}
+
+/* Status message at bottom */
+.ue-status {
+    margin-top: 8px;
+    font-size: 11px;
+    min-height: 16px;
+}
+.ue-status.admin-success { color: #4caf50; }
+.ue-status.admin-error { color: #ef5350; }
+
 /* ── God View Banner (persistent warning) ─────── */
 .god-view-banner {
     position: fixed;
@@ -1862,6 +2105,95 @@ button:hover { background: #1a5276; }
     border-radius: 4px;
     margin-bottom: 6px;
     flex-wrap: wrap;
+}
+
+/* ── Unit Type Editor Floating Window ─────────── */
+.utype-float { width: 560px; }
+.utype-layout {
+    display: flex;
+    gap: 14px;
+}
+.utype-form-col { flex: 1; min-width: 0; }
+.utype-preview-col {
+    width: 140px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.utype-section {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(79,195,247,0.08);
+}
+.utype-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.utype-section-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #4fc3f7;
+    margin-bottom: 6px;
+}
+.utype-sidc-input {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+}
+.utype-preview-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.utype-preview-card {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: 6px;
+    text-align: center;
+}
+.utype-preview-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #90caf9;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.utype-preview-symbol {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.utype-preview-symbol svg { max-width: 52px; max-height: 52px; }
+.utype-preview-sidc-text {
+    font-size: 8px;
+    color: #555;
+    font-family: monospace;
+    margin-top: 2px;
+    word-break: break-all;
+}
+.utype-preview-stats {
+    font-size: 10px;
+    color: #aaa;
+    line-height: 1.6;
+    margin-top: 4px;
+    padding: 6px;
+    background: rgba(0,0,0,0.15);
+    border-radius: 4px;
+}
+.utype-preview-stats .utype-stat-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+}
+.utype-preview-stats .utype-stat-val {
+    color: #e0e0e0;
+    font-weight: 600;
+    font-family: monospace;
 }
 
 /* ── Unit Type Registry ──────────────────────── */

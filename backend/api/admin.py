@@ -354,6 +354,7 @@ class AdminUnitUpdate(BaseModel):
     ammo: float | None = None
     morale: float | None = None
     suppression: float | None = None
+    comms_status: str | None = None
     move_speed_mps: float | None = None
     detection_range_m: float | None = None
     capabilities: dict | None = None
@@ -651,6 +652,8 @@ async def admin_update_unit(
         unit.morale = body.morale
     if body.suppression is not None:
         unit.suppression = body.suppression
+    if body.comms_status is not None:
+        unit.comms_status = body.comms_status
     if body.move_speed_mps is not None:
         unit.move_speed_mps = body.move_speed_mps
     if body.detection_range_m is not None:

@@ -576,64 +576,119 @@
         </div>
     </div>
 
-    <!-- ── Admin Unit Edit Modal ─────────────────────── -->
-    <div id="admin-unit-edit-modal" class="admin-modal-overlay" style="display:none;">
-        <div class="admin-modal">
-            <div class="admin-modal-header">
-                <span>✏ Edit Unit</span>
-                <button class="admin-modal-close" id="admin-ue-close" title="Cancel">✕</button>
+    <!-- ── Admin Unit Edit — Floating Draggable Window ── -->
+    <div id="admin-unit-edit-modal" class="ue-float" style="display:none;">
+        <div class="ue-float-header" id="admin-ue-header">
+            <span id="admin-ue-title">✏ Edit Unit</span>
+            <button class="ue-float-close" id="admin-ue-close" title="Close">✕</button>
+        </div>
+        <div class="ue-float-body">
+            <!-- Top row: symbol preview + unit label -->
+            <div class="ue-preview-row">
+                <div id="admin-ue-symbol-preview" class="ue-symbol-box" title="Live symbol preview"></div>
+                <div class="ue-preview-info">
+                    <div id="admin-ue-label" class="ue-unit-label"></div>
+                    <div id="admin-ue-id-display" class="ue-unit-id"></div>
+                </div>
             </div>
-            <div class="admin-modal-body">
-                <div id="admin-ue-label" style="font-size:13px;color:#4fc3f7;font-weight:700;margin-bottom:10px;"></div>
-                <div class="admin-modal-row">
+
+            <!-- Two-column field grid -->
+            <div class="ue-fields">
+                <!-- Name — full width -->
+                <div class="ue-field ue-span2">
                     <label>Name</label>
-                    <input type="text" id="admin-ue-name" class="admin-modal-select" style="padding:4px 6px;" />
+                    <input type="text" id="admin-ue-name" class="ue-input" />
                 </div>
-                <div class="admin-modal-row" style="display:flex;gap:8px;">
-                    <div style="flex:1;">
-                        <label>Side</label>
-                        <select id="admin-ue-side" class="admin-modal-select" style="padding:4px 6px;">
-                            <option value="blue">🔵 Blue</option>
-                            <option value="red">🔴 Red</option>
-                        </select>
+                <!-- Side -->
+                <div class="ue-field">
+                    <label>Side</label>
+                    <select id="admin-ue-side" class="ue-input">
+                        <option value="blue">🔵 Blue</option>
+                        <option value="red">🔴 Red</option>
+                    </select>
+                </div>
+                <!-- Unit Type -->
+                <div class="ue-field">
+                    <label>Unit Type</label>
+                    <select id="admin-ue-unit-type" class="ue-input"></select>
+                </div>
+
+                <!-- Stat bars — full width each -->
+                <div class="ue-field ue-span2">
+                    <label>Strength</label>
+                    <div class="ue-stat-row">
+                        <input type="range" id="admin-ue-strength" min="0" max="100" step="1" class="ue-range ue-range-str" />
+                        <span class="ue-stat-val" id="admin-ue-strength-val">100%</span>
                     </div>
-                    <div style="flex:2;">
-                        <label>Unit Type</label>
-                        <select id="admin-ue-unit-type" class="admin-modal-select" style="padding:4px 6px;">
-                        </select>
+                </div>
+                <div class="ue-field ue-span2">
+                    <label>Morale</label>
+                    <div class="ue-stat-row">
+                        <input type="range" id="admin-ue-morale" min="0" max="100" step="1" class="ue-range ue-range-mor" />
+                        <span class="ue-stat-val" id="admin-ue-morale-val">90%</span>
                     </div>
                 </div>
-                <div class="admin-modal-row">
-                    <label>Strength %</label>
-                    <input type="number" id="admin-ue-strength" min="0" max="100" step="5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                <div class="ue-field ue-span2">
+                    <label>Ammo</label>
+                    <div class="ue-stat-row">
+                        <input type="range" id="admin-ue-ammo" min="0" max="100" step="1" class="ue-range ue-range-ammo" />
+                        <span class="ue-stat-val" id="admin-ue-ammo-val">100%</span>
+                    </div>
                 </div>
-                <div class="admin-modal-row">
-                    <label>Morale %</label>
-                    <input type="number" id="admin-ue-morale" min="0" max="100" step="5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                <div class="ue-field ue-span2">
+                    <label>Suppression</label>
+                    <div class="ue-stat-row">
+                        <input type="range" id="admin-ue-suppression" min="0" max="100" step="1" class="ue-range ue-range-sup" />
+                        <span class="ue-stat-val" id="admin-ue-suppression-val">0%</span>
+                    </div>
                 </div>
-                <div class="admin-modal-row">
-                    <label>Ammo %</label>
-                    <input type="number" id="admin-ue-ammo" min="0" max="100" step="5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
-                </div>
-                <div class="admin-modal-row">
+
+                <!-- Numeric fields — two-column -->
+                <div class="ue-field">
                     <label>Detection (m)</label>
-                    <input type="number" id="admin-ue-detection" min="0" max="10000" step="100" class="admin-modal-select" style="width:100px;padding:4px 6px;" />
+                    <input type="number" id="admin-ue-detection" min="0" max="10000" step="100" class="ue-input" />
                 </div>
-                <div class="admin-modal-row">
+                <div class="ue-field">
                     <label>Speed (m/s)</label>
-                    <input type="number" id="admin-ue-speed" min="0" max="50" step="0.5" class="admin-modal-select" style="width:80px;padding:4px 6px;" />
+                    <input type="number" id="admin-ue-speed" min="0" max="50" step="0.5" class="ue-input" />
                 </div>
-                <div class="admin-modal-row">
+                <div class="ue-field">
+                    <label>Heading (°)</label>
+                    <input type="number" id="admin-ue-heading" min="0" max="360" step="5" class="ue-input" placeholder="0" />
+                </div>
+                <div class="ue-field">
+                    <label>Comms</label>
+                    <select id="admin-ue-comms" class="ue-input">
+                        <option value="operational">✅ Operational</option>
+                        <option value="degraded">⚠ Degraded</option>
+                        <option value="offline">❌ Offline</option>
+                    </select>
+                </div>
+
+                <!-- Position — full width -->
+                <div class="ue-field ue-span2">
                     <label>Position</label>
-                    <input type="text" id="admin-ue-lat" placeholder="Lat" class="admin-modal-select" style="width:100px;padding:4px 6px;" title="Latitude" />
-                    <input type="text" id="admin-ue-lon" placeholder="Lon" class="admin-modal-select" style="width:100px;padding:4px 6px;" title="Longitude" />
+                    <div class="ue-pos-row">
+                        <input type="text" id="admin-ue-lat" placeholder="Lat" class="ue-input ue-pos-input" title="Latitude" />
+                        <input type="text" id="admin-ue-lon" placeholder="Lon" class="ue-input ue-pos-input" title="Longitude" />
+                        <button class="ue-pick-btn" id="admin-ue-pick-map" title="Pick position on map">📍</button>
+                    </div>
                 </div>
-                <div id="admin-ue-status" class="admin-info" style="margin-top:6px;"></div>
+
+                <!-- Destroyed toggle — full width -->
+                <div class="ue-field ue-span2">
+                    <label class="ue-check-label">
+                        <input type="checkbox" id="admin-ue-destroyed" />
+                        <span>☠ Destroyed</span>
+                    </label>
+                </div>
             </div>
-            <div class="admin-modal-footer">
-                <button id="admin-ue-save" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;flex:1;">✓ Save</button>
-                <button id="admin-ue-cancel" class="admin-btn" style="flex:1;">Cancel</button>
-            </div>
+
+            <div id="admin-ue-status" class="ue-status"></div>
+        </div>
+        <div class="ue-float-footer">
+            <button id="admin-ue-save" class="admin-btn ue-btn-save">✓ Save</button>
+            <button id="admin-ue-cancel" class="admin-btn ue-btn-cancel">Cancel</button>
         </div>
     </div>
 
@@ -791,6 +846,103 @@
             <div class="admin-modal-footer">
                 <button id="scenario-desc-ok" class="admin-btn" style="flex:1;">OK</button>
             </div>
+        </div>
+    </div>
+
+    <!-- ── Unit Type Editor — Floating Draggable Window ── -->
+    <div id="admin-utype-modal" class="ue-float utype-float" style="display:none;">
+        <div class="ue-float-header" id="admin-utype-header">
+            <span id="admin-utype-title">✏ Edit Unit Type</span>
+            <button class="ue-float-close" id="admin-utype-close" title="Close">✕</button>
+        </div>
+        <div class="ue-float-body">
+            <div class="utype-layout">
+                <!-- Left Column: Form -->
+                <div class="utype-form-col">
+                    <!-- Identity Section -->
+                    <div class="utype-section">
+                        <div class="utype-section-title">Identity</div>
+                        <div class="ue-fields" style="gap:6px 8px;">
+                            <div class="ue-field ue-span2">
+                                <label>Key</label>
+                                <input type="text" id="utype-key" class="ue-input" placeholder="e.g. heavy_mortar" />
+                            </div>
+                            <div class="ue-field ue-span2">
+                                <label>Display Name</label>
+                                <input type="text" id="utype-label" class="ue-input" placeholder="Heavy Mortar" />
+                            </div>
+                            <div class="ue-field ue-span2">
+                                <label class="ue-check-label" style="color:#ff9800 !important;">
+                                    <input type="checkbox" id="utype-is-hq" style="accent-color:#ff9800;" />
+                                    <span>⭐ HQ Unit Type</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Combat Stats Section -->
+                    <div class="utype-section">
+                        <div class="utype-section-title">Combat Stats</div>
+                        <div class="ue-fields" style="gap:6px 8px;">
+                            <div class="ue-field">
+                                <label>Detection (m)</label>
+                                <input type="number" id="utype-det" class="ue-input" min="0" max="10000" step="100" value="1500" />
+                            </div>
+                            <div class="ue-field">
+                                <label>Fire Range (m)</label>
+                                <input type="number" id="utype-fire" class="ue-input" min="0" max="10000" step="50" value="600" />
+                            </div>
+                            <div class="ue-field">
+                                <label>Speed (m/s)</label>
+                                <input type="number" id="utype-speed" class="ue-input" min="0" max="50" step="0.5" value="4.0" />
+                            </div>
+                            <div class="ue-field">
+                                <label>Personnel</label>
+                                <input type="number" id="utype-personnel" class="ue-input" min="0" max="5000" step="1" value="30" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Symbol Codes Section -->
+                    <div class="utype-section">
+                        <div class="utype-section-title">Symbol Codes (SIDC)</div>
+                        <div class="ue-fields" style="gap:6px 8px;">
+                            <div class="ue-field ue-span2">
+                                <label>Blue SIDC (20 chars)</label>
+                                <input type="text" id="utype-sidc-blue" class="ue-input utype-sidc-input" maxlength="20" placeholder="10031000151211000000" />
+                            </div>
+                            <div class="ue-field ue-span2">
+                                <label>Red SIDC (20 chars)</label>
+                                <input type="text" id="utype-sidc-red" class="ue-input utype-sidc-input" maxlength="20" placeholder="10061000151211000000" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Preview -->
+                <div class="utype-preview-col">
+                    <div class="utype-section-title">Preview</div>
+                    <div class="utype-preview-cards">
+                        <div class="utype-preview-card">
+                            <div class="utype-preview-label">🔵 Blue</div>
+                            <div id="utype-preview-blue" class="utype-preview-symbol"></div>
+                            <div id="utype-preview-blue-sidc" class="utype-preview-sidc-text"></div>
+                        </div>
+                        <div class="utype-preview-card">
+                            <div class="utype-preview-label">🔴 Red</div>
+                            <div id="utype-preview-red" class="utype-preview-symbol"></div>
+                            <div id="utype-preview-red-sidc" class="utype-preview-sidc-text"></div>
+                        </div>
+                    </div>
+                    <div class="utype-preview-stats" id="utype-preview-stats"></div>
+                </div>
+            </div>
+
+            <div id="utype-status" class="ue-status"></div>
+        </div>
+        <div class="ue-float-footer">
+            <button id="admin-utype-save" class="admin-btn ue-btn-save">✓ Save</button>
+            <button id="admin-utype-cancel" class="admin-btn ue-btn-cancel">Cancel</button>
         </div>
     </div>
 

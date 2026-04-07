@@ -1593,6 +1593,7 @@ const KAdmin = (() => {
                     if (info.det) _setVal('admin-ue-detection', info.det);
                     if (info.speed) _setVal('admin-ue-speed', info.speed);
                 }
+                _updateUnitEditPreview();
             };
         }
 
@@ -1603,22 +1604,46 @@ const KAdmin = (() => {
         _setVal('admin-ue-strength', 100);
         _setVal('admin-ue-morale', 90);
         _setVal('admin-ue-ammo', 100);
+        _setVal('admin-ue-suppression', 0);
         _setVal('admin-ue-detection', 1500);
         _setVal('admin-ue-speed', 4);
+        _setVal('admin-ue-heading', 0);
+        _setVal('admin-ue-comms', 'operational');
         _setVal('admin-ue-lat', center.lat.toFixed(6));
         _setVal('admin-ue-lon', center.lng.toFixed(6));
 
-        const label = document.getElementById('admin-ue-label');
-        if (label) label.textContent = 'Create New Unit';
+        // Destroyed checkbox
+        const destroyedEl = document.getElementById('admin-ue-destroyed');
+        if (destroyedEl) destroyedEl.checked = false;
 
-        const header = modal.querySelector('.admin-modal-header span');
-        if (header) header.textContent = '➕ New Unit';
+        // Fire range slider visual updates
+        _fireRangeUpdate('admin-ue-strength');
+        _fireRangeUpdate('admin-ue-morale');
+        _fireRangeUpdate('admin-ue-ammo');
+        _fireRangeUpdate('admin-ue-suppression');
+
+        // Label and ID
+        const label = document.getElementById('admin-ue-label');
+        if (label) label.textContent = 'New Unit';
+        const idDisplay = document.getElementById('admin-ue-id-display');
+        if (idDisplay) idDisplay.textContent = 'will be assigned on save';
+
+        // Title
+        const titleEl = document.getElementById('admin-ue-title');
+        if (titleEl) titleEl.textContent = '➕ New Unit';
 
         const statusEl = document.getElementById('admin-ue-status');
-        if (statusEl) statusEl.textContent = '';
+        if (statusEl) { statusEl.textContent = ''; statusEl.className = 'ue-status'; }
+
+        // Symbol preview
+        _updateUnitEditPreview();
 
         // Use __new__ marker so save knows to POST instead of PUT
         modal.dataset.unitId = '__new__';
+        modal.classList.remove('ue-dragged');
+        modal.style.left = '50%';
+        modal.style.top = '50%';
+        modal.style.transform = 'translate(-50%, -50%)';
         modal.style.display = 'flex';
     }
 
@@ -1663,6 +1688,7 @@ const KAdmin = (() => {
                     if (info.det) _setVal('admin-ue-detection', info.det);
                     if (info.speed) _setVal('admin-ue-speed', info.speed);
                 }
+                _updateUnitEditPreview();
             };
             // Add current type if not in list
             if (unit.unit_type && !types[unit.unit_type]) {
@@ -1680,18 +1706,46 @@ const KAdmin = (() => {
         _setVal('admin-ue-strength', unit.strength != null ? Math.round(unit.strength * 100) : 100);
         _setVal('admin-ue-morale', unit.morale != null ? Math.round(unit.morale * 100) : 90);
         _setVal('admin-ue-ammo', unit.ammo != null ? Math.round(unit.ammo * 100) : 100);
+        _setVal('admin-ue-suppression', unit.suppression != null ? Math.round(unit.suppression * 100) : 0);
         _setVal('admin-ue-detection', unit.detection_range_m || 1500);
         _setVal('admin-ue-speed', unit.move_speed_mps || 4);
+        _setVal('admin-ue-heading', unit.heading_deg != null ? unit.heading_deg : 0);
+        _setVal('admin-ue-comms', unit.comms_status || 'operational');
         _setVal('admin-ue-lat', unit.lat != null ? unit.lat.toFixed(6) : '');
         _setVal('admin-ue-lon', unit.lon != null ? unit.lon.toFixed(6) : '');
 
-        const label = document.getElementById('admin-ue-label');
-        if (label) label.textContent = `Edit: ${unit.name}`;
+        // Destroyed checkbox
+        const destroyedEl = document.getElementById('admin-ue-destroyed');
+        if (destroyedEl) destroyedEl.checked = !!unit.is_destroyed;
 
+        // Fire range slider visual updates
+        _fireRangeUpdate('admin-ue-strength');
+        _fireRangeUpdate('admin-ue-morale');
+        _fireRangeUpdate('admin-ue-ammo');
+        _fireRangeUpdate('admin-ue-suppression');
+
+        // Label and ID
+        const label = document.getElementById('admin-ue-label');
+        if (label) label.textContent = unit.name;
+        const idDisplay = document.getElementById('admin-ue-id-display');
+        if (idDisplay) idDisplay.textContent = unitId.substring(0, 8) + '…';
+
+        // Title
+        const titleEl = document.getElementById('admin-ue-title');
+        if (titleEl) titleEl.textContent = '✏ Edit Unit';
+
+        // Status
         const statusEl = document.getElementById('admin-ue-status');
-        if (statusEl) statusEl.textContent = '';
+        if (statusEl) { statusEl.textContent = ''; statusEl.className = 'ue-status'; }
+
+        // Symbol preview
+        _updateUnitEditPreview();
 
         modal.dataset.unitId = unitId;
+        modal.classList.remove('ue-dragged');
+        modal.style.left = '50%';
+        modal.style.top = '50%';
+        modal.style.transform = 'translate(-50%, -50%)';
         modal.style.display = 'flex';
     }
 
@@ -1730,6 +1784,7 @@ const KAdmin = (() => {
             }
         }
 
+        // Range slider values (0-100 → 0.0-1.0)
         const str = parseFloat(document.getElementById('admin-ue-strength').value);
         if (!isNaN(str)) body.strength = Math.max(0, Math.min(1, str / 100));
 
@@ -1739,11 +1794,22 @@ const KAdmin = (() => {
         const amm = parseFloat(document.getElementById('admin-ue-ammo').value);
         if (!isNaN(amm)) body.ammo = Math.max(0, Math.min(1, amm / 100));
 
+        const sup = parseFloat(document.getElementById('admin-ue-suppression').value);
+        if (!isNaN(sup)) body.suppression = Math.max(0, Math.min(1, sup / 100));
+
+        // Numeric fields
         const det = parseFloat(document.getElementById('admin-ue-detection').value);
         if (!isNaN(det)) body.detection_range_m = Math.max(0, det);
 
         const spd = parseFloat(document.getElementById('admin-ue-speed').value);
         if (!isNaN(spd)) body.move_speed_mps = Math.max(0, spd);
+
+        const hdg = parseFloat(document.getElementById('admin-ue-heading').value);
+        if (!isNaN(hdg)) body.heading_deg = ((hdg % 360) + 360) % 360;
+
+        // Comms status
+        const commsEl = document.getElementById('admin-ue-comms');
+        if (commsEl && commsEl.value) body.comms_status = commsEl.value;
 
         // Position (lat/lon)
         const latEl = document.getElementById('admin-ue-lat');
@@ -1756,6 +1822,10 @@ const KAdmin = (() => {
                 body.lon = lon;
             }
         }
+
+        // Destroyed
+        const destroyedEl = document.getElementById('admin-ue-destroyed');
+        if (destroyedEl) body.is_destroyed = destroyedEl.checked;
 
         try {
             const isNew = unitId === '__new__';
@@ -1771,12 +1841,9 @@ const KAdmin = (() => {
             });
             if (resp.ok) {
                 const verb = isNew ? 'Created' : 'Saved';
-                if (statusEl) { statusEl.textContent = `✓ ${verb}`; statusEl.className = 'admin-info admin-success'; }
+                if (statusEl) { statusEl.textContent = `✓ ${verb}`; statusEl.className = 'ue-status admin-success'; }
                 setTimeout(() => {
-                    modal.style.display = 'none';
-                    // Reset modal header
-                    const header = modal.querySelector('.admin-modal-header span');
-                    if (header) header.textContent = '✏ Edit Unit';
+                    _closeUnitEdit();
                     _loadUnitDashboard();
                     // Refresh map units if this is the active session
                     const userSid = _getUserSessionId();
@@ -1786,13 +1853,13 @@ const KAdmin = (() => {
                             else KUnits.load(userSid, token);
                         } catch(e) {}
                     }
-                }, 200);
+                }, 300);
             } else {
                 const d = await resp.json().catch(() => ({}));
-                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Failed'}`; statusEl.className = 'admin-info admin-error'; }
+                if (statusEl) { statusEl.textContent = `✗ ${d.detail || 'Failed'}`; statusEl.className = 'ue-status admin-error'; }
             }
         } catch (err) {
-            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
+            if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'ue-status admin-error'; }
         }
     }
 
@@ -2998,23 +3065,170 @@ const KAdmin = (() => {
 
     function _initUnitEditModal() {
         _bind('admin-ue-save', 'click', _saveUnitEdit);
-        _bind('admin-ue-cancel', 'click', () => {
-            const modal = document.getElementById('admin-unit-edit-modal');
-            if (modal) modal.style.display = 'none';
+        _bind('admin-ue-cancel', 'click', _closeUnitEdit);
+        _bind('admin-ue-close', 'click', _closeUnitEdit);
+        _bind('admin-ue-pick-map', 'click', _pickUnitPositionOnMap);
+
+        // ── Range sliders: live value display + track coloring ──
+        const sliders = [
+            { id: 'admin-ue-strength',    valId: 'admin-ue-strength-val',    color: '#4caf50', lowColor: '#f44336' },
+            { id: 'admin-ue-morale',      valId: 'admin-ue-morale-val',      color: '#2196f3', lowColor: '#ff9800' },
+            { id: 'admin-ue-ammo',        valId: 'admin-ue-ammo-val',        color: '#ff9800', lowColor: '#f44336' },
+            { id: 'admin-ue-suppression', valId: 'admin-ue-suppression-val', color: '#f44336', lowColor: '#f44336' },
+        ];
+        sliders.forEach(s => {
+            const range = document.getElementById(s.id);
+            const valEl = document.getElementById(s.valId);
+            if (range && valEl) {
+                const updateSlider = () => {
+                    const v = parseInt(range.value);
+                    valEl.textContent = v + '%';
+                    // Color-coded value text
+                    if (s.id === 'admin-ue-suppression') {
+                        valEl.style.color = v > 50 ? '#f44336' : v > 20 ? '#ff9800' : '#4caf50';
+                    } else {
+                        valEl.style.color = v > 60 ? '#4caf50' : v > 30 ? '#ff9800' : '#f44336';
+                    }
+                    // Gradient fill on range track
+                    const pct = v;
+                    const fillColor = s.id === 'admin-ue-suppression'
+                        ? (v > 50 ? '#f44336' : v > 20 ? '#ff9800' : '#4caf50')
+                        : (v > 60 ? s.color : v > 30 ? '#ff9800' : s.lowColor);
+                    range.style.background = `linear-gradient(to right, ${fillColor} 0%, ${fillColor} ${pct}%, #1a1a2e ${pct}%, #1a1a2e 100%)`;
+                };
+                range.addEventListener('input', updateSlider);
+                range.addEventListener('change', updateSlider);
+            }
         });
-        _bind('admin-ue-close', 'click', () => {
-            // Auto-save on close
-            _saveUnitEdit();
-        });
-        const overlay = document.getElementById('admin-unit-edit-modal');
-        if (overlay) {
-            overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) {
-                    // Auto-save on backdrop click
-                    _saveUnitEdit();
-                }
-            });
+
+        // ── Live symbol preview: update on side or unit type change ──
+        const sideEl = document.getElementById('admin-ue-side');
+        const typeEl = document.getElementById('admin-ue-unit-type');
+        if (sideEl) sideEl.addEventListener('change', _updateUnitEditPreview);
+        if (typeEl) typeEl.addEventListener('change', _updateUnitEditPreview);
+
+        // ── Draggable header ──
+        _initUnitEditDrag();
+    }
+
+    function _closeUnitEdit() {
+        const modal = document.getElementById('admin-unit-edit-modal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('ue-dragged');
+            // Reset centering for next open
+            modal.style.left = '50%';
+            modal.style.top = '50%';
+            modal.style.right = '';
+            modal.style.transform = 'translate(-50%, -50%)';
         }
+    }
+
+    function _initUnitEditDrag() {
+        const win = document.getElementById('admin-unit-edit-modal');
+        const header = document.getElementById('admin-ue-header');
+        if (!win || !header) return;
+
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+
+        header.addEventListener('pointerdown', (e) => {
+            if (e.target.classList.contains('ue-float-close')) return;
+            isDragging = true;
+            const rect = win.getBoundingClientRect();
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = rect.left;
+            startTop = rect.top;
+            header.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+
+        header.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            win.classList.add('ue-dragged');
+            win.style.transform = 'none';
+            win.style.left = (startLeft + dx) + 'px';
+            win.style.top = (startTop + dy) + 'px';
+            win.style.right = 'auto';
+        });
+
+        header.addEventListener('pointerup', () => { isDragging = false; });
+    }
+
+    /** Update milsymbol preview in unit edit dialog. */
+    function _updateUnitEditPreview() {
+        const previewEl = document.getElementById('admin-ue-symbol-preview');
+        if (!previewEl) return;
+        const sideVal = document.getElementById('admin-ue-side')?.value || 'blue';
+        const typeVal = document.getElementById('admin-ue-unit-type')?.value || '';
+        const types = typeof KScenarioBuilder !== 'undefined' ? KScenarioBuilder.getUnitTypes() : {};
+        const info = types[typeVal];
+        let sidc = '';
+        if (info) {
+            sidc = sideVal === 'red' ? (info.sidc_red || '') : (info.sidc_blue || '');
+        }
+        if (sidc && window.ms) {
+            try {
+                const sym = new ms.Symbol(sidc, { size: 40 });
+                previewEl.innerHTML = sym.asSVG();
+                return;
+            } catch(e) {}
+        }
+        // Fallback
+        const emoji = sideVal === 'red' ? '🔴' : '🔵';
+        previewEl.innerHTML = `<span style="font-size:28px;">${emoji}</span>`;
+    }
+
+    /** Pick unit position on map (hide modal, click map, restore modal). */
+    function _pickUnitPositionOnMap() {
+        const map = KMap.getMap();
+        if (!map) return;
+        const modal = document.getElementById('admin-unit-edit-modal');
+        if (!modal) return;
+
+        // Temporarily hide the edit dialog
+        modal.style.opacity = '0.3';
+        modal.style.pointerEvents = 'none';
+        map.getContainer().classList.add('pick-mode-active');
+
+        // Banner
+        const banner = document.createElement('div');
+        banner.className = 'pick-mode-banner';
+        banner.id = 'ue-pick-banner';
+        banner.textContent = '🖱 Click map to set unit position — ESC to cancel';
+        document.body.appendChild(banner);
+
+        const _cancel = () => {
+            modal.style.opacity = '';
+            modal.style.pointerEvents = '';
+            map.getContainer().classList.remove('pick-mode-active');
+            const b = document.getElementById('ue-pick-banner');
+            if (b) b.remove();
+            map.off('click', _onClick);
+            document.removeEventListener('keydown', _onKey);
+        };
+
+        const _onClick = (e) => {
+            _setVal('admin-ue-lat', e.latlng.lat.toFixed(6));
+            _setVal('admin-ue-lon', e.latlng.lng.toFixed(6));
+            _cancel();
+        };
+
+        const _onKey = (e) => {
+            if (e.key === 'Escape') _cancel();
+        };
+
+        map.once('click', _onClick);
+        document.addEventListener('keydown', _onKey, { once: true });
+    }
+
+    /** Helper: trigger range slider visual update (after setting value programmatically). */
+    function _fireRangeUpdate(id) {
+        const el = document.getElementById(id);
+        if (el) el.dispatchEvent(new Event('input'));
     }
 
     // ── Session Context Update ───────────────────────
@@ -3071,6 +3285,16 @@ const KAdmin = (() => {
     function _initUnitTypes() {
         _bind('admin-add-unit-type', 'click', _addUnitType);
         _bind('admin-reset-unit-types', 'click', _resetUnitTypes);
+        _bind('admin-utype-save', 'click', _saveUnitTypeEdit);
+        _bind('admin-utype-cancel', 'click', _closeUnitTypeEdit);
+        _bind('admin-utype-close', 'click', _closeUnitTypeEdit);
+        _initUnitTypeDrag();
+
+        // Live preview: update on any SIDC or stats input change
+        ['utype-sidc-blue', 'utype-sidc-red', 'utype-label', 'utype-det', 'utype-fire', 'utype-speed', 'utype-personnel'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', _updateUnitTypePreview);
+        });
     }
 
     function _renderUnitTypes() {
@@ -3116,60 +3340,216 @@ const KAdmin = (() => {
         el.innerHTML = html;
     }
 
+    let _utypeEditingKey = null;  // null = adding new, string = editing existing
+
     function _addUnitType() {
-        const key = prompt('Unit type key (e.g. "heavy_mortar"):');
-        if (!key || !key.trim()) return;
-        const label = prompt('Display label:', key);
-        if (!label) return;
-
-        const types = KScenarioBuilder.getUnitTypes();
-        if (types[key.trim()]) { alert('Type already exists'); return; }
-
-        types[key.trim()] = {
-            label: label.trim(),
+        _utypeEditingKey = null;
+        _openUnitTypeEditor({
+            key: '',
+            label: '',
             sidc_blue: '10031000151211000000',
             sidc_red: '10061000151211000000',
             speed: 4.0,
             det: 1500,
             fire: 600,
             personnel: 20,
-        };
-        _renderUnitTypes();
-        // Refresh unit type dropdown in builder
-        try { _populateUnitTypeDropdown(); } catch(e) {}
+            isHQ: false,
+        }, 'New Unit Type');
     }
 
     function editUnitType(key) {
         const types = KScenarioBuilder.getUnitTypes();
         const info = types[key];
         if (!info) { alert('Type not found'); return; }
+        _utypeEditingKey = key;
+        _openUnitTypeEditor({ key, ...info }, `Edit: ${info.label || key}`);
+    }
 
-        const label = prompt('Label:', info.label);
-        if (label !== null) info.label = label.trim();
+    function _openUnitTypeEditor(data, title) {
+        const modal = document.getElementById('admin-utype-modal');
+        if (!modal) return;
 
-        const det = prompt('Detection range (m):', info.det);
-        if (det !== null && !isNaN(parseInt(det))) info.det = parseInt(det);
+        // Set title
+        const titleEl = document.getElementById('admin-utype-title');
+        if (titleEl) titleEl.textContent = `✏ ${title}`;
 
-        const fire = prompt('Fire range (m):', info.fire);
-        if (fire !== null && !isNaN(parseInt(fire))) info.fire = parseInt(fire);
+        // Populate fields
+        _setVal('utype-key', data.key || '');
+        _setVal('utype-label', data.label || '');
+        _setVal('utype-det', data.det || 1500);
+        _setVal('utype-fire', data.fire || 600);
+        _setVal('utype-speed', data.speed || 4.0);
+        _setVal('utype-personnel', data.personnel || 30);
+        _setVal('utype-sidc-blue', data.sidc_blue || '');
+        _setVal('utype-sidc-red', data.sidc_red || '');
+        const hqEl = document.getElementById('utype-is-hq');
+        if (hqEl) hqEl.checked = !!data.isHQ;
 
-        const speed = prompt('Speed (m/s):', info.speed);
-        if (speed !== null && !isNaN(parseFloat(speed))) info.speed = parseFloat(speed);
+        // Key field: editable only when adding new
+        const keyEl = document.getElementById('utype-key');
+        if (keyEl) {
+            keyEl.readOnly = _utypeEditingKey !== null;
+            keyEl.style.opacity = _utypeEditingKey !== null ? '0.6' : '1';
+        }
 
-        const personnel = prompt('Personnel:', info.personnel);
-        if (personnel !== null && !isNaN(parseInt(personnel))) info.personnel = parseInt(personnel);
+        // Clear status
+        const statusEl = document.getElementById('utype-status');
+        if (statusEl) { statusEl.textContent = ''; statusEl.className = 'ue-status'; }
 
-        const sidc = prompt('SIDC (Blue):', info.sidc_blue);
-        if (sidc !== null && sidc.trim().length === 20) info.sidc_blue = sidc.trim();
+        // Show modal
+        modal.style.display = 'flex';
 
-        const sidcRed = prompt('SIDC (Red):', info.sidc_red);
-        if (sidcRed !== null && sidcRed.trim().length === 20) info.sidc_red = sidcRed.trim();
+        // Update preview
+        _updateUnitTypePreview();
+    }
 
-        const isHQ = confirm('Is this an HQ unit type?');
-        info.isHQ = isHQ;
+    function _closeUnitTypeEdit() {
+        const modal = document.getElementById('admin-utype-modal');
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('ue-dragged');
+            modal.style.left = '50%';
+            modal.style.top = '50%';
+            modal.style.right = '';
+            modal.style.transform = 'translate(-50%, -50%)';
+        }
+        _utypeEditingKey = null;
+    }
+
+    function _saveUnitTypeEdit() {
+        const key = (document.getElementById('utype-key')?.value || '').trim();
+        const label = (document.getElementById('utype-label')?.value || '').trim();
+        const det = parseInt(document.getElementById('utype-det')?.value) || 1500;
+        const fire = parseInt(document.getElementById('utype-fire')?.value) || 600;
+        const speed = parseFloat(document.getElementById('utype-speed')?.value) || 4.0;
+        const personnel = parseInt(document.getElementById('utype-personnel')?.value) || 30;
+        const sidcBlue = (document.getElementById('utype-sidc-blue')?.value || '').trim();
+        const sidcRed = (document.getElementById('utype-sidc-red')?.value || '').trim();
+        const isHQ = document.getElementById('utype-is-hq')?.checked || false;
+        const statusEl = document.getElementById('utype-status');
+
+        // Validate
+        if (!key) {
+            if (statusEl) { statusEl.textContent = '❌ Key is required'; statusEl.className = 'ue-status admin-error'; }
+            return;
+        }
+        if (!label) {
+            if (statusEl) { statusEl.textContent = '❌ Display name is required'; statusEl.className = 'ue-status admin-error'; }
+            return;
+        }
+        if (sidcBlue && sidcBlue.length !== 20) {
+            if (statusEl) { statusEl.textContent = '❌ Blue SIDC must be exactly 20 characters'; statusEl.className = 'ue-status admin-error'; }
+            return;
+        }
+        if (sidcRed && sidcRed.length !== 20) {
+            if (statusEl) { statusEl.textContent = '❌ Red SIDC must be exactly 20 characters'; statusEl.className = 'ue-status admin-error'; }
+            return;
+        }
+
+        const types = KScenarioBuilder.getUnitTypes();
+
+        // Check for duplicate key when adding new
+        if (_utypeEditingKey === null && types[key]) {
+            if (statusEl) { statusEl.textContent = '❌ Type key already exists'; statusEl.className = 'ue-status admin-error'; }
+            return;
+        }
+
+        // Save
+        types[key] = {
+            label,
+            sidc_blue: sidcBlue,
+            sidc_red: sidcRed,
+            speed,
+            det,
+            fire,
+            personnel,
+            isHQ,
+        };
 
         _renderUnitTypes();
         try { _populateUnitTypeDropdown(); } catch(e) {}
+        _closeUnitTypeEdit();
+    }
+
+    function _updateUnitTypePreview() {
+        const sidcBlue = (document.getElementById('utype-sidc-blue')?.value || '').trim();
+        const sidcRed = (document.getElementById('utype-sidc-red')?.value || '').trim();
+        const det = document.getElementById('utype-det')?.value || '0';
+        const fire = document.getElementById('utype-fire')?.value || '0';
+        const speed = document.getElementById('utype-speed')?.value || '0';
+        const personnel = document.getElementById('utype-personnel')?.value || '0';
+
+        // Blue preview
+        const blueBox = document.getElementById('utype-preview-blue');
+        const blueSidcText = document.getElementById('utype-preview-blue-sidc');
+        if (blueBox) {
+            if (sidcBlue.length === 20 && window.ms) {
+                try {
+                    blueBox.innerHTML = new ms.Symbol(sidcBlue, { size: 48 }).asSVG();
+                } catch(e) { blueBox.innerHTML = '<span style="font-size:32px;">🔵</span>'; }
+            } else {
+                blueBox.innerHTML = '<span style="font-size:32px;">🔵</span>';
+            }
+        }
+        if (blueSidcText) blueSidcText.textContent = sidcBlue || '—';
+
+        // Red preview
+        const redBox = document.getElementById('utype-preview-red');
+        const redSidcText = document.getElementById('utype-preview-red-sidc');
+        if (redBox) {
+            if (sidcRed.length === 20 && window.ms) {
+                try {
+                    redBox.innerHTML = new ms.Symbol(sidcRed, { size: 48 }).asSVG();
+                } catch(e) { redBox.innerHTML = '<span style="font-size:32px;">🔴</span>'; }
+            } else {
+                redBox.innerHTML = '<span style="font-size:32px;">🔴</span>';
+            }
+        }
+        if (redSidcText) redSidcText.textContent = sidcRed || '—';
+
+        // Stats preview
+        const statsEl = document.getElementById('utype-preview-stats');
+        if (statsEl) {
+            statsEl.innerHTML = `
+                <div class="utype-stat-line"><span>👁 Detection</span><span class="utype-stat-val">${det}m</span></div>
+                <div class="utype-stat-line"><span>🎯 Fire Range</span><span class="utype-stat-val">${fire}m</span></div>
+                <div class="utype-stat-line"><span>⚡ Speed</span><span class="utype-stat-val">${speed} m/s</span></div>
+                <div class="utype-stat-line"><span>👥 Personnel</span><span class="utype-stat-val">${personnel}</span></div>`;
+        }
+    }
+
+    function _initUnitTypeDrag() {
+        const win = document.getElementById('admin-utype-modal');
+        const header = document.getElementById('admin-utype-header');
+        if (!win || !header) return;
+
+        let isDragging = false;
+        let startX, startY, startLeft, startTop;
+
+        header.addEventListener('pointerdown', (e) => {
+            if (e.target.classList.contains('ue-float-close')) return;
+            isDragging = true;
+            const rect = win.getBoundingClientRect();
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = rect.left;
+            startTop = rect.top;
+            header.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        });
+
+        header.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            win.classList.add('ue-dragged');
+            win.style.transform = 'none';
+            win.style.left = (startLeft + dx) + 'px';
+            win.style.top = (startTop + dy) + 'px';
+            win.style.right = 'auto';
+        });
+
+        header.addEventListener('pointerup', () => { isDragging = false; });
     }
 
     function removeUnitType(key) {
