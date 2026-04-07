@@ -401,6 +401,15 @@ const KUnits = (() => {
 
                 _map.removeLayer(_selectRect);
                 _selectRect = null;
+            } else if (_selectStartPt && !_isSelecting && selectedUnitIds.size > 0) {
+                // Simple click on empty map space (no drag) → deselect all
+                const dx = e.clientX - _selectStartPt.x;
+                const dy = e.clientY - _selectStartPt.y;
+                if (Math.abs(dx) < SELECT_THRESHOLD && Math.abs(dy) < SELECT_THRESHOLD) {
+                    selectedUnitIds.clear();
+                    _drawSelectionOverlays();
+                    _updateSelectionUI();
+                }
             }
 
             _selectStartPt = null;

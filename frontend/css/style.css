@@ -98,7 +98,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     color: #e0f0ff;
 }
 
-/* ── Orders Complete Button (topbar) ─────────── */
+/* ── Execute Orders Button (topbar) ────────── */
 .topbar-orders-complete-btn {
     padding: 4px 14px;
     font-size: 12px;
@@ -111,6 +111,8 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     transition: all 0.2s;
     white-space: nowrap;
     letter-spacing: 0.4px;
+    display: inline-flex;
+    align-items: center;
 }
 .topbar-orders-complete-btn:hover {
     background: rgba(46, 125, 50, 0.6);
