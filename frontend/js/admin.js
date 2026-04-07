@@ -223,6 +223,12 @@ const KAdmin = (() => {
         // Toggle visibility
         if (win.style.display === 'none' || !win.style.display) {
             win.style.display = 'flex';
+            // Apply locked class if not yet unlocked
+            if (!_adminUnlocked) {
+                win.classList.add('admin-locked');
+            } else {
+                win.classList.remove('admin-locked');
+            }
             // Re-enable admin drag when admin window is reopened
             if (_adminUnlocked) {
                 try { KUnits.setAdminDrag(true); } catch(e) {}
@@ -236,7 +242,10 @@ const KAdmin = (() => {
     /** Close admin window — disable god view and admin drag, then redraw normal view. */
     async function _closeAdminWindow() {
         const win = document.getElementById('admin-window');
-        if (win) win.style.display = 'none';
+        if (win) {
+            win.style.display = 'none';
+            win.classList.add('admin-locked');
+        }
 
         // Lock admin panel when window is closed
         _adminUnlocked = false;
@@ -309,6 +318,9 @@ const KAdmin = (() => {
                 if (gate) gate.style.display = 'none';
                 if (content) content.style.display = 'block';
                 pw.value = '';
+                // Remove locked class — expand to full size
+                const win = document.getElementById('admin-window');
+                if (win) win.classList.remove('admin-locked');
                 // Show admin topbar button
                 const topbarBtn = document.getElementById('admin-topbar-btn');
                 if (topbarBtn) topbarBtn.style.display = '';
@@ -2459,6 +2471,10 @@ const KAdmin = (() => {
         return false;
     }
 
+    // ── Drag-and-drop state for CoC tree ──────────
+    let _cocDragUnitId = null;
+    let _cocDragSide = null;
+
     function _renderCoCTree(units, targetElId, editable, allUnits) {
         const el = document.getElementById(targetElId);
         if (!el) return;
@@ -2494,6 +2510,11 @@ const KAdmin = (() => {
         roots.sort(sortFn);
         Object.values(unitMap).forEach(u => u.children.sort(sortFn));
 
+        // Determine if the current user can modify hierarchy
+        const canModifyHierarchy = _adminUnlocked || (
+            KSessionUI.getSide() !== 'observer' && KSessionUI.getRole() !== 'observer'
+        );
+
         // Render tree
         let html = '';
 
@@ -2511,6 +2532,11 @@ const KAdmin = (() => {
             </div>`;
         }
 
+        // Drag hint for hierarchy
+        if (canModifyHierarchy) {
+            html += `<div class="coc-drag-hint">💡 Drag units onto others to set parent. Use ⬆⬇ to reorder.</div>`;
+        }
+
         html += '<div class="coc-tree">';
 
         const blueRoots = roots.filter(u => u.side === 'blue');
@@ -2518,18 +2544,19 @@ const KAdmin = (() => {
 
         if (blueRoots.length > 0) {
             html += '<div class="coc-side-header" style="color:#4fc3f7;">BLUE FORCE</div>';
-            blueRoots.forEach(u => { html += _renderCoCNode(u, 0, units, editable, allUnitMap); });
+            blueRoots.forEach(u => { html += _renderCoCNode(u, 0, units, editable, allUnitMap, canModifyHierarchy); });
         }
         if (redRoots.length > 0) {
             html += '<div class="coc-side-header" style="color:#ef5350;margin-top:8px;">RED FORCE</div>';
-            redRoots.forEach(u => { html += _renderCoCNode(u, 0, units, editable, allUnitMap); });
+            redRoots.forEach(u => { html += _renderCoCNode(u, 0, units, editable, allUnitMap, canModifyHierarchy); });
         }
 
         html += '</div>';
         el.innerHTML = html;
 
-        // Bind admin assign/unassign (hierarchy structure) buttons
+        // ── Bind hierarchy structure buttons ──────────
         if (editable) {
+            // Parent picker button (⬆ assign to parent)
             el.querySelectorAll('.coc-assign-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -2538,11 +2565,47 @@ const KAdmin = (() => {
                 });
             });
 
+            // Detach from parent (✕)
             el.querySelectorAll('.coc-unassign-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const unitId = btn.dataset.unitId;
-                    _setUnitParent(unitId, null);
+                    _setCoCParent(unitId, null);
+                });
+            });
+
+            // Move up within siblings
+            el.querySelectorAll('.coc-move-up-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    // Move up is conceptual reordering — we'll detach from parent to make it a root
+                    // (since ordering is by name, true reorder would need a sort_order field;
+                    //  instead, "move up" changes parent to grandparent)
+                    const unitId = btn.dataset.unitId;
+                    const unit = allUnitMap[unitId];
+                    if (unit && unit.parent_unit_id) {
+                        const parent = allUnitMap[unit.parent_unit_id];
+                        const grandparentId = parent ? parent.parent_unit_id : null;
+                        _setCoCParent(unitId, grandparentId || null);
+                    }
+                });
+            });
+
+            // Move down = become child of the sibling above
+            el.querySelectorAll('.coc-move-down-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const unitId = btn.dataset.unitId;
+                    const unit = allUnitMap[unitId];
+                    if (!unit) return;
+                    // Find siblings (same parent, same side)
+                    const siblings = units.filter(u =>
+                        u.id !== unitId && u.side === unit.side && u.parent_unit_id === unit.parent_unit_id
+                    );
+                    if (siblings.length > 0) {
+                        // Pick first sibling as new parent (nearest in hierarchy)
+                        _showQuickParentPicker(unitId, siblings, allUnitMap);
+                    }
                 });
             });
         }
@@ -2569,6 +2632,11 @@ const KAdmin = (() => {
                 }
             });
         });
+
+        // ── Drag-and-drop for hierarchy ──────────────
+        if (canModifyHierarchy) {
+            _bindCoCDragAndDrop(el, allUnitMap, units);
+        }
 
         // Bind bulk action bar (admin only)
         if (_adminUnlocked) {
@@ -2603,7 +2671,125 @@ const KAdmin = (() => {
         }
     }
 
-    function _renderCoCNode(unit, depth, allUnits, editable, allUnitMap) {
+    /** Bind drag-and-drop events on CoC tree nodes. */
+    function _bindCoCDragAndDrop(container, allUnitMap, allUnits) {
+        const nodes = container.querySelectorAll('.coc-node[draggable="true"]');
+
+        nodes.forEach(node => {
+            node.addEventListener('dragstart', (e) => {
+                _cocDragUnitId = node.dataset.unitId;
+                _cocDragSide = node.dataset.side;
+                node.classList.add('coc-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', _cocDragUnitId);
+            });
+
+            node.addEventListener('dragend', () => {
+                _cocDragUnitId = null;
+                _cocDragSide = null;
+                node.classList.remove('coc-dragging');
+                // Clear all drop targets
+                container.querySelectorAll('.coc-drop-target, .coc-drop-target-above, .coc-drop-target-invalid').forEach(n => {
+                    n.classList.remove('coc-drop-target', 'coc-drop-target-above', 'coc-drop-target-invalid');
+                });
+            });
+
+            node.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if (!_cocDragUnitId || _cocDragUnitId === node.dataset.unitId) return;
+                if (_cocDragSide !== node.dataset.side) {
+                    node.classList.add('coc-drop-target-invalid');
+                    e.dataTransfer.dropEffect = 'none';
+                    return;
+                }
+                e.dataTransfer.dropEffect = 'move';
+
+                // Determine drop zone: top 25% = "above" (become sibling), bottom 75% = "inside" (become child)
+                const rect = node.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                const ratio = y / rect.height;
+                node.classList.remove('coc-drop-target', 'coc-drop-target-above');
+                if (ratio < 0.3) {
+                    node.classList.add('coc-drop-target-above');
+                } else {
+                    node.classList.add('coc-drop-target');
+                }
+            });
+
+            node.addEventListener('dragleave', () => {
+                node.classList.remove('coc-drop-target', 'coc-drop-target-above', 'coc-drop-target-invalid');
+            });
+
+            node.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                node.classList.remove('coc-drop-target', 'coc-drop-target-above', 'coc-drop-target-invalid');
+                if (!_cocDragUnitId || _cocDragUnitId === node.dataset.unitId) return;
+                if (_cocDragSide !== node.dataset.side) return;
+
+                const targetUnitId = node.dataset.unitId;
+                const targetUnit = allUnitMap[targetUnitId];
+
+                // Determine drop zone
+                const rect = node.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                const ratio = y / rect.height;
+
+                if (ratio < 0.3 && targetUnit) {
+                    // Drop above = become sibling (share same parent as target)
+                    _setCoCParent(_cocDragUnitId, targetUnit.parent_unit_id || null);
+                } else {
+                    // Drop inside = become child of target
+                    _setCoCParent(_cocDragUnitId, targetUnitId);
+                }
+            });
+        });
+
+        // Allow dropping on the tree container itself (to make root-level)
+        container.addEventListener('dragover', (e) => {
+            if (e.target === container || e.target.classList.contains('coc-tree') || e.target.classList.contains('coc-side-header')) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            }
+        });
+        container.addEventListener('drop', (e) => {
+            if (e.target === container || e.target.classList.contains('coc-tree') || e.target.classList.contains('coc-side-header')) {
+                e.preventDefault();
+                if (_cocDragUnitId) {
+                    _setCoCParent(_cocDragUnitId, null);
+                }
+            }
+        });
+    }
+
+    /** Quick parent picker inline — shows a small dropdown for "move down" action. */
+    function _showQuickParentPicker(unitId, candidates, allUnitMap) {
+        if (candidates.length === 1) {
+            // Only one candidate — just set it
+            _setCoCParent(unitId, candidates[0].id);
+            return;
+        }
+        // Use the existing parent picker modal
+        _cocPickerPendingUnitId = unitId;
+        const label = document.getElementById('admin-coc-picker-unit-label');
+        const unit = allUnitMap[unitId];
+        if (label) label.textContent = `Make "${unit ? unit.name : unitId}" subordinate to:`;
+        const sel = document.getElementById('admin-coc-picker-select');
+        if (sel) {
+            sel.innerHTML = '';
+            candidates.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = `${c.name} (${c.unit_type})`;
+                sel.appendChild(opt);
+            });
+            sel.value = candidates[0].id;
+        }
+        const modal = document.getElementById('admin-coc-picker-modal');
+        if (modal) modal.style.display = 'flex';
+    }
+
+    function _renderCoCNode(unit, depth, allUnits, editable, allUnitMap, canModifyHierarchy) {
         const indent = depth * 20;
         const sideColor = unit.side === 'blue' ? '#4fc3f7' : '#ef5350';
         const strPct = unit.strength != null ? (unit.strength * 100).toFixed(0) + '%' : '?';
@@ -2642,7 +2828,11 @@ const KAdmin = (() => {
             ? `<input type="checkbox" class="coc-bulk-cb" data-unit-id="${unit.id}" data-side="${unit.side}" style="cursor:pointer;flex-shrink:0;margin-right:3px;" />`
             : '';
 
-        let html = `<div class="coc-node" style="margin-left:${indent}px;" title="${tooltip}">
+        // Can this user edit this unit's hierarchy?
+        const canEdit = _adminUnlocked || (canModifyHierarchy && _userCanAssign(unit, allUnitMap));
+        const isDraggable = canEdit ? 'true' : 'false';
+
+        let html = `<div class="coc-node${canEdit ? ' coc-draggable' : ''}" style="margin-left:${indent}px;" title="${tooltip}" draggable="${isDraggable}" data-unit-id="${unit.id}" data-side="${unit.side}">
             ${bulkCb}
             <span class="coc-expand">${expandIcon}</span>
             <span class="coc-connector" style="background:${sideColor};"></span>
@@ -2658,11 +2848,25 @@ const KAdmin = (() => {
             html += `<button class="coc-user-assign-btn" data-unit-id="${unit.id}" title="Assign a commander to this unit"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;"><circle cx="8" cy="5" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M3 14c0-3 2.5-5 5-5s5 2 5 5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M11 3l2-1.5v3L11 3z" fill="currentColor" opacity="0.7"/></svg></button>`;
         }
 
-        // Admin-only: parent hierarchy buttons
-        if (editable && _adminUnlocked) {
-            html += `<button class="coc-assign-btn" data-unit-id="${unit.id}" title="Assign to a parent commander">⬆</button>`;
+        // Hierarchy adjustment buttons: shown for authorized users
+        if (editable && canEdit) {
+            // Move up (detach from parent → become sibling of parent = go to grandparent level)
             if (unit.parent_unit_id) {
-                html += `<button class="coc-unassign-btn" data-unit-id="${unit.id}" title="Remove from parent chain of command">✕</button>`;
+                html += `<button class="coc-move-up-btn coc-hier-btn" data-unit-id="${unit.id}" title="Move up in hierarchy (detach from parent)">
+                    <svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 2L2 6h3v4h2V6h3z" fill="currentColor"/></svg>
+                </button>`;
+            }
+            // Move down (become child of a sibling)
+            html += `<button class="coc-move-down-btn coc-hier-btn" data-unit-id="${unit.id}" title="Move down (become subordinate of a sibling)">
+                <svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 10L2 6h3V2h2v4h3z" fill="currentColor"/></svg>
+            </button>`;
+            // Parent picker
+            html += `<button class="coc-assign-btn coc-hier-btn" data-unit-id="${unit.id}" title="Assign to a specific parent unit">
+                <svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 1v4H2l4 4 4-4H7V1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="2" y1="11" x2="10" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>`;
+            // Detach from parent
+            if (unit.parent_unit_id) {
+                html += `<button class="coc-unassign-btn coc-hier-btn" data-unit-id="${unit.id}" title="Detach from parent (make independent)">✕</button>`;
             }
         }
 
@@ -2670,7 +2874,7 @@ const KAdmin = (() => {
 
         if (hasChildren) {
             unit.children.forEach(child => {
-                html += _renderCoCNode(child, depth + 1, allUnits, editable, allUnitMap);
+                html += _renderCoCNode(child, depth + 1, allUnits, editable, allUnitMap, canModifyHierarchy);
             });
         }
         return html;
@@ -3026,24 +3230,41 @@ const KAdmin = (() => {
         }
     }
 
-    async function _setUnitParent(unitId, parentId) {
-        const token = _getToken(), sid = _getAdminSessionId();
-        if (!token || !sid) return;
+    async function _setCoCParent(unitId, parentId) {
+        const token = _getToken();
+        if (!token) return;
+
+        // Use admin endpoint when admin panel is open, otherwise use public endpoint
+        const sid = _adminUnlocked
+            ? (_getAdminSessionId() || _getUserSessionId())
+            : (_getUserSessionId() || _getAdminSessionId());
+        if (!sid) return;
 
         try {
-            const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}/parent`, {
+            const endpoint = _adminUnlocked
+                ? `/api/admin/sessions/${sid}/units/${unitId}/parent`
+                : `/api/sessions/${sid}/units/${unitId}/parent`;
+            const resp = await fetch(endpoint, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                 body: JSON.stringify({ parent_unit_id: parentId }),
             });
             if (resp.ok) {
+                // Refresh both CoC trees
                 _loadChainOfCommand();
                 loadPublicCoC();
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Failed');
+                KGameLog.addEntry(`Hierarchy change failed: ${d.detail || 'unknown error'}`, 'error');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) {
+            KGameLog.addEntry(`Hierarchy change failed: ${err.message}`, 'error');
+        }
+    }
+
+    // Keep backward-compatible alias for admin-specific calls
+    async function _setUnitParent(unitId, parentId) {
+        return _setCoCParent(unitId, parentId);
     }
 
     // ══════════════════════════════════════════════════

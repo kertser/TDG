@@ -1130,7 +1130,7 @@ if unit.ammo <= 0:
 
 ## Appendix A: Implementation Status
 
-> Last updated: 2026-04-07
+> Last updated: 2026-04-08
 
 ### Phases Completed / In Progress
 
@@ -1138,10 +1138,10 @@ if unit.ammo <= 0:
 |---|---|---|
 | **Phase 1: Project Skeleton** | ✅ Complete | FastAPI app, DB, models, migrations, Docker, config |
 | **Phase 2: Grid / Snail System** | ✅ Complete | GridService, API endpoints, frontend rendering |
-| **Phase 3: Session & User Management** | ✅ Complete | Auth (JWT), session CRUD, join, start/pause/tick, participants |
+| **Phase 3: Session & User Management** | ✅ Complete | Auth (JWT+bcrypt), session CRUD, join, start/pause/tick, participants |
 | **Phase 4: Map — Units, Fog of War** | ✅ Complete | milsymbol rendering, fog-of-war via PostGIS `ST_DWithin`, detection range filtering |
 | **Phase 5: Collaborative Overlays** | ✅ Complete | Drawing tools (arrow, polyline, rect, marker, ellipse, measure), WebSocket sync, overlay context menu (color/width/label/delete) |
-| **Phase 6: Order Entry** | ⚠ Partial | Text order submission, parsed_order for direct task (move), unit selection UI. LLM parsing/intent not yet wired. |
+| **Phase 6: Order Entry** | ⚠ Partial | Text order submission, bottom command panel with radio chat, parsed_order for direct task (move), unit selection UI. LLM parsing/intent not yet wired. |
 | **Phase 7: Rules Engine** | ✅ Complete | Tick processing: movement, detection, combat, morale, comms, suppression, ammo, contacts, events |
 | **Phase 8: Red AI** | ❌ Not started | RedAgent model exists, but AI decision loop not implemented |
 | **Phase 9: Reports, Events, Log** | ⚠ Partial | Events endpoint + frontend panel. Reports endpoint exists. AI-generated reports not wired. |
@@ -1156,11 +1156,11 @@ if unit.ammo <= 0:
 | **Scenario Builder** | `scenario_builder.js`, `admin.js` | Interactive map-click unit placement, grid configuration, save/load scenarios. **Resync**: saving a scenario auto-resyncs units/grid in the current session via `POST /api/admin/sessions/{id}/resync-units`. |
 | **God View** | `admin.js`, `admin.py` | Admin toggle to see all units from both sides (bypasses fog-of-war). |
 | **Unit Dashboard** | `admin.js` | Admin table of all units with focus, edit, delete, split, merge buttons. |
-| **Chain of Command (Public CoC)** | `admin.js` (sidebar CoC tab) | Sidebar CoC tree visible to all players. Commanders can reassign subordinate units. |
-| **Chain of Command (Admin CoC)** | `admin.js` (admin CoC sub-tab) | Admin-only full hierarchy editor with parent picker and bulk assign/unassign. |
+| **Chain of Command (Public CoC)** | `admin.js` (sidebar CoC tab) | Sidebar CoC tree visible to all players. Commanders can reassign subordinate units. **Drag-and-drop** hierarchy adjustment: drag units onto others to reparent, drag to header to detach. **Button hierarchy**: ⬆ move up (to grandparent), ⬇ move down (become child of sibling), assign to specific parent, ✕ detach. All permission-aware — buttons/drag only for units the user has authority over. |
+| **Chain of Command (Admin CoC)** | `admin.js` (admin CoC sub-tab) | Admin-only full hierarchy editor with parent picker and bulk assign/unassign. Same drag-and-drop + buttons as public CoC. |
 | **Unit Split / Merge** | `units.py`, `admin.py`, `units.js`, `admin.js` | Split: auto-naming, echelon drop. Merge: combine strength, echelon up, re-parent children. Admin merge has no distance restriction. |
 | **Unit Formations** | `units.py`, `units.js` | 10 formation types (column, line, wedge, vee, etc.), set via context menu. |
-| **Unit Movement** | `units.py`, `units.js`, `engine/movement.py` | Set move target via map click, 2 speed modes (slow/fast), unit-type-specific base speeds (24 types), movement arrows on map, tick-based movement. |
+| **Unit Movement** | `units.py`, `units.js`, `engine/movement.py` | Set move target via map click, 2 speed modes (slow/fast), unit-type-specific base speeds (36 types), movement arrows on map, tick-based movement. |
 | **Unit-Type-Specific Speeds** | `units.py`, `units.js` | Each unit type has unique slow/fast base speeds (m/s). Infantry foot ~1-3 m/s, tanks ~2.5-12 m/s, recon ~2-4 m/s. Frontend shows km/h in move picker and speed icon (🐢/⚡) in status badge, task line, and tooltip. Backend table: `UNIT_TYPE_SPEEDS`. |
 | **Move Target Snail Path** | `units.py`, `units.js`, `grid_service.py` | Move commands resolve target coordinates to snail grid reference (e.g. "C9-2-8") via GridService. Displayed in unit card task line, tooltip, and gamelog. Frontend fallback resolves via grid API if backend didn't provide it. |
 | **Rubber-band Selection** | `units.js` | Left-drag on map for mass unit selection. Shift+click for additive selection. |
@@ -1182,6 +1182,13 @@ if unit.ammo <= 0:
 | **LOS Viewshed (Line-of-Sight)** | `los_service.py`, `units.py`, `detection.py`, `tick.py`, `units.js`, `app.js` | Replaces circular detection ranges with terrain-aware visibility polygons. Backend `LOSService` casts 72 rays, uses "maximum elevation angle" algorithm with terrain obstacle heights (forest=12m, urban=10m, orchard=5m, scrub=2m) and visibility absorption. API endpoint `GET /units/{id}/viewshed` returns GeoJSON polygon. Detection engine uses `has_los()` for unit-to-unit LOS checks (with matching visibility absorption). Frontend fetches viewshed on hover/select, renders as `L.polygon` instead of `L.circle`, with cache invalidated on tick change. Falls back to circle when no elevation data. **Unit-type-specific eye heights**: observation_post=8m (elevated optics), tanks=3m, recon=3m, infantry=2m (default). Higher eye height lets units see over obstacles (forests, buildings). Applied in viewshed computation, tick detection, and fog-of-war LOS filter. **Bugfixes applied:** (1) `has_los()` now includes visibility absorption budget (consistent with viewshed), (2) `_cast_ray` no longer terminates prematurely after 3 hidden steps (valleys), tracks farthest visible point correctly, (3) detection probability includes target terrain concealment factor, (4) visibility service `_filter_by_los` applies terrain/height range modifiers (matches tick engine), (5) contact upsert matches by `target_unit_id` for accurate multi-contact tracking. |
 | **Unit Type Editor** | `admin.js`, `index.html`, `style.css` | Floating draggable window for editing unit type definitions. Two-column layout: form (Identity: key, display name, HQ checkbox; Combat Stats: detection, fire range, speed, personnel in 2×2 grid; Symbol Codes: Blue/Red SIDC) + live preview panel (Blue/Red milsymbol renders, stats summary). Replaces sequential prompt() dialogs. |
 | **Session Wizard Terrain Step** | `admin.js`, `index.html` | 4-step session creation wizard: Setup → Participants → Terrain → Done. Terrain step (step 3) runs auto-analysis (OSM + elevation) with SSE progress bar, depth selector, skip-elevation toggle, and skip option. Auto-advances to Done on success. Session Setup Steps guide updated to include terrain analysis. |
+| **Tactical Map Objects** | `map_objects.js` (FE), `map_objects.py` (API), `engine/map_objects.py` | Static and dynamic battlefield objects: barbed wire (polyline), minefields (ellipse areas), entrenchments (polyline), roadblocks (point), pillboxes (point), bridges (point), command posts (point), fuel depots (point), supply caches (point), observation towers (point), field hospitals (point), airfields (area, realistic runway SVG). NATO-style tactical markers. Admin-only placement/deletion. Objects affect engine: minefields damage/slow units, barbed wire slows, entrenchments add protection, etc. Draggable when admin panel is open. |
+| **Engineering Units** | `unit_types.json`, `units.py`, `engine/engineering.py` | 12 engineering unit types: engineer platoon/section, combat engineer platoon/section/team, mine layer section/team, obstacle breacher team/section, engineer recon team, construction engineer platoon/section, AVLB vehicle/section. Each has specific capabilities (mine clearance, mine laying, breach, bridge deploy). Interact with tactical objects (clear minefields, breach barbed wire, deploy bridges). |
+| **SIDC Code Audit & Fix** | `unit_types.json` | Corrected all 36 unit type SIDC codes to proper MIL-STD-2525D: fixed echelon indicators (team=11, squad=12, section=13), added mechanized infantry entity subtype (121102), proper mortar entity (130200), anti-tank subtype (121104), sniper subtype (121106), observation post subtype (121302), differentiated all engineer subtypes (01-06), HQ entity (110000), logistics entity (160700). |
+| **Commander Hierarchy Management** | `units.py`, `admin.js`, `style.css` | Public API endpoint `PUT /sessions/{id}/units/{unit_id}/parent` for commanders to reparent units with authority checks. Drag-and-drop in CoC tree: drag onto unit = become child, drag to top = become sibling, drag to empty = detach. Move-up/move-down buttons visible on hover. Permission-aware: buttons/drag only for authorized units. Cycle detection prevents circular hierarchies. |
+| **Bottom Command Panel** | `index.html`, `session_ui.js`, `style.css` | Map-centered bottom panel with two tabs: Orders (text input for unit commands) and Radio (tactical radio chat between commanders). Auto-collapses to save map space, expands on hover/focus. Game time + author badges. |
+| **Radio Chat** | `session_ui.js`, `style.css` | Tactical radio channel between session commanders. Select recipient (all or specific commander). Messages stored and delivered to recipients. Blinking LED indicator for unread messages. Military radio styling. |
+| **Editable Unit Types Config** | `frontend/config/unit_types.json` | Unit type definitions (SIDC codes, speeds, personnel, detection/fire ranges) stored in editable JSON config file instead of hardcoded JavaScript. Loaded on startup. Admin Unit Type Editor reads/writes to this config. |
 
 ### Permission / Authority System
 
@@ -1191,18 +1198,23 @@ if unit.ammo <= 0:
 | Observers cannot submit orders | `orders.py: submit_order` — 403 if side or role is observer |
 | Observers cannot be assigned to units | `units.py: assign_unit`, `admin.py: PATCH unit` — validates target user |
 | Observers cannot assign units | `units.py: assign_unit` — 403 if caller is observer |
+| Observers cannot modify hierarchy | `units.py: set_unit_parent` — 403 if observer |
 | Side check: blue can't command red | `units.js: _canSelect` — rejects cross-side selection (bypassed when admin panel is unlocked) |
 | Side check: blue can't order red units | `orders.py: submit_order` — validates unit side matches order side |
+| Side check: can't reparent cross-side | `units.py: set_unit_parent` — validates unit and parent are same side |
 | Formation/Move/Stop require admin | `units.js: _showUnitContextMenu` — Formation, Set Move, Stop items only shown when `KAdmin.isUnlocked()` is true |
+| Tactical objects admin-only | `map_objects.js` — placement/deletion/dragging only when admin panel open |
 | Admin close locks panel | `admin.js: _closeAdminWindow` — closing admin window sets `_adminUnlocked = false`, re-shows lock gate, closes open unit context menus, deactivates scenario builder |
 | Command authority via hierarchy | `visibility_service.py: check_command_authority` — walks parent chain |
 | Implicit authority when no CoC | `visibility_service.py` — if no same-side units have assigned users, all same-side players have authority |
 | Subordinate user authority | `visibility_service.py: check_subordinate_authority` — user A has authority if target is assigned to a subordinate of A |
 | CoC tree assign buttons | `admin.js: _userCanAssign` — mirrors backend logic, includes "no CoC" fallback |
+| CoC drag-and-drop authority | `admin.js: _renderCoCNode` — draggable only for units user can manage |
+| Hierarchy cycle prevention | `units.py: set_unit_parent` — walks parent chain to detect cycles before committing |
 
 ### Authentication
 
-- **Callsign + password** authentication: Users register with a callsign and password (min 4 chars). Passwords hashed with bcrypt via `passlib.context.CryptContext`.
+- **Callsign + password** authentication: Users register with a callsign and password (min 4 chars). Passwords hashed with bcrypt.
 - **Register**: `POST /api/auth/register` — creates new user with callsign + password. Rejects duplicate callsigns (409).
 - **Login**: `POST /api/auth/login` — authenticates with callsign + password. Returns JWT token.
 - **Legacy users**: Users created before password system (or via admin panel) have NULL `password_hash`. On first login they are prompted to set a password.
@@ -1226,6 +1238,8 @@ if unit.ammo <= 0:
 5. **Side + role dual observer check**: Observer restriction checks both `participant.side == 'observer'` and `participant.role == 'observer'` to handle blue/red-side observers.
 6. **Append-only events**: Event table is never updated/deleted. Supports replay.
 7. **JSONB for flexibility**: Unit tasks, capabilities, order payloads, scenario config use JSONB columns.
+8. **Editable config over hardcode**: Unit type definitions (SIDC, speeds, personnel) in `frontend/config/unit_types.json` instead of JavaScript constants. Backend `UNIT_TYPE_SPEEDS` mirrors config for engine use.
+9. **MIL-STD-2525D SIDC compliance**: All unit SIDCs follow 20-character 2525D format with correct echelon (pos 9-10), HQ indicator (pos 8), entity/type/subtype (pos 11-16), and standard identity (pos 4: 3=Friend, 6=Hostile).
 
 ---
 
@@ -1261,15 +1275,17 @@ KShU/
 │   │   ├── report.py
 │   │   ├── red_agent.py
 │   │   ├── grid.py
-│   │   ├── terrain_cell.py        ← NEW: TerrainCell (snail_path → terrain type + modifiers)
-│   │   └── elevation_cell.py      ← NEW: ElevationCell (snail_path → height/slope/aspect)
+│   │   ├── map_object.py          ← Tactical map objects (barbed wire, mines, etc.)
+│   │   ├── chat_message.py        ← Radio chat messages between commanders
+│   │   ├── terrain_cell.py        ← TerrainCell (snail_path → terrain type + modifiers)
+│   │   └── elevation_cell.py      ← ElevationCell (snail_path → height/slope/aspect)
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py
 │   │   ├── auth.py
 │   │   ├── admin.py              ← Admin endpoints (session mgmt, god view, unit CRUD, CoC, users)
 │   │   ├── sessions.py
-│   │   ├── units.py              ← Unit endpoints (fog-of-war, assign, split/merge, move, formation)
+│   │   ├── units.py              ← Unit endpoints (fog-of-war, assign, split/merge, move, formation, parent/hierarchy)
 │   │   ├── orders.py
 │   │   ├── overlays.py
 │   │   ├── grid.py
@@ -1277,7 +1293,8 @@ KShU/
 │   │   ├── events.py
 │   │   ├── reports.py
 │   │   ├── scenarios.py
-│   │   ├── terrain.py             ← NEW: Terrain analysis + painting + elevation endpoints
+│   │   ├── map_objects.py         ← Tactical object CRUD (barbed wire, mines, entrenchments, etc.)
+│   │   ├── terrain.py             ← Terrain analysis + painting + elevation endpoints
 │   │   └── websocket.py
 │   ├── services/
 │   │   ├── __init__.py
@@ -1287,8 +1304,8 @@ KShU/
 │   │   ├── overlay_service.py
 │   │   ├── ws_manager.py
 │   │   ├── tick_scheduler.py
-│   │   ├── los_service.py        ← NEW: LOS viewshed computation (ray casting, terrain-aware)
-│   │   └── terrain_analysis/      ← NEW: Terrain intelligence package
+│   │   ├── los_service.py        ← LOS viewshed computation (ray casting, terrain-aware)
+│   │   └── terrain_analysis/      ← Terrain intelligence package
 │   │       ├── __init__.py
 │   │       ├── service.py         ← Orchestrator: analyze_grid()
 │   │       ├── osm_analyzer.py    ← OSM Overpass query + tag→terrain mapping
@@ -1310,17 +1327,22 @@ KShU/
 │   │   ├── events.py
 │   │   ├── ammo.py
 │   │   ├── suppression.py
-│   │   └── terrain.py
+│   │   ├── terrain.py
+│   │   ├── engineering.py         ← Engineering unit interactions with tactical objects
+│   │   ├── map_objects.py         ← Tactical object effects on units per tick
+│   │   └── structures.py
 │   └── tests/
 │       ├── __init__.py
 │       ├── test_grid_service.py
 │       ├── test_movement.py
 │       ├── test_detection.py
 │       ├── test_combat.py
-│       └── test_los_service.py    ← NEW: LOS viewshed + has_los tests
+│       └── test_los_service.py    ← LOS viewshed + has_los tests
 ├── frontend/
 │   ├── index.html
 │   ├── favicon.svg
+│   ├── config/
+│   │   └── unit_types.json        ← Editable unit type registry (SIDC, speeds, personnel, capabilities)
 │   ├── css/
 │   │   └── style.css
 │   └── js/
@@ -1331,23 +1353,27 @@ KShU/
 │       ├── units.js              ← Unit rendering, selection, context menu, split/merge/move/formation
 │       ├── contacts.js           ← Contact rendering (enemy detections)
 │       ├── overlays.js           ← Drawing tools (arrow, polyline, rect, marker, ellipse, measure)
+│       ├── map_objects.js        ← Tactical map objects rendering + admin placement UI
 │       ├── websocket.js          ← WebSocket client with reconnect
 │       ├── orders.js             ← Order submission panel
 │       ├── events.js             ← Events timeline panel
 │       ├── reports.js            ← Reports panel
 │       ├── gamelog.js            ← Unified game log
-│       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu
+│       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu, radio chat
 │       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
-│       ├── admin.js              ← Admin panel (~3900 lines): dashboard, CoC, wizard (4-step), god view, users, types, terrain
-│       ├── terrain.js            ← NEW: Terrain overlay rendering, legend, elevation heatmap
+│       ├── admin.js              ← Admin panel (~4300 lines): dashboard, CoC (drag-and-drop), wizard, god view, users, types, terrain
+│       ├── terrain.js            ← Terrain overlay rendering, legend, elevation heatmap
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 ├── frontend/
-│   ├── ...
 │   └── static/
 │       └── topbar-pattern.svg    ← Decorative SVG pattern for UI top bar
 └── scripts/
     ├── __init__.py
     ├── seed_scenario.py
+    ├── add_password_column.py
+    ├── set_passwords.py
+    ├── set_user_passwords.py
+    ├── verify_sidc.py            ← SIDC code verification tool
     ├── test_api_quick.py
     ├── test_flow.py
     ├── test_grid_quick.py
@@ -1356,3 +1382,42 @@ KShU/
     ├── test_viewport.py
     └── verify_system.py
 ```
+
+### SIDC Code Reference (MIL-STD-2525D 20-character format)
+
+```
+Position:  1-2  3    4    5-6  7    8    9-10  11-16    17-20
+Field:     Ver  Ctx  SI   SS   Stat HQ   Ech   Entity   Modifier
+Example:   10   0    3    10   0    0    14    121100   0000
+           │    │    │    │    │    │    │     │        │
+           │    │    │    │    │    │    │     │        └─ Sector modifiers
+           │    │    │    │    │    │    │     └─ Entity/Type/Subtype
+           │    │    │    │    │    │    └─ Echelon (11=Team, 12=Squad, 13=Section, 14=Platoon, 15=Company, 16=Bn)
+           │    │    │    │    │    └─ HQ/TF/FD (0=None, 2=HQ, 4=TF, 6=TF HQ)
+           │    │    │    │    └─ Status (0=Present, 1=Planned)
+           │    │    │    └─ Symbol Set (10=Land Unit)
+           │    │    └─ Standard Identity (3=Friend/Blue, 6=Hostile/Red)
+           │    └─ Context (0=Reality)
+           └─ Version (10=MIL-STD-2525D)
+
+Entity codes used (Symbol Set 10):
+  110000 = Command & Control
+  121100 = Infantry
+  121102 = Mechanized Infantry
+  121104 = Anti-Tank
+  121106 = Sniper
+  121300 = Reconnaissance
+  121302 = Observation
+  120600 = Engineer (generic)
+  120601 = Engineer Reconnaissance
+  120602 = Combat Engineer
+  120603 = Mine/Countermine
+  120604 = Obstacle Breacher
+  120605 = Construction Engineer
+  120606 = Bridge/AVLB
+  130100 = Armor
+  130200 = Mortar
+  130300 = Field Artillery
+  160700 = Logistics/CSS
+```
+

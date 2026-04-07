@@ -636,6 +636,50 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    transition: width 0.25s ease, min-width 0.25s ease, opacity 0.2s ease;
+    min-width: 340px;
+}
+#sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    border-left: none;
+    overflow: hidden;
+}
+
+/* ── Sidebar Toggle Handle ───────────────────── */
+#sidebar-toggle {
+    position: absolute;
+    right: 340px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 800;
+    width: 22px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #16213e 0%, #1a2744 100%);
+    border: 1px solid #0f3460;
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    cursor: pointer;
+    color: #4fc3f7;
+    opacity: 0.6;
+    transition: right 0.25s ease, opacity 0.2s, background 0.2s, width 0.15s;
+}
+#sidebar-toggle:hover {
+    opacity: 1;
+    background: linear-gradient(135deg, #1a2744 0%, #1f3050 100%);
+    width: 26px;
+}
+#sidebar-toggle svg {
+    transition: transform 0.25s ease;
+}
+#sidebar-toggle.collapsed {
+    right: 0;
+}
+#sidebar-toggle.collapsed svg {
+    transform: rotate(180deg);
 }
 
 #sidebar-tabs {
@@ -1967,6 +2011,72 @@ button:hover { background: #1a5276; }
     border-color: #e53935;
 }
 
+/* ── CoC Hierarchy Buttons ─────────────────────── */
+.coc-hier-btn {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    font-size: 9px;
+    line-height: 1;
+    border-radius: 2px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #777;
+    cursor: pointer;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.12s, color 0.12s;
+}
+.coc-node:hover .coc-hier-btn {
+    opacity: 1;
+}
+.coc-move-up-btn:hover {
+    background: #1a3a5c;
+    color: #64b5f6;
+    border-color: #42a5f5;
+}
+.coc-move-down-btn:hover {
+    background: #1a3a5c;
+    color: #64b5f6;
+    border-color: #42a5f5;
+}
+
+/* ── CoC Drag-and-Drop Styling ─────────────────── */
+.coc-drag-hint {
+    font-size: 9px;
+    color: #666;
+    padding: 2px 4px;
+    margin-bottom: 4px;
+    font-style: italic;
+}
+.coc-draggable {
+    cursor: grab;
+}
+.coc-draggable:active {
+    cursor: grabbing;
+}
+.coc-dragging {
+    opacity: 0.4;
+    background: rgba(79, 195, 247, 0.1) !important;
+}
+.coc-drop-target {
+    background: rgba(76, 175, 80, 0.2) !important;
+    border: 1px dashed #4caf50 !important;
+    border-radius: 4px;
+}
+.coc-drop-target-above {
+    border-top: 2px solid #4fc3f7 !important;
+    background: rgba(79, 195, 247, 0.08) !important;
+}
+.coc-drop-target-invalid {
+    background: rgba(244, 67, 54, 0.15) !important;
+    border: 1px dashed #f44336 !important;
+    border-radius: 4px;
+}
+
 /* ── Scenario Builder Context Menu (reuses .ctx-menu) ── */
 .sb-ctx-menu {
     min-width: 180px;
@@ -1994,6 +2104,14 @@ button:hover { background: #1a5276; }
     resize: both;
     min-width: 420px;
     min-height: 500px;
+}
+/* When locked (showing lock gate), shrink to fit the card */
+#admin-window.admin-locked {
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+    resize: none;
 }
 #admin-window-header {
     display: flex;
@@ -2927,6 +3045,10 @@ button:hover { background: #1a5276; }
     align-items: center;
     justify-content: center;
     transition: all 0.15s;
+    opacity: 0;
+}
+.coc-node:hover .coc-user-assign-btn {
+    opacity: 1;
 }
 .coc-user-assign-btn:hover {
     background: rgba(76, 175, 80, 0.25);

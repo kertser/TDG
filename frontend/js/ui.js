@@ -6,6 +6,7 @@
 const KUI = (() => {
     let _mapCtrlControl = null;
     let _compassControl = null;
+    let _sidebarCollapsed = false;
 
     // ...existing code...
     function init() {
@@ -24,6 +25,19 @@ const KUI = (() => {
                 }
             });
         });
+
+        // Sidebar toggle handle
+        const toggleBtn = document.getElementById('sidebar-toggle');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', _toggleSidebar);
+        }
+
+        // Restore sidebar state from localStorage
+        try {
+            if (localStorage.getItem('kshu_sidebar_collapsed') === 'true') {
+                _toggleSidebar(null, true);  // collapse without animation on load
+            }
+        } catch(e) {}
 
         // Drawing toolbar button events are bound in addMapControls() (dynamic creation)
     }
@@ -213,6 +227,42 @@ const KUI = (() => {
 
     function _clearActive() {
         document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    /** Toggle sidebar collapsed/expanded state. */
+    function _toggleSidebar(e, skipAnim) {
+        _sidebarCollapsed = !_sidebarCollapsed;
+        const sidebar = document.getElementById('sidebar');
+        const toggle = document.getElementById('sidebar-toggle');
+        if (!sidebar) return;
+
+        if (skipAnim) {
+            sidebar.style.transition = 'none';
+            if (toggle) toggle.style.transition = 'none';
+        }
+
+        if (_sidebarCollapsed) {
+            sidebar.classList.add('collapsed');
+            if (toggle) toggle.classList.add('collapsed');
+        } else {
+            sidebar.classList.remove('collapsed');
+            if (toggle) toggle.classList.remove('collapsed');
+        }
+
+        if (skipAnim) {
+            requestAnimationFrame(() => {
+                sidebar.style.transition = '';
+                if (toggle) toggle.style.transition = '';
+            });
+        }
+
+        // Invalidate map size after transition
+        setTimeout(() => {
+            try { KMap.getMap().invalidateSize(); } catch(e) {}
+        }, 300);
+
+        // Remember preference
+        try { localStorage.setItem('kshu_sidebar_collapsed', _sidebarCollapsed); } catch(e) {}
     }
 
     return { init, addMapControls };

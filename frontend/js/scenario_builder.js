@@ -221,8 +221,21 @@ const KScenarioBuilder = (() => {
         const nameEl = document.getElementById('sb-unit-name');
         if (!typeEl) return;
         const info = UNIT_TYPES[typeEl.value];
-        if (info && !nameEl.value) {
-            // Auto-generate a name
+        const currentName = nameEl ? nameEl.value : '';
+
+        // Check if current name is empty or matches an auto-generated pattern
+        // (i.e. "{AnyTypeLabel} {number}")
+        let isAutoName = !currentName;
+        if (!isAutoName) {
+            for (const [, typeInfo] of Object.entries(UNIT_TYPES)) {
+                const label = typeInfo.label || '';
+                const re = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+\\d+$`);
+                if (re.test(currentName)) { isAutoName = true; break; }
+            }
+        }
+
+        if (info && isAutoName) {
+            // Auto-generate a name based on the new type
             const side = document.getElementById('sb-unit-side').value;
             const count = _stagedUnits.filter(u => u.side === side && u.unit_type === typeEl.value).length + 1;
             nameEl.value = `${info.label} ${count}`;

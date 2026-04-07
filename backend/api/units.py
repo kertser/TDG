@@ -312,6 +312,88 @@ async def assign_unit(
 
 
 # ══════════════════════════════════════════════════
+# ── Parent / Hierarchy (for commanders) ───────────
+# ══════════════════════════════════════════════════
+
+class UnitSetParentRequest(BaseModel):
+    parent_unit_id: str | None = None
+
+
+@router.put("/{session_id}/units/{unit_id}/parent")
+async def set_unit_parent(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    body: UnitSetParentRequest,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """Set or clear a unit's parent in the chain of command.
+    Commanders can reparent units they have authority over."""
+    side = participant.side.value
+    user_id = str(participant.user_id)
+
+    # Observers cannot modify hierarchy
+    if side == "observer" or participant.role == "observer":
+        raise HTTPException(status_code=403, detail="Observers cannot modify hierarchy")
+
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
+    unit = result.scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+
+    # Authority check (skip for admin)
+    if side != "admin":
+        if unit.side.value != side:
+            raise HTTPException(status_code=403, detail="Cannot modify units from other side")
+        has_authority = await check_command_authority(user_id, unit, session_id, db)
+        if not has_authority:
+            has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
+        if not has_authority:
+            # Check if no CoC is set up (implicit authority)
+            all_result = await db.execute(
+                select(Unit).where(Unit.session_id == session_id, Unit.side == unit.side.value)
+            )
+            all_same_side = all_result.scalars().all()
+            any_assigned = any(u.assigned_user_ids for u in all_same_side)
+            if any_assigned:
+                raise HTTPException(status_code=403, detail="No command authority over this unit")
+
+    if body.parent_unit_id:
+        try:
+            parent_uuid = uuid.UUID(body.parent_unit_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid parent_unit_id")
+        if parent_uuid == unit_id:
+            raise HTTPException(status_code=400, detail="Unit cannot be its own parent")
+        # Verify parent exists in same session and same side
+        pr = await db.execute(
+            select(Unit).where(Unit.id == parent_uuid, Unit.session_id == session_id)
+        )
+        parent = pr.scalar_one_or_none()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent unit not found")
+        if parent.side != unit.side:
+            raise HTTPException(status_code=400, detail="Cannot set parent from different side")
+        # Cycle detection: walk up from parent to ensure we don't create a loop
+        current = parent
+        visited = {unit_id}
+        while current.parent_unit_id:
+            if current.parent_unit_id in visited:
+                raise HTTPException(status_code=400, detail="Circular hierarchy detected")
+            visited.add(current.parent_unit_id)
+            pr2 = await db.execute(select(Unit).where(Unit.id == current.parent_unit_id))
+            current = pr2.scalar_one_or_none()
+            if not current:
+                break
+        unit.parent_unit_id = parent_uuid
+    else:
+        unit.parent_unit_id = None
+
+    await db.flush()
+    return {"id": str(unit.id), "parent_unit_id": str(unit.parent_unit_id) if unit.parent_unit_id else None}
+
+
+# ══════════════════════════════════════════════════
 # ── Formation ─────────────────────────────────────
 # ══════════════════════════════════════════════════
 
