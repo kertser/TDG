@@ -586,6 +586,8 @@ const KAdmin = (() => {
         _bind('wizard-next-btn', 'click', _wizardNextStep);
         _bind('wizard-prev-btn', 'click', _wizardPrevStep);
         _bind('wizard-create-btn', 'click', _wizardCreate);
+        _bind('wizard-terrain-btn', 'click', _wizardAnalyzeTerrain);
+        _bind('wizard-terrain-skip-btn', 'click', _wizardSkipTerrain);
         _bind('wizard-done-btn', 'click', _wizardDone);
         _bind('wizard-cancel-btn', 'click', _closeWizard);
         _bind('wizard-close', 'click', _closeWizard);
@@ -657,7 +659,7 @@ const KAdmin = (() => {
 
     function _wizardShowStep(step) {
         _wizardStep = step;
-        for (let i = 1; i <= 3; i++) {
+        for (let i = 1; i <= 4; i++) {
             const el = document.getElementById(`wizard-step-${i}`);
             if (el) el.style.display = i === step ? 'block' : 'none';
             const ind = document.getElementById(`wizard-ind-${i}`);
@@ -670,11 +672,15 @@ const KAdmin = (() => {
         const prevBtn = document.getElementById('wizard-prev-btn');
         const nextBtn = document.getElementById('wizard-next-btn');
         const createBtn = document.getElementById('wizard-create-btn');
+        const terrainBtn = document.getElementById('wizard-terrain-btn');
+        const terrainSkipBtn = document.getElementById('wizard-terrain-skip-btn');
         const doneBtn = document.getElementById('wizard-done-btn');
-        if (prevBtn) prevBtn.style.display = step > 1 && step < 3 ? '' : 'none';
+        if (prevBtn) prevBtn.style.display = step === 2 ? '' : 'none';
         if (nextBtn) nextBtn.style.display = step === 1 ? '' : 'none';
         if (createBtn) createBtn.style.display = step === 2 ? '' : 'none';
-        if (doneBtn) doneBtn.style.display = step === 3 ? '' : 'none';
+        if (terrainBtn) terrainBtn.style.display = step === 3 ? '' : 'none';
+        if (terrainSkipBtn) terrainSkipBtn.style.display = step === 3 ? '' : 'none';
+        if (doneBtn) doneBtn.style.display = step === 4 ? '' : 'none';
     }
 
     function _wizardNextStep() {
@@ -836,12 +842,77 @@ const KAdmin = (() => {
 
             KGameLog.addEntry(`Session "${name}" created via wizard (${addedCount} participants)`, 'info');
 
-            // Move to step 3 (done)
+            // Set terrain session context so KTerrain knows which session to analyze
+            KTerrain.setSession(sessionData.id);
+
+            // Move to step 3 (terrain analysis)
             _wizardShowStep(3);
 
         } catch (err) {
             if (statusEl) { statusEl.textContent = `✗ ${err.message}`; statusEl.className = 'admin-info admin-error'; }
         }
+    }
+
+    async function _wizardAnalyzeTerrain() {
+        if (!_wizardCreatedSessionId) return;
+
+        const depth = parseInt(document.getElementById('wizard-terrain-depth')?.value || '3');
+        const skipElev = document.getElementById('wizard-terrain-skip-elev')?.checked || false;
+        const statusEl = document.getElementById('wizard-terrain-status');
+        const progressContainer = document.getElementById('wizard-terrain-progress');
+        const progressFill = document.getElementById('wizard-terrain-progress-fill');
+        const progressText = document.getElementById('wizard-terrain-progress-text');
+        const terrainBtn = document.getElementById('wizard-terrain-btn');
+        const skipBtn = document.getElementById('wizard-terrain-skip-btn');
+
+        // Show progress
+        if (progressContainer) progressContainer.style.display = 'block';
+        if (progressFill) { progressFill.style.width = '0%'; progressFill.classList.remove('error'); }
+        if (progressText) progressText.textContent = 'Starting analysis...';
+        if (statusEl) { statusEl.textContent = ''; statusEl.className = 'admin-info'; }
+        if (terrainBtn) terrainBtn.disabled = true;
+        if (skipBtn) skipBtn.disabled = true;
+
+        // Make sure KTerrain knows the session
+        KTerrain.setSession(_wizardCreatedSessionId);
+
+        const result = await KTerrain.analyzeWithProgress(depth, false, skipElev, (event) => {
+            if (progressFill && event.progress >= 0) {
+                progressFill.style.width = `${Math.round(event.progress * 100)}%`;
+            }
+            if (progressText && event.message) {
+                progressText.textContent = event.message;
+            }
+            if (event.step === 'error') {
+                if (progressFill) progressFill.classList.add('error');
+                if (statusEl) {
+                    statusEl.textContent = `❌ ${event.message}`;
+                    statusEl.className = 'admin-info admin-error';
+                }
+            }
+        });
+
+        if (terrainBtn) terrainBtn.disabled = false;
+        if (skipBtn) skipBtn.disabled = false;
+
+        if (result) {
+            if (progressFill) progressFill.style.width = '100%';
+            if (progressText) progressText.textContent = `✅ Done in ${result.duration_s}s`;
+            if (statusEl) {
+                statusEl.textContent = `✅ ${result.cells_created} cells created, ${result.cells_updated} updated. OSM: ${result.osm_features} features. ${result.cell_size_m}m resolution.`;
+                statusEl.className = 'admin-info admin-success';
+            }
+            KGameLog.addEntry(`Terrain analyzed: ${result.cells_created} cells at depth ${depth}`, 'info');
+
+            // Auto-advance to Done after a short delay
+            setTimeout(() => _wizardShowStep(4), 1500);
+        } else if (!statusEl?.textContent?.includes('❌')) {
+            if (statusEl) { statusEl.textContent = '❌ Analysis failed. You can retry or skip.'; statusEl.className = 'admin-info admin-error'; }
+        }
+    }
+
+    function _wizardSkipTerrain() {
+        _wizardShowStep(4);
     }
 
     async function _wizardDone() {

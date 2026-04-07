@@ -1152,7 +1152,7 @@ if unit.ammo <= 0:
 
 | Feature | Files | Description |
 |---|---|---|
-| **Admin Panel** | `admin.js`, `admin.py` | Floating admin window with password gate, sub-tabs (Session, Monitor, Builder, CoC, Users, Types). Session wizard for guided setup. |
+| **Admin Panel** | `admin.js`, `admin.py` | Floating admin window with password gate, sub-tabs (Session, Monitor, Builder, CoC, Users, Types). Session wizard (4-step: Setup → Participants → Terrain → Done) for guided setup. |
 | **Scenario Builder** | `scenario_builder.js`, `admin.js` | Interactive map-click unit placement, grid configuration, save/load scenarios. |
 | **God View** | `admin.js`, `admin.py` | Admin toggle to see all units from both sides (bypasses fog-of-war). |
 | **Unit Dashboard** | `admin.js` | Admin table of all units with focus, edit, delete, split, merge buttons. |
@@ -1180,6 +1180,8 @@ if unit.ammo <= 0:
 | **Unit Delete from Context Menu** | `units.js` | Right-click context menu includes 🗑 Delete Unit (admin-only), calls admin DELETE endpoint. |
 | **Orders Complete Button** | `index.html`, `session_ui.js`, `style.css` | "✔ Orders Complete" button in topbar (right side) replaces sidebar "Next Turn". Visible only to commanders. Green accent styling. |
 | **LOS Viewshed (Line-of-Sight)** | `los_service.py`, `units.py`, `detection.py`, `tick.py`, `units.js`, `app.js` | Replaces circular detection ranges with terrain-aware visibility polygons. Backend `LOSService` casts 72 rays, uses "maximum elevation angle" algorithm with terrain obstacle heights (forest=12m, urban=10m, orchard=5m, scrub=2m) and visibility absorption. API endpoint `GET /units/{id}/viewshed` returns GeoJSON polygon. Detection engine uses `has_los()` for unit-to-unit LOS checks (with matching visibility absorption). Frontend fetches viewshed on hover/select, renders as `L.polygon` instead of `L.circle`, with cache invalidated on tick change. Falls back to circle when no elevation data. **Unit-type-specific eye heights**: observation_post=8m (elevated optics), tanks=3m, recon=3m, infantry=2m (default). Higher eye height lets units see over obstacles (forests, buildings). Applied in viewshed computation, tick detection, and fog-of-war LOS filter. **Bugfixes applied:** (1) `has_los()` now includes visibility absorption budget (consistent with viewshed), (2) `_cast_ray` no longer terminates prematurely after 3 hidden steps (valleys), tracks farthest visible point correctly, (3) detection probability includes target terrain concealment factor, (4) visibility service `_filter_by_los` applies terrain/height range modifiers (matches tick engine), (5) contact upsert matches by `target_unit_id` for accurate multi-contact tracking. |
+| **Unit Type Editor** | `admin.js`, `index.html`, `style.css` | Floating draggable window for editing unit type definitions. Two-column layout: form (Identity: key, display name, HQ checkbox; Combat Stats: detection, fire range, speed, personnel in 2×2 grid; Symbol Codes: Blue/Red SIDC) + live preview panel (Blue/Red milsymbol renders, stats summary). Replaces sequential prompt() dialogs. |
+| **Session Wizard Terrain Step** | `admin.js`, `index.html` | 4-step session creation wizard: Setup → Participants → Terrain → Done. Terrain step (step 3) runs auto-analysis (OSM + elevation) with SSE progress bar, depth selector, skip-elevation toggle, and skip option. Auto-advances to Done on success. Session Setup Steps guide updated to include terrain analysis. |
 
 ### Permission / Authority System
 
@@ -1328,7 +1330,7 @@ KShU/
 │       ├── gamelog.js            ← Unified game log
 │       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu
 │       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
-│       ├── admin.js              ← Admin panel (3200+ lines): dashboard, CoC, wizard, god view, users, types
+│       ├── admin.js              ← Admin panel (~3900 lines): dashboard, CoC, wizard (4-step), god view, users, types, terrain
 │       ├── terrain.js            ← NEW: Terrain overlay rendering, legend, elevation heatmap
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 ├── frontend/

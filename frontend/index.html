@@ -259,8 +259,9 @@
                     <div style="font-size:10px;color:#aaa;line-height:1.6;">
                         1️⃣ <b>Builder</b> → Create & save a scenario with units<br>
                         2️⃣ <b>Builder</b> → Click "🎮 Session" → Wizard walks you through setup<br>
-                        3️⃣ <b>CoC</b> → Assign commanders to units (bulk or individual)<br>
-                        4️⃣ <b>▶ Enter</b> the session → Click "Start Session"
+                        3️⃣ <b>Terrain</b> → Analyze terrain (auto in wizard, or manual later)<br>
+                        4️⃣ <b>CoC</b> → Assign commanders to units (bulk or individual)<br>
+                        5️⃣ <b>▶ Enter</b> the session → Click "Start Session"
                     </div>
                 </div>
                 <div class="admin-section">
@@ -704,7 +705,8 @@
                 <div class="wizard-steps-indicator">
                     <div class="wizard-step-dot active" id="wizard-ind-1"><span>1</span> Setup</div>
                     <div class="wizard-step-dot" id="wizard-ind-2"><span>2</span> Participants</div>
-                    <div class="wizard-step-dot" id="wizard-ind-3"><span>3</span> Done</div>
+                    <div class="wizard-step-dot" id="wizard-ind-3"><span>3</span> Terrain</div>
+                    <div class="wizard-step-dot" id="wizard-ind-4"><span>4</span> Done</div>
                 </div>
 
                 <!-- Step 1: Session Setup -->
@@ -755,13 +757,42 @@
                     <div id="wizard-create-status" class="admin-info" style="margin-top:6px;"></div>
                 </div>
 
-                <!-- Step 3: Done -->
+                <!-- Step 3: Terrain Analysis -->
                 <div id="wizard-step-3" style="display:none;">
+                    <div style="font-size:11px;color:#aaa;margin-bottom:8px;">
+                        Run terrain analysis to auto-classify roads, forests, water, urban areas, and elevation from real-world geodata.
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+                        <label style="font-size:10px;color:#90caf9;">Depth:</label>
+                        <select id="wizard-terrain-depth" style="padding:3px 6px;font-size:11px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;">
+                            <option value="1">1 (~333m cells)</option>
+                            <option value="2">2 (~111m cells)</option>
+                            <option value="3" selected>3 (~37m cells)</option>
+                        </select>
+                        <label style="font-size:10px;color:#90caf9;">
+                            <input type="checkbox" id="wizard-terrain-skip-elev" style="accent-color:#4fc3f7;"> Skip elevation
+                        </label>
+                    </div>
+                    <!-- Wizard terrain progress bar -->
+                    <div id="wizard-terrain-progress" style="display:none;margin-bottom:8px;">
+                        <div class="terrain-progress-bar">
+                            <div class="terrain-progress-fill" id="wizard-terrain-progress-fill"></div>
+                        </div>
+                        <div id="wizard-terrain-progress-text" style="font-size:10px;color:#90caf9;margin-top:2px;"></div>
+                    </div>
+                    <div id="wizard-terrain-status" class="admin-info" style="margin-bottom:8px;"></div>
+                    <div style="font-size:10px;color:#666;margin-top:4px;">
+                        ℹ You can also run or re-run terrain analysis later from the <b>Terrain</b> admin tab.
+                    </div>
+                </div>
+
+                <!-- Step 4: Done -->
+                <div id="wizard-step-4" style="display:none;">
                     <div style="text-align:center;padding:16px 0;">
                         <div style="font-size:28px;margin-bottom:8px;">✅</div>
                         <div style="font-size:14px;color:#a5d6a7;font-weight:700;margin-bottom:8px;">Session Created!</div>
                         <div style="font-size:11px;color:#aaa;line-height:1.6;">
-                            Units and grid are ready.<br>
+                            Units, grid, and terrain are ready.<br>
                             Next step: Open the <b>CoC</b> tab to assign commanders to units,<br>
                             then <b>Enter</b> the session and click <b>Start</b>.
                         </div>
@@ -772,6 +803,8 @@
                 <button id="wizard-prev-btn" class="admin-btn" style="flex:1;display:none;">← Back</button>
                 <button id="wizard-next-btn" class="admin-btn" style="flex:1;background:#0d3460;color:#4fc3f7;">Next →</button>
                 <button id="wizard-create-btn" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;display:none;">🎮 Create Session</button>
+                <button id="wizard-terrain-btn" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;display:none;">🔍 Analyze Terrain</button>
+                <button id="wizard-terrain-skip-btn" class="admin-btn" style="flex:1;display:none;">Skip →</button>
                 <button id="wizard-done-btn" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;display:none;">✓ Open CoC Setup</button>
                 <button id="wizard-cancel-btn" class="admin-btn" style="flex:1;">Cancel</button>
             </div>

@@ -2058,8 +2058,8 @@ button:hover { background: #1a5276; }
 .wizard-step-dot {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
+    gap: 3px;
+    padding: 4px 8px;
     font-size: 10px;
     color: #666;
     border-radius: 12px;
