@@ -9,10 +9,10 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Fog of War** — Server-authoritative visibility filtering via PostGIS `ST_DWithin`; players only see enemy units within detection range
 - **Collaborative Overlays** — Real-time synchronized drawing tools (arrows, polylines, rectangles, markers, ellipses, measurement) via WebSocket
 - **Terrain Intelligence** — Automatic terrain classification from OSM Overpass + ESA WorldCover + Open-Elevation API; 12-type taxonomy with military modifiers; admin manual painting; SSE progress streaming
-- **Rules Engine** — Deterministic tick-based simulation: movement, detection, combat, morale, suppression, ammo, communications
+- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds), detection, combat, morale, suppression, ammo, communications
 - **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, split/merge
 - **Admin Panel** — Floating admin window with session wizard, god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls
-- **Order System** — Text order submission with parsed task assignment (move, attack, defend); LLM integration planned
+- **Order System** — Text order submission with parsed task assignment (move with snail grid reference, attack, defend); LLM integration planned
 - **Game Log** — Append-only event timeline, reports panel, unified game log
 
 ## Quick Start
@@ -65,7 +65,7 @@ Navigate to `http://localhost:8000` in your browser.
 4. Military unit symbols appear on the map (filtered by your side's fog of war)
 5. Use the **map control panel** (top-right) to toggle drawing tools, grid, units, overlays, contacts, and labels
 6. **Draw overlays**: select a tool (arrow, polyline, rectangle, marker, ellipse, measure) and draw on the map; overlays sync in real-time via WebSocket
-7. **Command units**: right-click for context menu (move, formation, split, merge, rename, assign); drag-select for rubber-band mass selection
+7. **Command units**: right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign); drag-select for rubber-band mass selection
 8. **Submit orders** in the **Orders** tab (text-based)
 9. **Advance simulation** via admin tick control — units move, detect, and engage per Rules Engine
 10. View events and reports in the **Log** tab

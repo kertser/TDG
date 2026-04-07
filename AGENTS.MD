@@ -768,12 +768,20 @@ The Rules Engine runs once per **tick**. A tick represents a configurable time s
 
 ### 8.2 Movement
 ```
-effective_speed = base_speed × terrain_factor × (1 - suppression × 0.7) × morale_factor
+effective_speed = base_speed × terrain_factor × slope_factor × (1 - suppression × 0.7) × morale_factor
 distance_this_tick = effective_speed × tick_duration_seconds
 ```
-- `terrain_factor`: road=1.0, open=0.8, forest=0.5, urban=0.4, water=0.1
+- `base_speed`: **unit-type-specific**, looked up from `UNIT_TYPE_SPEEDS` table by `unit_type` + speed mode (`slow` or `fast`). Examples:
+  - Infantry platoon: slow=1.2 m/s (~4 km/h), fast=3.0 m/s (~11 km/h)
+  - Tank company: slow=2.5 m/s (~9 km/h), fast=10.0 m/s (~36 km/h)
+  - Recon team: slow=2.0 m/s (~7 km/h), fast=4.0 m/s (~14 km/h)
+  - Mortar section: slow=1.0 m/s (~4 km/h), fast=2.5 m/s (~9 km/h)
+  - Full table: 24 unit types defined in `backend/api/units.py: UNIT_TYPE_SPEEDS`
+- `terrain_factor`: road=1.0, open=0.8, forest=0.5, urban=0.4, water=0.05 (see Section 1.7.3 for all 12 types)
+- `slope_factor`: `max(0.2, 1.0 - slope_deg/45)` — steep slopes dramatically slow movement
 - `morale_factor`: morale > 0.5 → 1.0; morale 0.25–0.5 → 0.7; morale < 0.25 → 0.4
 - Unit moves along straight line toward target. If distance_remaining < distance_this_tick, unit arrives and task completes.
+- **Speed modes**: Only two modes — `slow` (cautious/tactical, better concealment) and `fast` (rapid, exposed). No "average". Speed mode is stored in `unit.current_task.speed` alongside `target_location` and `target_snail` (grid reference).
 
 ### 8.3 Detection
 ```
@@ -1151,9 +1159,11 @@ if unit.ammo <= 0:
 | **Chain of Command (Admin CoC)** | `admin.js` (admin CoC sub-tab) | Admin-only full hierarchy editor with parent picker and bulk assign/unassign. |
 | **Unit Split / Merge** | `units.py`, `admin.py`, `units.js`, `admin.js` | Split: auto-naming, echelon drop. Merge: combine strength, echelon up, re-parent children. Admin merge has no distance restriction. |
 | **Unit Formations** | `units.py`, `units.js` | 10 formation types (column, line, wedge, vee, etc.), set via context menu. |
-| **Unit Movement** | `units.py`, `units.js`, `engine/movement.py` | Set move target via map click, 3 speed presets, movement arrows on map, tick-based movement. |
+| **Unit Movement** | `units.py`, `units.js`, `engine/movement.py` | Set move target via map click, 2 speed modes (slow/fast), unit-type-specific base speeds (24 types), movement arrows on map, tick-based movement. |
+| **Unit-Type-Specific Speeds** | `units.py`, `units.js` | Each unit type has unique slow/fast base speeds (m/s). Infantry foot ~1-3 m/s, tanks ~2.5-12 m/s, recon ~2-4 m/s. Frontend shows km/h in move picker and speed icon (🐢/⚡) in status badge, task line, and tooltip. Backend table: `UNIT_TYPE_SPEEDS`. |
+| **Move Target Snail Path** | `units.py`, `units.js`, `grid_service.py` | Move commands resolve target coordinates to snail grid reference (e.g. "C9-2-8") via GridService. Displayed in unit card task line, tooltip, and gamelog. Frontend fallback resolves via grid API if backend didn't provide it. |
 | **Rubber-band Selection** | `units.js` | Left-drag on map for mass unit selection. Shift+click for additive selection. |
-| **Unit Context Menu** | `units.js` | Right-click context menu: select, rename, formation, move, stop, split, merge, assign. |
+| **Unit Context Menu** | `units.js` | Right-click context menu: select, rename, formation, move (slow 🐢/fast ⚡), stop, split, merge, assign, delete (admin). Info card shows speed mode, target snail path, and unit-type-specific km/h. |
 | **Unit Status Icons** | `units.js` | Status derived from task/morale/suppression, shown in tooltip and CoC tree. |
 | **Zoom-scaled Markers** | `symbols.js`, `units.js` | milsymbol markers scale with zoom level. |
 | **Game Clock** | `map.js`, `style.css` | Bottom-right map overlay showing turn number and in-game date/time. Covers Leaflet attribution with high z-index. |
