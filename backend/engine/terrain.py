@@ -12,6 +12,7 @@ detection height bonus, and combat height advantage.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from shapely.geometry import Point, box
@@ -100,11 +101,111 @@ class TerrainService:
                     poly = box(bounds[0], bounds[1], bounds[2], bounds[3])
                     self._regions.append((terrain_type, poly))
 
+        # ── Fast spatial index: bypass point_to_snail for lookups ──
+        # Build a direct (lon,lat) → snail_path lookup using the grid's
+        # local coordinate system. This avoids repeated pyproj transforms.
+        self._fast_lookup: dict | None = None
+        self._fast_elev_lookup: dict | None = None
+        self._local_params: dict | None = None
+        if self._cells and self._grid:
+            self._build_fast_index()
+
+    def _build_fast_index(self):
+        """Build a fast integer-grid index for O(1) terrain/elevation lookups.
+
+        Instead of calling point_to_snail (which does pyproj transform + snail
+        arithmetic every time), we precompute the grid's local coordinate params
+        and do fast floor-division at query time.
+
+        Gracefully falls back to slow path if grid doesn't have pyproj attrs
+        (e.g. mock grids in tests).
+        """
+        gs = self._grid
+        # Check that the grid has the necessary internal attributes
+        if not hasattr(gs, '_origin_lat') or not hasattr(gs, '_to_local'):
+            # Mock or incomplete grid — skip fast index, fall back to slow path
+            return
+
+        # Precompute projection transform parameters (from grid_service)
+        self._local_params = {
+            "origin_lat": gs._origin_lat,
+            "origin_lon": gs._origin_lon,
+            "square_size": gs._square_size,
+            "columns": gs._columns,
+            "rows": gs._rows,
+            "recursion_base": gs._recursion_base,
+            "rot_rad": gs._rot_rad,
+            # Precompute trig for rotation
+            "cos_neg_rot": math.cos(-gs._rot_rad),
+            "sin_neg_rot": math.sin(-gs._rot_rad),
+        }
+        # We keep a reference to the pyproj transformers for the initial
+        # geo→local transform but avoid re-creating them
+        self._to_local = gs._to_local
+
+        # Pre-build the snail offset map for the configured recursion base
+        # (always 3 in practice)
+        from backend.services.grid_service import OFFSET_TO_SNAIL
+        self._offset_to_snail = OFFSET_TO_SNAIL
+
+        # Store labeling scheme info for _make_top_label equivalent
+        self._labeling = gs._labeling
+
+    def _fast_point_to_snail(self, lon: float, lat: float) -> str | None:
+        """Ultra-fast point→snail using pre-cached local projection params."""
+        if self._local_params is None:
+            return self._grid.point_to_snail(lat, lon, depth=self._cell_depth) if self._grid else None
+
+        p = self._local_params
+        # Project geo → local using the same pyproj transformer
+        x, y = self._to_local.transform(lon, lat)
+
+        # Undo grid rotation
+        ux = x * p["cos_neg_rot"] - y * p["sin_neg_rot"]
+        uy = x * p["sin_neg_rot"] + y * p["cos_neg_rot"]
+
+        sq = p["square_size"]
+        col = int(ux // sq)
+        row = int(uy // sq)
+        if not (0 <= col < p["columns"] and 0 <= row < p["rows"]):
+            return None
+
+        # Build top label
+        if self._labeling == "alphanumeric":
+            display_row = p["rows"] - row
+            top_label = f"{chr(ord('A') + col)}{display_row}"
+        else:
+            display_row_idx = p["rows"] - 1 - row
+            top_label = str(display_row_idx * p["columns"] + col + 1)
+
+        # Recursive snail subdivision
+        lx = ux - col * sq
+        ly = uy - row * sq
+        size = sq
+        rb = p["recursion_base"]
+        digits: list[str] = []
+
+        for _ in range(self._cell_depth):
+            sub_size = size / rb
+            sub_col = min(int(lx / sub_size), rb - 1)
+            sub_row = min(int(ly / sub_size), rb - 1)
+            digit = self._offset_to_snail.get((sub_col, sub_row))
+            if digit is None:
+                break
+            digits.append(str(digit))
+            lx -= sub_col * sub_size
+            ly -= sub_row * sub_size
+            size = sub_size
+
+        if digits:
+            return top_label + "-" + "-".join(digits)
+        return top_label
+
     def get_terrain_at(self, lon: float, lat: float) -> str:
         """Return terrain type string at the given point."""
-        # Mode 1: DB-backed cells
+        # Mode 1: DB-backed cells with fast index
         if self._cells and self._grid:
-            snail = self._grid.point_to_snail(lat, lon, depth=self._cell_depth)
+            snail = self._fast_point_to_snail(lon, lat)
             if snail and snail in self._cells:
                 return self._cells[snail]
             # Try parent paths (lower depth)
@@ -151,7 +252,7 @@ class TerrainService:
         """Return elevation in meters at point. Returns 0.0 if no data."""
         if not self._elevation or not self._grid:
             return 0.0
-        snail = self._grid.point_to_snail(lat, lon, depth=self._cell_depth)
+        snail = self._fast_point_to_snail(lon, lat)
         if snail and snail in self._elevation:
             return self._elevation[snail].get("elevation_m", 0.0)
         return 0.0
@@ -160,7 +261,7 @@ class TerrainService:
         """Return slope in degrees at point. Returns 0.0 if no data."""
         if not self._elevation or not self._grid:
             return 0.0
-        snail = self._grid.point_to_snail(lat, lon, depth=self._cell_depth)
+        snail = self._fast_point_to_snail(lon, lat)
         if snail and snail in self._elevation:
             return self._elevation[snail].get("slope_deg", 0.0)
         return 0.0
@@ -215,3 +316,50 @@ class TerrainService:
         adv = self.elevation_advantage(attacker_lon, attacker_lat, target_lon, target_lat)
         mod = 1.0 + 0.15 * (adv / 50.0)
         return max(0.7, min(1.5, mod))
+
+
+# ── Session-level terrain data cache ─────────────────────────
+# Avoids re-loading terrain/elevation from DB on every viewshed request.
+# Invalidated when terrain analysis runs (via clear_terrain_cache).
+
+import threading
+_terrain_cache_lock = threading.Lock()
+_terrain_cache: dict[str, dict] = {}  # session_id_str → {terrain_cells, elevation_cells, ts}
+
+TERRAIN_CACHE_TTL = 300  # seconds
+
+
+def get_cached_terrain_data(session_id_str: str) -> dict | None:
+    """Get cached terrain/elevation dicts for a session, or None if expired/missing."""
+    import time
+    with _terrain_cache_lock:
+        entry = _terrain_cache.get(session_id_str)
+        if entry and (time.time() - entry["ts"]) < TERRAIN_CACHE_TTL:
+            return entry
+    return None
+
+
+def set_cached_terrain_data(
+    session_id_str: str,
+    terrain_cells: dict[str, str] | None,
+    elevation_cells: dict[str, dict] | None,
+):
+    """Cache terrain/elevation dicts for a session."""
+    import time
+    with _terrain_cache_lock:
+        _terrain_cache[session_id_str] = {
+            "terrain_cells": terrain_cells,
+            "elevation_cells": elevation_cells,
+            "ts": time.time(),
+        }
+
+
+def clear_terrain_cache(session_id_str: str | None = None):
+    """Clear terrain cache for a session (or all sessions)."""
+    with _terrain_cache_lock:
+        if session_id_str:
+            _terrain_cache.pop(session_id_str, None)
+        else:
+            _terrain_cache.clear()
+
+

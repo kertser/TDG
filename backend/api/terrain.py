@@ -75,6 +75,9 @@ async def analyze_terrain(
             force=body.force,
             skip_elevation=body.skip_elevation,
         )
+        # Invalidate terrain cache after analysis
+        from backend.engine.terrain import clear_terrain_cache
+        clear_terrain_cache(str(session_id))
         return summary
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -515,6 +518,10 @@ async def batch_paint_terrain(
             db.add(cell)
         painted += 1
 
+    # Invalidate terrain cache
+    from backend.engine.terrain import clear_terrain_cache
+    clear_terrain_cache(str(session_id))
+
     return {"painted": painted, "terrain_type": body.terrain_type}
 
 
@@ -536,6 +543,10 @@ async def clear_terrain(
     await db.execute(
         delete(ElevationCell).where(ElevationCell.session_id == session_id)
     )
+
+    # Invalidate terrain cache
+    from backend.engine.terrain import clear_terrain_cache
+    clear_terrain_cache(str(session_id))
 
     return {"deleted": deleted_count, "kept_manual": keep_manual}
 

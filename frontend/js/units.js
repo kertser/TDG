@@ -31,6 +31,11 @@ const KUnits = (() => {
     let _lastZoomBucket = null;    // track zoom bucket for marker size changes
     let _adminDragEnabled = false; // admin drag-and-drop mode
 
+    // ── Viewshed (LOS polygon) cache ────────────────
+    let _viewshedCache = {};       // unit_id → GeoJSON Feature
+    let _viewshedPending = {};     // unit_id → true (fetch in-flight)
+    let _viewshedTick = -1;        // invalidate cache when tick changes
+
     // ── Rubber-band selection state ──────────────────
     let _selectRect = null;
     let _selectStartPt = null;
@@ -64,8 +69,34 @@ const KUnits = (() => {
         'recon_team':        400,
         'observation_post':  300,
         'sniper_team':       1000,
+        'artillery_battery': 8000,
+        'artillery_platoon': 6000,
+        'mortar_team':       2500,
     };
     const DEFAULT_FIRE_RANGE = 500;
+
+    // ── Indirect fire unit types (fire NOT affected by LOS) ──
+    const INDIRECT_FIRE_TYPES = new Set([
+        'mortar_section', 'mortar_team',
+        'artillery_battery', 'artillery_platoon',
+    ]);
+
+    // ── Unit-type-specific eye heights (meters) for LOS context ──
+    const UNIT_EYE_HEIGHTS = {
+        'observation_post':   8.0,    // elevated optics / mast
+        'tank_company':       3.0,
+        'tank_platoon':       3.0,
+        'mech_company':       2.8,
+        'mech_platoon':       2.8,
+        'recon_team':         3.0,
+        'recon_section':      3.0,
+        'sniper_team':        2.5,
+        'headquarters':       3.0,
+        'command_post':       3.0,
+        'artillery_battery':  2.5,
+        'artillery_platoon':  2.5,
+    };
+    const DEFAULT_UNIT_EYE_HEIGHT = 2.0;
 
     // ── Status icons ────────────────────────────────────
     const STATUS_ICONS = {
@@ -180,6 +211,9 @@ const KUnits = (() => {
         const myRole = KSessionUI.getRole();
         // Observers cannot select/command units (check both side and role)
         if (mySide === 'observer' || myRole === 'observer') return false;
+        // Admin-unlocked bypass: can select any unit regardless of side
+        const adminUnlocked = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+        if (adminUnlocked) return true;
         // Side check: only own-side units are selectable (admin bypass)
         if (mySide && mySide !== 'admin' && unit.side !== mySide) {
             return false;
@@ -200,6 +234,9 @@ const KUnits = (() => {
         const myRole = KSessionUI.getRole();
         // Observers cannot assign units (check both side and role)
         if (mySide === 'observer' || myRole === 'observer') return false;
+        // Admin-unlocked bypass: can assign any unit regardless of side
+        const adminUnlocked = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+        if (adminUnlocked) return true;
         // Side check: only own-side units can be assigned (admin bypass)
         if (mySide && mySide !== 'admin' && unit.side !== mySide) {
             return false;
@@ -399,6 +436,8 @@ const KUnits = (() => {
             });
             if (!resp.ok) return;
             const units = await resp.json();
+            // Invalidate viewshed for units whose position changed
+            _invalidateMovedUnitsViewshed(units);
             allUnitsData = units;
             render(units);
             _updateSelectionUI();
@@ -480,9 +519,11 @@ const KUnits = (() => {
                 ttStatusIcon = SPEED_OPTIONS[ttSpeed].icon;
                 ttStatus = ttSpeed;
             }
+            const tooltipEyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
+            const tooltipEyeTag = tooltipEyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${tooltipEyeH}m)</span>` : '';
             const tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span><br>`
                 + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
-                + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}</span> `
+                + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}${tooltipEyeTag}</span> `
                 + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
             marker.bindTooltip(tooltipHtml, {
                 permanent: false,
@@ -561,6 +602,9 @@ const KUnits = (() => {
                     u.lat = pos.lat;
                     u.lon = pos.lng;
 
+                    // Invalidate viewshed cache for moved unit (position changed)
+                    delete _viewshedCache[u.id];
+
                     // Save all peer positions if group drag
                     if (marker._groupDrag && marker._groupPeers) {
                         const dLat = pos.lat - marker._groupDragStart.lat;
@@ -573,15 +617,26 @@ const KUnits = (() => {
                                 peerUnit.lat = newLat;
                                 peerUnit.lon = newLng;
                             }
+                            // Invalidate viewshed cache for each moved peer
+                            delete _viewshedCache[p.id];
                             _saveUnitPosition(p.id, newLat, newLng);
                         });
+                    }
+
+                    // Collect all moved unit IDs for viewshed refresh
+                    const movedIds = [u.id];
+                    if (marker._groupDrag && marker._groupPeers) {
+                        marker._groupPeers.forEach(p => movedIds.push(p.id));
                     }
 
                     marker._groupDrag = false;
                     marker._groupPeers = null;
                     marker._groupDragStart = null;
-                    _drawSelectionOverlays();
                     _drawMovementArrows();
+
+                    // Re-fetch viewshed for moved units, then redraw overlays
+                    Promise.all(movedIds.map(id => _fetchViewshed(id)))
+                        .then(() => _drawSelectionOverlays());
                 });
             }
 
@@ -595,37 +650,195 @@ const KUnits = (() => {
         _drawSelectionOverlays();
     }
 
-    /** Draw hover range circles for a unit (transient, cleared on mouseout). */
+    // ══════════════════════════════════════════════════
+    // ── Viewshed (LOS polygon) Fetch & Cache ─────────
+    // ══════════════════════════════════════════════════
+
+    /**
+     * Fetch the viewshed (line-of-sight) polygon for a unit.
+     * Returns a promise that resolves when the data is cached.
+     * Uses an in-memory cache keyed by unit_id, invalidated on tick change.
+     * Failed fetches are cached as `false` to prevent infinite retry loops.
+     */
+    function _fetchViewshed(unitId) {
+        // Already cached (success or failure sentinel) — resolve immediately
+        if (_viewshedCache[unitId] !== undefined) return Promise.resolve();
+        // Already fetching — return the existing promise so callers wait
+        if (_viewshedPending[unitId]) return _viewshedPending[unitId];
+
+        const sessionId = KSessionUI.getSessionId();
+        const token = KSessionUI.getToken();
+        if (!sessionId || !token) return Promise.resolve();
+
+        const promise = fetch(
+            `/api/sessions/${sessionId}/units/${unitId}/viewshed?rays=72`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        ).then(resp => {
+            if (resp.ok) return resp.json();
+            console.warn('Viewshed API error', resp.status, 'for unit', unitId);
+            return null;
+        }).then(geojson => {
+            if (geojson) {
+                _viewshedCache[unitId] = geojson;
+            } else {
+                // Cache failure sentinel to prevent infinite retries
+                _viewshedCache[unitId] = false;
+            }
+        }).catch(err => {
+            console.warn('Viewshed fetch failed for', unitId, err);
+            _viewshedCache[unitId] = false;
+        }).finally(() => {
+            delete _viewshedPending[unitId];
+        });
+
+        _viewshedPending[unitId] = promise;
+        return promise;
+    }
+
+    /**
+     * Invalidate the viewshed cache (called on tick update or unit state change).
+     */
+    function _invalidateViewshedCache(newTick) {
+        if (newTick !== undefined && newTick !== _viewshedTick) {
+            _viewshedTick = newTick;
+            _viewshedCache = {};
+            _viewshedPending = {};
+        }
+    }
+
+    /**
+     * Chaikin's corner-cutting algorithm to smooth a polygon.
+     * @param {Array<[number,number]>} latlngs  Array of [lat, lng] (Leaflet order).
+     * @param {number} iterations  Number of smoothing passes (default 2).
+     * @returns {Array<[number,number]>}
+     */
+    function _smoothPolygon(latlngs, iterations) {
+        if (!latlngs || latlngs.length < 4) return latlngs;
+        iterations = iterations || 2;
+        let pts = latlngs;
+        // Remove closing duplicate if present
+        const last = pts[pts.length - 1];
+        const first = pts[0];
+        if (last[0] === first[0] && last[1] === first[1]) pts = pts.slice(0, -1);
+
+        for (let iter = 0; iter < iterations; iter++) {
+            const n = pts.length;
+            const newPts = [];
+            for (let i = 0; i < n; i++) {
+                const p0 = pts[i];
+                const p1 = pts[(i + 1) % n];
+                newPts.push([
+                    0.75 * p0[0] + 0.25 * p1[0],
+                    0.75 * p0[1] + 0.25 * p1[1],
+                ]);
+                newPts.push([
+                    0.25 * p0[0] + 0.75 * p1[0],
+                    0.25 * p0[1] + 0.75 * p1[1],
+                ]);
+            }
+            pts = newPts;
+        }
+        // Close
+        pts.push(pts[0]);
+        return pts;
+    }
+
+    /**
+     * Clip a viewshed polygon to a maximum range (for direct fire range overlay).
+     * For each vertex, if its distance from center > maxRange, scale it toward center.
+     * @param {Array<[number,number]>} geojsonCoords  [lon, lat] pairs from GeoJSON.
+     * @param {number} centerLat
+     * @param {number} centerLon
+     * @param {number} maxRangeM  Fire range in meters.
+     * @returns {Array<[number,number]>}  [lat, lng] pairs (Leaflet order).
+     */
+    function _clipViewshedToRange(geojsonCoords, centerLat, centerLon, maxRangeM) {
+        const result = [];
+        for (const coord of geojsonCoords) {
+            const lon = coord[0], lat = coord[1];
+            const dlat = (lat - centerLat) * 111320;
+            const dlon = (lon - centerLon) * 74000;
+            const dist = Math.sqrt(dlat * dlat + dlon * dlon);
+            if (dist <= maxRangeM || dist < 1) {
+                result.push([lat, lon]);
+            } else {
+                const scale = maxRangeM / dist;
+                result.push([
+                    centerLat + (lat - centerLat) * scale,
+                    centerLon + (lon - centerLon) * scale,
+                ]);
+            }
+        }
+        return result;
+    }
+
+    /** Draw hover range overlays for a unit (transient, cleared on mouseout). */
     function _drawHoverRanges(u) {
         _hoverLayer.clearLayers();
         const pos = L.latLng(u.lat, u.lon);
         const isBlue = u.side === 'blue';
         const accent = isBlue ? '#4fc3f7' : '#ef5350';
-
-        // Detection range
         const detRange = u.detection_range_m || 2000;
-        _hoverLayer.addLayer(L.circle(pos, {
-            radius: detRange,
-            color: accent,
-            weight: 1,
-            opacity: 0.3,
-            dashArray: '6,8',
-            fillColor: accent,
-            fillOpacity: 0.05,
-            interactive: false,
-        }));
-
-        // Fire range
         const fireRange = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
-        if (fireRange < detRange * 0.95) {
+        const isIndirect = INDIRECT_FIRE_TYPES.has(u.unit_type);
+
+        // Use viewshed polygon (no fallback circles — fetch silently)
+        const cached = _viewshedCache[u.id];
+        if (cached && cached.geometry && cached.geometry.coordinates) {
+            const coords = cached.geometry.coordinates[0];
+            const latlngs = coords.map(c => [c[1], c[0]]);
+            const smoothed = _smoothPolygon(latlngs, 2);
+            _hoverLayer.addLayer(L.polygon(smoothed, {
+                color: accent,
+                weight: 1.5,
+                opacity: 0.6,
+                fillColor: accent,
+                fillOpacity: 0.10,
+                interactive: false,
+            }));
+
+            // Direct fire range: clip viewshed polygon to fire range
+            if (!isIndirect && fireRange < detRange * 0.95) {
+                const clipped = _clipViewshedToRange(coords, u.lat, u.lon, fireRange);
+                const smoothedFire = _smoothPolygon(clipped, 2);
+                _hoverLayer.addLayer(L.polygon(smoothedFire, {
+                    color: '#ff9800',
+                    weight: 1.5,
+                    opacity: 0.6,
+                    fillColor: '#ff9800',
+                    fillOpacity: 0.10,
+                    interactive: false,
+                }));
+            }
+        } else if (cached === false) {
+            // Viewshed fetch failed — show a fallback dashed circle
+            _hoverLayer.addLayer(L.circle(pos, {
+                radius: detRange,
+                color: accent,
+                weight: 1,
+                opacity: 0.4,
+                dashArray: '6,4',
+                fillColor: accent,
+                fillOpacity: 0.05,
+                interactive: false,
+            }));
+        } else {
+            // No viewshed cached yet — fetch in background, redraw when ready
+            _fetchViewshed(u.id).then(() => {
+                if (_hoveredUnitId === u.id) _drawHoverRanges(u);
+            });
+        }
+
+        // Indirect fire range: always a circle (not affected by LOS)
+        if (isIndirect) {
             _hoverLayer.addLayer(L.circle(pos, {
                 radius: fireRange,
                 color: '#ff9800',
-                weight: 1,
-                opacity: 0.35,
-                dashArray: '4,5',
+                weight: 1.5,
+                opacity: 0.6,
+                dashArray: '6,4',
                 fillColor: '#ff9800',
-                fillOpacity: 0.06,
+                fillOpacity: 0.08,
                 interactive: false,
             }));
         }
@@ -662,7 +875,9 @@ const KUnits = (() => {
         // Detection / fire range info
         const detR = u.detection_range_m || 2000;
         const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
-        html += `<span style="font-size:10px;color:#64b5f6">👁 ${_fmtDist(detR)}</span>`;
+        const eyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
+        const eyeTag = eyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${eyeH}m)</span>` : '';
+        html += `<span style="font-size:10px;color:#64b5f6">👁 ${_fmtDist(detR)}${eyeTag}</span>`;
         html += ` <span style="font-size:10px;color:#ff9800">🎯 ${_fmtDist(fireR)}</span><br>`;
 
         // Current task info
@@ -1535,6 +1750,9 @@ const KUnits = (() => {
             const pos = L.latLng(u.lat, u.lon);
             const isBlue = u.side === 'blue';
             const accent = isBlue ? '#4fc3f7' : '#ef5350';
+            const detRange = u.detection_range_m || 2000;
+            const fireRange = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
+            const isIndirect = INDIRECT_FIRE_TYPES.has(u.unit_type);
 
             // ── Selection ring (fixed pixel size — does not zoom) ──
             _selectionLayer.addLayer(L.circleMarker(pos, {
@@ -1546,30 +1764,63 @@ const KUnits = (() => {
                 interactive: false,
             }));
 
-            // ── Detection / visibility range (geographic circle) ──
-            const detRange = u.detection_range_m || 2000;
-            _selectionLayer.addLayer(L.circle(pos, {
-                radius: detRange,
-                color: accent,
-                weight: 1,
-                opacity: 0.35,
-                dashArray: '6,8',
-                fillColor: accent,
-                fillOpacity: 0.06,
-                interactive: false,
-            }));
+            // ── Detection / visibility range (viewshed polygon) ──
+            const cached = _viewshedCache[u.id];
+            if (cached && cached.geometry && cached.geometry.coordinates) {
+                const coords = cached.geometry.coordinates[0];
+                const latlngs = coords.map(c => [c[1], c[0]]);
+                const smoothed = _smoothPolygon(latlngs, 2);
+                _selectionLayer.addLayer(L.polygon(smoothed, {
+                    color: accent,
+                    weight: 1.5,
+                    opacity: 0.6,
+                    fillColor: accent,
+                    fillOpacity: 0.12,
+                    interactive: false,
+                }));
 
-            // ── Effective fire range (geographic, amber) ──
-            const fireRange = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
-            if (fireRange < detRange * 0.95) {
+                // Direct fire range: clip viewshed to fire range
+                if (!isIndirect && fireRange < detRange * 0.95) {
+                    const clipped = _clipViewshedToRange(coords, u.lat, u.lon, fireRange);
+                    const smoothedFire = _smoothPolygon(clipped, 2);
+                    _selectionLayer.addLayer(L.polygon(smoothedFire, {
+                        color: '#ff9800',
+                        weight: 1.5,
+                        opacity: 0.6,
+                        fillColor: '#ff9800',
+                        fillOpacity: 0.12,
+                        interactive: false,
+                    }));
+                }
+            } else if (cached === false) {
+                // Viewshed fetch failed — show fallback dashed circle
+                _selectionLayer.addLayer(L.circle(pos, {
+                    radius: detRange,
+                    color: accent,
+                    weight: 1,
+                    opacity: 0.4,
+                    dashArray: '6,4',
+                    fillColor: accent,
+                    fillOpacity: 0.06,
+                    interactive: false,
+                }));
+            } else {
+                // No viewshed cached yet — fetch in background, redraw when ready
+                _fetchViewshed(u.id).then(() => {
+                    if (selectedUnitIds.has(uid)) _drawSelectionOverlays();
+                });
+            }
+
+            // ── Indirect fire range: always circle (not LOS-affected) ──
+            if (isIndirect) {
                 _selectionLayer.addLayer(L.circle(pos, {
                     radius: fireRange,
                     color: '#ff9800',
-                    weight: 1,
-                    opacity: 0.4,
-                    dashArray: '4,5',
+                    weight: 1.5,
+                    opacity: 0.6,
+                    dashArray: '6,4',
                     fillColor: '#ff9800',
-                    fillOpacity: 0.07,
+                    fillOpacity: 0.10,
                     interactive: false,
                 }));
             }
@@ -1682,10 +1933,37 @@ const KUnits = (() => {
         unitMarkers = {};
         allUnitsData = [];
         selectedUnitIds.clear();
+        _viewshedCache = {};
+        _viewshedPending = {};
+        _viewshedTick = -1;
     }
 
-    function update(units) {
+    function update(units, tick) {
+        // Invalidate viewshed cache on tick change
+        if (tick !== undefined) _invalidateViewshedCache(tick);
+
+        // Invalidate viewshed for units whose position changed (e.g. admin move, engine tick)
+        _invalidateMovedUnitsViewshed(units);
+
         render(units);
+    }
+
+    /**
+     * Compare incoming unit positions with cached data and invalidate
+     * viewshed entries for units that have moved.
+     */
+    function _invalidateMovedUnitsViewshed(newUnits) {
+        if (!newUnits || !allUnitsData.length) return;
+        const oldMap = {};
+        allUnitsData.forEach(u => { oldMap[u.id] = u; });
+        for (const nu of newUnits) {
+            const old = oldMap[nu.id];
+            if (!old) continue;
+            // If position changed, clear viewshed for this unit
+            if (old.lat !== nu.lat || old.lon !== nu.lon) {
+                delete _viewshedCache[nu.id];
+            }
+        }
     }
 
     function getMarker(unitId) {
@@ -1698,5 +1976,6 @@ const KUnits = (() => {
         toggleSelect, assignToMe,
         getSelectedIds, clearSelection, getAllUnits,
         clearAll, setAdminDrag,
+        invalidateViewshedCache: _invalidateViewshedCache,
     };
 })();

@@ -4,6 +4,7 @@ Fog-of-war visibility service.
 Filters world state → per-side visible view.
 - Own-side units: always fully visible
 - Opposing units: only visible if within detection range of own-side unit
+  AND line-of-sight is not blocked by terrain
 - Admin/observer: sees everything
 """
 
@@ -217,6 +218,13 @@ async def get_visible_units(
         # fall back to no enemy visibility
         enemy_units = []
 
+    # ── LOS filtering: verify each enemy unit has line-of-sight from
+    # at least one friendly observer (terrain/elevation blocks visibility) ──
+    if enemy_units:
+        enemy_units = await _filter_by_los(
+            session_id, side, own_units, enemy_units, db
+        )
+
     all_visible = [_serialize_unit(u) for u in own_units]
     for u in enemy_units:
         serialized = _serialize_unit(u)
@@ -230,6 +238,147 @@ async def get_visible_units(
         all_visible.append(serialized)
 
     return all_visible
+
+
+async def _filter_by_los(
+    session_id: uuid.UUID,
+    side: str,
+    own_units: list,
+    enemy_units: list,
+    db: AsyncSession,
+) -> list:
+    """Filter enemy units through line-of-sight checks.
+
+    For each candidate enemy unit (already within ST_DWithin range),
+    check that at least one friendly unit has unblocked LOS to it.
+    Uses cached terrain/elevation data for speed.
+    """
+    from backend.models.terrain_cell import TerrainCell
+    from backend.models.elevation_cell import ElevationCell
+    from backend.models.grid import GridDefinition
+    from backend.engine.terrain import (
+        TerrainService, get_cached_terrain_data, set_cached_terrain_data,
+    )
+    from backend.services.los_service import LOSService
+
+    # Build TerrainService from cache or DB
+    sid_str = str(session_id)
+    cached = get_cached_terrain_data(sid_str)
+    terrain_cells_dict = None
+    elevation_cells_dict = None
+
+    if cached:
+        terrain_cells_dict = cached["terrain_cells"]
+        elevation_cells_dict = cached["elevation_cells"]
+    else:
+        tc_result = await db.execute(
+            select(TerrainCell.snail_path, TerrainCell.terrain_type)
+            .where(TerrainCell.session_id == session_id)
+        )
+        tc_rows = tc_result.all()
+        if tc_rows:
+            terrain_cells_dict = {row[0]: row[1] for row in tc_rows}
+            ec_result = await db.execute(
+                select(
+                    ElevationCell.snail_path,
+                    ElevationCell.elevation_m,
+                    ElevationCell.slope_deg,
+                    ElevationCell.aspect_deg,
+                ).where(ElevationCell.session_id == session_id)
+            )
+            ec_rows = ec_result.all()
+            if ec_rows:
+                elevation_cells_dict = {
+                    row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                    for row in ec_rows
+                }
+        set_cached_terrain_data(sid_str, terrain_cells_dict, elevation_cells_dict)
+
+    # If no elevation data AND no terrain cells, skip LOS filtering (all pass)
+    if not elevation_cells_dict and not terrain_cells_dict:
+        return enemy_units
+
+    # Load grid service
+    grid_service = None
+    gd_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = gd_result.scalar_one_or_none()
+    if gd:
+        from backend.services.grid_service import GridService
+        grid_service = GridService(gd)
+
+    if not grid_service:
+        return enemy_units
+
+    terrain = TerrainService(
+        terrain_cells=terrain_cells_dict,
+        elevation_cells=elevation_cells_dict,
+        grid_service=grid_service,
+    )
+    los = LOSService(terrain)
+
+    # Unit-type-specific eye heights (must match detection.py / units.py)
+    UNIT_EYE_HEIGHTS = {
+        "observation_post": 8.0, "tank_company": 3.0, "tank_platoon": 3.0,
+        "mech_company": 2.8, "mech_platoon": 2.8, "recon_team": 3.0,
+        "recon_section": 3.0, "sniper_team": 2.5, "headquarters": 3.0,
+        "command_post": 3.0, "artillery_battery": 2.5, "artillery_platoon": 2.5,
+    }
+    DEFAULT_EYE_H = 2.0
+
+    # Pre-extract own unit positions
+    own_positions = []
+    for u in own_units:
+        if u.is_destroyed or u.position is None:
+            continue
+        try:
+            pt = to_shape(u.position)
+            eye_h = UNIT_EYE_HEIGHTS.get(u.unit_type, DEFAULT_EYE_H)
+            own_positions.append((pt.x, pt.y, u.detection_range_m or 1500.0, eye_h))
+        except Exception:
+            continue
+
+    if not own_positions:
+        return enemy_units
+
+    # Filter: enemy must have LOS from at least one own unit
+    visible = []
+    for enemy in enemy_units:
+        if enemy.position is None:
+            continue
+        try:
+            ept = to_shape(enemy.position)
+            e_lon, e_lat = ept.x, ept.y
+        except Exception:
+            continue
+
+        has_any_los = False
+        for obs_lon, obs_lat, det_range, eye_h in own_positions:
+            # Apply terrain visibility factor to detection range
+            # (matches the tick engine's process_detection formula)
+            terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
+            effective_range = det_range * terrain_vis
+
+            # Apply height advantage bonus to effective range
+            height_bonus = terrain.detection_height_bonus(
+                obs_lon, obs_lat, e_lon, e_lat
+            )
+            effective_range *= height_bonus
+
+            dlat = (e_lat - obs_lat) * 111320.0
+            dlon = (e_lon - obs_lon) * 74000.0
+            dist = (dlat * dlat + dlon * dlon) ** 0.5
+            if dist > effective_range:
+                continue
+            if los.has_los(obs_lon, obs_lat, e_lon, e_lat, eye_height=eye_h):
+                has_any_los = True
+                break
+
+        if has_any_los:
+            visible.append(enemy)
+
+    return visible
 
 
 async def get_visible_contacts(

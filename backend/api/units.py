@@ -389,6 +389,24 @@ DEFAULT_SPEEDS = {"slow": 1.2, "fast": 3.0}  # fallback for unknown types
 
 VALID_SPEED_LABELS = {"slow", "fast"}
 
+# ── Unit-type-specific eye heights (meters above ground) for LOS / viewshed ──
+# Observation posts have elevated optics; vehicles have turret height; infantry is standing height.
+UNIT_EYE_HEIGHTS: dict[str, float] = {
+    "observation_post":   8.0,    # elevated observation platform / optics on mast
+    "tank_company":       3.0,    # turret height
+    "tank_platoon":       3.0,
+    "mech_company":       2.8,    # IFV turret
+    "mech_platoon":       2.8,
+    "recon_team":         3.0,    # optics on vehicle or elevated position
+    "recon_section":      3.0,
+    "sniper_team":        2.5,    # often on elevated positions
+    "headquarters":       3.0,    # command vehicle
+    "command_post":       3.0,
+    "artillery_battery":  2.5,
+    "artillery_platoon":  2.5,
+}
+DEFAULT_EYE_HEIGHT = 2.0  # infantry standing height
+
 
 @router.put("/{session_id}/units/{unit_id}/move")
 async def set_unit_move(
@@ -703,6 +721,144 @@ async def merge_units(
         "survivor": _serialize_unit(survivor),
         "absorbed_id": str(absorbed.id),
     }
+
+
+@router.get("/{session_id}/units/{unit_id}/viewshed")
+async def get_unit_viewshed(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+    rays: int = 72,
+    step: float | None = None,
+):
+    """Return the LOS-based viewshed polygon for a unit as GeoJSON.
+    
+    The viewshed accounts for terrain elevation blocking and
+    terrain feature occlusion (forest, urban, etc.).
+    Falls back to a simple circle if no elevation data exists.
+    """
+    from backend.models.grid import GridDefinition
+    from backend.models.terrain_cell import TerrainCell
+    from backend.models.elevation_cell import ElevationCell
+    from backend.engine.terrain import TerrainService, get_cached_terrain_data, set_cached_terrain_data
+    from backend.services.grid_service import GridService
+    from backend.services.los_service import LOSService
+
+    # Load unit
+    result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
+    unit = result.scalar_one_or_none()
+    if unit is None:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    if unit.is_destroyed:
+        raise HTTPException(status_code=404, detail="Unit is destroyed")
+    if unit.position is None:
+        raise HTTPException(status_code=400, detail="Unit has no position")
+
+    # Fog-of-war note: any session participant may request viewshed for any
+    # non-destroyed unit.  The real visibility filter lives on the unit-list
+    # endpoint; if the client already has the unit's id it was already cleared
+    # by fog-of-war (or by admin god-view).
+
+    # Extract unit position
+    from geoalchemy2.shape import to_shape
+    pt = to_shape(unit.position)
+    obs_lon, obs_lat = pt.x, pt.y
+    det_range = unit.detection_range_m or 1500.0
+
+    # Build TerrainService — use session-level cache to avoid DB re-reads
+    sid_str = str(session_id)
+    cached = get_cached_terrain_data(sid_str)
+    terrain_cells_dict = None
+    elevation_cells_dict = None
+    grid_service = None
+
+    if cached:
+        terrain_cells_dict = cached["terrain_cells"]
+        elevation_cells_dict = cached["elevation_cells"]
+    else:
+        tc_result = await db.execute(
+            select(TerrainCell.snail_path, TerrainCell.terrain_type)
+            .where(TerrainCell.session_id == session_id)
+        )
+        tc_rows = tc_result.all()
+        if tc_rows:
+            terrain_cells_dict = {row[0]: row[1] for row in tc_rows}
+
+            ec_result = await db.execute(
+                select(
+                    ElevationCell.snail_path,
+                    ElevationCell.elevation_m,
+                    ElevationCell.slope_deg,
+                    ElevationCell.aspect_deg,
+                ).where(ElevationCell.session_id == session_id)
+            )
+            ec_rows = ec_result.all()
+            if ec_rows:
+                elevation_cells_dict = {
+                    row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                    for row in ec_rows
+                }
+        # Cache for future requests
+        set_cached_terrain_data(sid_str, terrain_cells_dict, elevation_cells_dict)
+
+    # Load grid service (lightweight, no cache needed)
+    gd_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = gd_result.scalar_one_or_none()
+    if gd:
+        grid_service = GridService(gd)
+
+    # Load scenario for terrain_meta fallback
+    from backend.models.scenario import Scenario
+    from backend.models.session import Session
+    sess_result = await db.execute(select(Session).where(Session.id == session_id))
+    session_obj = sess_result.scalar_one_or_none()
+    terrain_meta = None
+    if session_obj and session_obj.scenario_id:
+        sc_result = await db.execute(select(Scenario).where(Scenario.id == session_obj.scenario_id))
+        scenario = sc_result.scalar_one_or_none()
+        if scenario:
+            terrain_meta = scenario.terrain_meta
+
+    terrain = TerrainService(
+        terrain_meta=terrain_meta,
+        terrain_cells=terrain_cells_dict,
+        elevation_cells=elevation_cells_dict,
+        grid_service=grid_service,
+    )
+
+    # Compute viewshed — use unit-type-specific eye height
+    los = LOSService(terrain)
+    # Clamp rays to reasonable range
+    rays = max(24, min(360, rays))
+    eye_h = UNIT_EYE_HEIGHTS.get(unit.unit_type, DEFAULT_EYE_HEIGHT)
+    try:
+        geojson = los.compute_viewshed_geojson(
+            observer_lon=obs_lon,
+            observer_lat=obs_lat,
+            max_range_m=det_range,
+            eye_height=eye_h,
+            num_rays=rays,
+            step_m=step,
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Viewshed computation failed for unit %s: %s", unit_id, e)
+        # Fallback: return a simple circle
+        geojson = los.compute_viewshed_geojson(
+            observer_lon=obs_lon,
+            observer_lat=obs_lat,
+            max_range_m=det_range,
+            eye_height=eye_h,
+            num_rays=rays,
+            step_m=None,
+        )
+    geojson["properties"]["unit_id"] = str(unit_id)
+    geojson["properties"]["unit_name"] = unit.name
+
+    return geojson
 
 
 @router.get("/{session_id}/contacts")

@@ -41,6 +41,11 @@ class Contact(Base):
     observing_unit_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("units.id"), nullable=True
     )
+    # Internal tracking: which actual enemy unit this contact refers to.
+    # Not exposed to players (they only see estimated_type/location).
+    target_unit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     estimated_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     estimated_size: Mapped[str | None] = mapped_column(String(50), nullable=True)
 

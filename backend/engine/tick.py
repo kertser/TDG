@@ -120,6 +120,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         grid_service=grid_service,
     )
 
+    # Build LOSService for line-of-sight checks in detection
+    from backend.services.los_service import LOSService
+    los_service = LOSService(terrain)
+
     tick = session.tick
     tick_duration = session.tick_interval or 60  # seconds
     game_time = session.current_time or datetime.now(timezone.utc)
@@ -154,7 +158,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         weather_mod = min(1.0, vis_km / 5.0)
 
     new_contacts_data = process_detection(
-        blue_units, red_units, tick, terrain, weather_mod
+        blue_units, red_units, tick, terrain, weather_mod,
+        los_service=los_service,
     )
 
     # Upsert contacts
@@ -329,7 +334,8 @@ async def _upsert_contacts(
     events = []
 
     for cd in new_contacts_data:
-        # Check if contact for this target already exists
+        # Check if contact for this specific target already exists
+        target_uid = cd.get("target_unit_id")
         result = await db.execute(
             select(Contact).where(
                 Contact.session_id == session_id,
@@ -338,13 +344,17 @@ async def _upsert_contacts(
         )
         existing = result.scalars().all()
 
-        # Find existing contact near this position
+        # Find existing contact for the SAME target unit
         updated = False
         for contact in existing:
-            # Simple match: same observing side, similar position
-            # In a full implementation, would match by target_unit_id
-            if not contact.is_stale and contact.source == cd["source"]:
-                # Update existing contact
+            # Match by target_unit_id for precise contact tracking
+            # (Previously matched only by source, causing different targets
+            # to incorrectly merge into one contact)
+            contact_target = None
+            if hasattr(contact, 'target_unit_id'):
+                contact_target = contact.target_unit_id
+            if target_uid and contact_target and str(contact_target) == str(target_uid):
+                # Update existing contact for this target
                 contact.location_estimate = from_shape(
                     Point(cd["lon"], cd["lat"]), srid=4326
                 )
@@ -354,6 +364,7 @@ async def _upsert_contacts(
                 contact.last_seen_at = game_time
                 contact.estimated_type = cd["estimated_type"]
                 contact.is_stale = False
+                contact.source = cd.get("source", "visual")
                 updated = True
                 break
 
@@ -363,6 +374,7 @@ async def _upsert_contacts(
                 session_id=session_id,
                 observing_side=cd["observing_side"],
                 observing_unit_id=cd.get("observing_unit_id"),
+                target_unit_id=cd.get("target_unit_id"),
                 estimated_type=cd.get("estimated_type"),
                 estimated_size=cd.get("estimated_size"),
                 location_estimate=from_shape(

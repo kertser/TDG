@@ -1586,6 +1586,14 @@ const KAdmin = (() => {
                 opt.textContent = info.label || key;
                 typeEl.appendChild(opt);
             }
+            // Auto-update detection range & speed when unit type changes
+            typeEl.onchange = () => {
+                const info = types[typeEl.value];
+                if (info) {
+                    if (info.det) _setVal('admin-ue-detection', info.det);
+                    if (info.speed) _setVal('admin-ue-speed', info.speed);
+                }
+            };
         }
 
         // Pre-fill with defaults for new unit
@@ -1648,6 +1656,14 @@ const KAdmin = (() => {
                 opt.textContent = info.label || key;
                 typeEl.appendChild(opt);
             }
+            // Auto-update detection range & speed when unit type changes
+            typeEl.onchange = () => {
+                const info = types[typeEl.value];
+                if (info) {
+                    if (info.det) _setVal('admin-ue-detection', info.det);
+                    if (info.speed) _setVal('admin-ue-speed', info.speed);
+                }
+            };
             // Add current type if not in list
             if (unit.unit_type && !types[unit.unit_type]) {
                 const opt = document.createElement('option');

@@ -376,6 +376,7 @@ Contact
   session_id      UUID  FK → Session
   observing_side  ENUM('blue','red')
   observing_unit_id UUID FK → Unit  nullable
+  target_unit_id  UUID  nullable     -- internal tracking of actual enemy unit
   estimated_type  VARCHAR(50)  nullable
   estimated_size  VARCHAR(50)  nullable
   location_estimate GEOMETRY(Point, 4326)
@@ -1178,6 +1179,7 @@ if unit.ammo <= 0:
 | **Overlay Layer Icon** | `ui.js` | Stacked-layers SVG icon for the overlay toggle button (replaces generic arrow+rect). |
 | **Unit Delete from Context Menu** | `units.js` | Right-click context menu includes 🗑 Delete Unit (admin-only), calls admin DELETE endpoint. |
 | **Orders Complete Button** | `index.html`, `session_ui.js`, `style.css` | "✔ Orders Complete" button in topbar (right side) replaces sidebar "Next Turn". Visible only to commanders. Green accent styling. |
+| **LOS Viewshed (Line-of-Sight)** | `los_service.py`, `units.py`, `detection.py`, `tick.py`, `units.js`, `app.js` | Replaces circular detection ranges with terrain-aware visibility polygons. Backend `LOSService` casts 72 rays, uses "maximum elevation angle" algorithm with terrain obstacle heights (forest=12m, urban=10m, orchard=5m, scrub=2m) and visibility absorption. API endpoint `GET /units/{id}/viewshed` returns GeoJSON polygon. Detection engine uses `has_los()` for unit-to-unit LOS checks (with matching visibility absorption). Frontend fetches viewshed on hover/select, renders as `L.polygon` instead of `L.circle`, with cache invalidated on tick change. Falls back to circle when no elevation data. **Unit-type-specific eye heights**: observation_post=8m (elevated optics), tanks=3m, recon=3m, infantry=2m (default). Higher eye height lets units see over obstacles (forests, buildings). Applied in viewshed computation, tick detection, and fog-of-war LOS filter. **Bugfixes applied:** (1) `has_los()` now includes visibility absorption budget (consistent with viewshed), (2) `_cast_ray` no longer terminates prematurely after 3 hidden steps (valleys), tracks farthest visible point correctly, (3) detection probability includes target terrain concealment factor, (4) visibility service `_filter_by_los` applies terrain/height range modifiers (matches tick engine), (5) contact upsert matches by `target_unit_id` for accurate multi-contact tracking. |
 
 ### Permission / Authority System
 
@@ -1187,7 +1189,7 @@ if unit.ammo <= 0:
 | Observers cannot submit orders | `orders.py: submit_order` — 403 if side or role is observer |
 | Observers cannot be assigned to units | `units.py: assign_unit`, `admin.py: PATCH unit` — validates target user |
 | Observers cannot assign units | `units.py: assign_unit` — 403 if caller is observer |
-| Side check: blue can't command red | `units.js: _canSelect` — rejects cross-side selection |
+| Side check: blue can't command red | `units.js: _canSelect` — rejects cross-side selection (bypassed when admin panel is unlocked) |
 | Side check: blue can't order red units | `orders.py: submit_order` — validates unit side matches order side |
 | Formation/Move/Stop require admin | `units.js: _showUnitContextMenu` — Formation, Set Move, Stop items only shown when `KAdmin.isUnlocked()` is true |
 | Admin close locks panel | `admin.js: _closeAdminWindow` — closing admin window sets `_adminUnlocked = false`, re-shows lock gate, closes open unit context menus |
@@ -1275,6 +1277,7 @@ KShU/
 │   │   ├── overlay_service.py
 │   │   ├── ws_manager.py
 │   │   ├── tick_scheduler.py
+│   │   ├── los_service.py        ← NEW: LOS viewshed computation (ray casting, terrain-aware)
 │   │   └── terrain_analysis/      ← NEW: Terrain intelligence package
 │   │       ├── __init__.py
 │   │       ├── service.py         ← Orchestrator: analyze_grid()
@@ -1303,7 +1306,8 @@ KShU/
 │       ├── test_grid_service.py
 │       ├── test_movement.py
 │       ├── test_detection.py
-│       └── test_combat.py
+│       ├── test_combat.py
+│       └── test_los_service.py    ← NEW: LOS viewshed + has_los tests
 ├── frontend/
 │   ├── index.html
 │   ├── favicon.svg

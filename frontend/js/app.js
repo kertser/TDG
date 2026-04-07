@@ -93,10 +93,10 @@
         KOverlays.setSession(sessionId, token);
         try { await KOverlays.loadFromServer(); } catch (err) { console.warn('Overlays load error:', err); }
 
-        // Load terrain overlay (if analyzed)
+        // Load terrain overlay (if analyzed) — non-blocking, don't hold up WS/events
         try {
             KTerrain.setSession(sessionId);
-            await KTerrain.load(sessionId, token);
+            KTerrain.load(sessionId, token);  // intentionally not awaited
         } catch (err) { console.warn('Terrain load error:', err); }
 
         // Initialize orders panel
@@ -115,12 +115,14 @@
             if (KAdmin.isGodViewEnabled()) {
                 KAdmin.onStateUpdate(data);
             } else {
-                if (data.units) KUnits.update(data.units);
+                if (data.units) KUnits.update(data.units, data.tick);
             }
             if (data.contacts) KContacts.render(data.contacts);
             // Update game clock from state update
             if (data.tick !== undefined) {
                 KMap.setGameTime(data.tick, data.game_time || null);
+                // Invalidate viewshed cache on tick change
+                KUnits.invalidateViewshedCache(data.tick);
             }
         });
 

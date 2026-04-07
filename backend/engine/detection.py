@@ -21,6 +21,24 @@ from backend.engine.terrain import TerrainService
 METERS_PER_DEG_LAT = 111_320.0
 METERS_PER_DEG_LON_AT_48 = 74_000.0
 
+# Unit-type-specific eye heights (meters above ground) for LOS checks.
+# Must stay in sync with backend/api/units.py UNIT_EYE_HEIGHTS.
+UNIT_EYE_HEIGHTS: dict[str, float] = {
+    "observation_post":   8.0,    # elevated observation platform / optics on mast
+    "tank_company":       3.0,    # turret height
+    "tank_platoon":       3.0,
+    "mech_company":       2.8,    # IFV turret
+    "mech_platoon":       2.8,
+    "recon_team":         3.0,    # optics on vehicle or elevated position
+    "recon_section":      3.0,
+    "sniper_team":        2.5,    # often on elevated positions
+    "headquarters":       3.0,    # command vehicle
+    "command_post":       3.0,
+    "artillery_battery":  2.5,
+    "artillery_platoon":  2.5,
+}
+DEFAULT_EYE_HEIGHT = 2.0
+
 
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlat = (lat2 - lat1) * METERS_PER_DEG_LAT
@@ -53,6 +71,7 @@ def process_detection(
     terrain: TerrainService,
     weather_visibility_mod: float = 1.0,
     existing_contacts: list | None = None,
+    los_service=None,
 ) -> list[dict]:
     """
     Run detection checks between opposing sides.
@@ -60,6 +79,9 @@ def process_detection(
     Returns list of new/updated contact dicts:
       {observing_side, observing_unit_id, target_unit, estimated_type,
        estimated_size, location_estimate, location_accuracy_m, confidence, source}
+
+    If los_service is provided, uses LOS checks to verify that terrain
+    doesn't block the line of sight between observer and target.
     """
     new_contacts = []
 
@@ -80,7 +102,13 @@ def process_detection(
 
             base_range = observer.detection_range_m or 1500.0
             terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
+
+            # Height advantage detection bonus
+            height_bonus = 1.0
             effective_range = base_range * terrain_vis * weather_visibility_mod
+
+            # Observer eye height depends on unit type (OP = 8m, tanks = 3m, infantry = 2m)
+            observer_eye_h = UNIT_EYE_HEIGHTS.get(observer.unit_type, DEFAULT_EYE_HEIGHT)
 
             # Recon bonus
             capabilities = observer.capabilities or {}
@@ -98,14 +126,33 @@ def process_detection(
                 except Exception:
                     continue
 
+                # Apply height advantage to effective range for this pair
+                pair_height_bonus = terrain.detection_height_bonus(
+                    obs_lon, obs_lat, tgt_lon, tgt_lat
+                )
+                pair_effective_range = effective_range * pair_height_bonus
+
                 dist = _distance_m(obs_lat, obs_lon, tgt_lat, tgt_lon)
-                if dist > effective_range:
+                if dist > pair_effective_range:
                     continue
+
+                # LOS check: verify terrain doesn't block line of sight
+                if los_service is not None:
+                    if not los_service.has_los(obs_lon, obs_lat, tgt_lon, tgt_lat,
+                                               eye_height=observer_eye_h):
+                        continue  # LOS blocked by terrain
 
                 # Detection probability
                 posture_mod = _posture_modifier(target.current_task)
-                distance_factor = max(0.0, 1.0 - dist / effective_range)
-                prob = base_prob * distance_factor * posture_mod * recon_bonus
+                distance_factor = max(0.0, 1.0 - dist / pair_effective_range)
+
+                # Target terrain concealment: targets in obscuring terrain
+                # (forest, urban, scrub) are harder to detect even if LOS exists.
+                # Maps terrain visibility factor 0.4–1.0 → concealment 0.7–1.0
+                target_terrain_vis = terrain.visibility_factor(tgt_lon, tgt_lat)
+                target_concealment = 0.5 + 0.5 * target_terrain_vis
+
+                prob = base_prob * distance_factor * posture_mod * recon_bonus * target_concealment
                 prob = min(prob, 0.95)  # cap at 95%
 
                 roll = _deterministic_roll(tick, observer.id, target.id)
