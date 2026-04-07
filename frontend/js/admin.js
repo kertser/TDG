@@ -255,6 +255,8 @@ const KAdmin = (() => {
         // Disable god view if it was on
         if (_godViewEnabled) {
             _godViewEnabled = false;
+            _godViewRefreshPending = false;
+            clearTimeout(_godViewRefreshTimer);
             const btn = document.getElementById('admin-god-view-toggle');
             if (btn) {
                 btn.textContent = '👁 God View OFF';
@@ -1363,7 +1365,11 @@ const KAdmin = (() => {
         if (existing) existing.remove();
     }
 
-    /** Fetch and render all units (god view). Called on toggle and on state_update. */
+    let _godViewRefreshPending = false;
+    let _godViewRefreshTimer = null;
+
+    /** Fetch and render all units (god view). Called on toggle and on state_update.
+     *  Debounced to prevent overlapping fetch+render calls from rapid state_updates. */
     async function _refreshGodView() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
@@ -1377,15 +1383,22 @@ const KAdmin = (() => {
         } catch (err) {
             _showInfo('admin-god-status', `✗ ${err.message}`, 'error');
         }
+        _godViewRefreshPending = false;
     }
 
     function isGodViewEnabled() { return _godViewEnabled; }
 
     /** Called by app.js when a state_update arrives via WebSocket.
-     *  If god view is on, re-fetch admin units instead of using fog-of-war data. */
+     *  If god view is on, re-fetch admin units instead of using fog-of-war data.
+     *  Debounced: skips if a refresh is already in flight, throttles to max 1/500ms. */
     async function onStateUpdate(data) {
         if (_godViewEnabled) {
-            await _refreshGodView();
+            if (_godViewRefreshPending) return; // skip if already in flight
+            _godViewRefreshPending = true;
+            clearTimeout(_godViewRefreshTimer);
+            _godViewRefreshTimer = setTimeout(() => {
+                _refreshGodView();
+            }, 200);
         }
     }
 
@@ -2851,14 +2864,14 @@ const KAdmin = (() => {
                     loadPublicCoC();
                     if (_adminUnlocked) _loadChainOfCommand();
                     // Reload units on map to show updated assignment names
-                    const token = _getToken();
+                    const reloadToken = _getToken();
                     const userSid = _getUserSessionId();
-                    if (userSid && token) {
+                    if (userSid && reloadToken) {
                         try {
                             if (_godViewEnabled) {
                                 await _refreshGodView();
                             } else {
-                                await KUnits.load(userSid, token);
+                                await KUnits.load(userSid, reloadToken);
                             }
                         } catch(e) {}
                     }
@@ -2902,14 +2915,14 @@ const KAdmin = (() => {
                     loadPublicCoC();
                     if (_adminUnlocked) _loadChainOfCommand();
                     // Reload units on map to show updated assignment
-                    const token2 = _getToken();
-                    const userSid2 = _getUserSessionId();
-                    if (userSid2 && token2) {
+                    const reloadToken = _getToken();
+                    const reloadSid = _getUserSessionId();
+                    if (reloadSid && reloadToken) {
                         try {
                             if (_godViewEnabled) {
                                 await _refreshGodView();
                             } else {
-                                await KUnits.load(userSid2, token2);
+                                await KUnits.load(reloadSid, reloadToken);
                             }
                         } catch(e) {}
                     }
@@ -3101,11 +3114,10 @@ const KAdmin = (() => {
             }
         });
 
-        // ── Live symbol preview: update on side or unit type change ──
+        // ── Live symbol preview: update on side change ──
+        // Note: unit type change preview is handled by typeEl.onchange set in editUnit/addUnit
         const sideEl = document.getElementById('admin-ue-side');
-        const typeEl = document.getElementById('admin-ue-unit-type');
         if (sideEl) sideEl.addEventListener('change', _updateUnitEditPreview);
-        if (typeEl) typeEl.addEventListener('change', _updateUnitEditPreview);
 
         // ── Draggable header ──
         _initUnitEditDrag();
@@ -3596,6 +3608,8 @@ const KAdmin = (() => {
         _godViewEnabled = false;
         _adminSelectedSessionId = null;
         _pendingGodViewEnable = false;
+        _godViewRefreshPending = false;
+        clearTimeout(_godViewRefreshTimer);
 
         // Disable admin drag-and-drop
         try { KUnits.setAdminDrag(false); } catch(e) {}
@@ -3719,6 +3733,8 @@ const KAdmin = (() => {
         _loadTerrainStats();
     }
 
+    let _terrainPaintChangeHandler = null;
+
     function _startTerrainPaint() {
         const type = document.getElementById('terrain-paint-type')?.value || 'forest';
         KTerrain.startPaintMode(type);
@@ -3729,9 +3745,15 @@ const KAdmin = (() => {
         if (startBtn) startBtn.style.display = 'none';
         if (stopBtn) stopBtn.style.display = '';
 
-        // Listen for type changes
+        // Listen for type changes — remove old listener first to prevent accumulation
         const sel = document.getElementById('terrain-paint-type');
-        if (sel) sel.addEventListener('change', () => KTerrain.setPaintType(sel.value));
+        if (sel) {
+            if (_terrainPaintChangeHandler) {
+                sel.removeEventListener('change', _terrainPaintChangeHandler);
+            }
+            _terrainPaintChangeHandler = () => KTerrain.setPaintType(sel.value);
+            sel.addEventListener('change', _terrainPaintChangeHandler);
+        }
     }
 
     function _stopTerrainPaint() {
@@ -3740,6 +3762,12 @@ const KAdmin = (() => {
         const stopBtn = document.getElementById('terrain-paint-stop-btn');
         if (startBtn) startBtn.style.display = '';
         if (stopBtn) stopBtn.style.display = 'none';
+        // Clean up terrain paint type change listener
+        if (_terrainPaintChangeHandler) {
+            const sel = document.getElementById('terrain-paint-type');
+            if (sel) sel.removeEventListener('change', _terrainPaintChangeHandler);
+            _terrainPaintChangeHandler = null;
+        }
     }
 
     async function _loadTerrainStats() {
