@@ -98,6 +98,31 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     color: #e0f0ff;
 }
 
+/* ── Orders Complete Button (topbar) ─────────── */
+.topbar-orders-complete-btn {
+    padding: 4px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 4px;
+    background: rgba(46, 125, 50, 0.35);
+    border: 1px solid rgba(102, 187, 106, 0.5);
+    color: #a5d6a7;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    letter-spacing: 0.4px;
+}
+.topbar-orders-complete-btn:hover {
+    background: rgba(46, 125, 50, 0.6);
+    border-color: rgba(129, 199, 132, 0.8);
+    color: #c8e6c9;
+    box-shadow: 0 0 8px rgba(102, 187, 106, 0.3);
+}
+.topbar-orders-complete-btn:active {
+    background: rgba(46, 125, 50, 0.8);
+    transform: scale(0.97);
+}
+
 /* ── Rules Modal ─────────────────────────────── */
 .rules-modal-dialog {
     max-width: 580px !important;
@@ -1190,6 +1215,7 @@ button:hover { background: #1a5276; }
     border-radius: 3px;
 }
 .ctx-item:hover { background: #1a5276; color: #fff; }
+.ctx-item-danger { color: #ef9a9a; }
 .ctx-item-danger:hover { background: #5a2020; color: #ef9a9a; }
 .ctx-colors {
     display: flex;

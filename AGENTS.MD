@@ -1164,6 +1164,10 @@ if unit.ammo <= 0:
 | **Scenario Description** | `session_ui.js` | Click session name to view scenario briefing modal. |
 | **Favicon** | `main.py`, `favicon.svg` | Custom SVG favicon with fallback route. |
 | **Credits** | `index.html`, `style.css` | Bottom sidebar credits bar. |
+| **Side-colored Movement Arrows** | `units.js` | Movement arrows use unit's side color (blue/red), tapered width (thick→thin), max 300m length, chevron-notched arrowhead. No endpoint circles. |
+| **Overlay Layer Icon** | `ui.js` | Stacked-layers SVG icon for the overlay toggle button (replaces generic arrow+rect). |
+| **Unit Delete from Context Menu** | `units.js` | Right-click context menu includes 🗑 Delete Unit (admin-only), calls admin DELETE endpoint. |
+| **Orders Complete Button** | `index.html`, `session_ui.js`, `style.css` | "✔ Orders Complete" button in topbar (right side) replaces sidebar "Next Turn". Visible only to commanders. Green accent styling. |
 
 ### Permission / Authority System
 
@@ -1175,6 +1179,8 @@ if unit.ammo <= 0:
 | Observers cannot assign units | `units.py: assign_unit` — 403 if caller is observer |
 | Side check: blue can't command red | `units.js: _canSelect` — rejects cross-side selection |
 | Side check: blue can't order red units | `orders.py: submit_order` — validates unit side matches order side |
+| Formation/Move/Stop require admin | `units.js: _showUnitContextMenu` — Formation, Set Move, Stop items only shown when `KAdmin.isUnlocked()` is true |
+| Admin close locks panel | `admin.js: _closeAdminWindow` — closing admin window sets `_adminUnlocked = false`, re-shows lock gate, closes open unit context menus |
 | Command authority via hierarchy | `visibility_service.py: check_command_authority` — walks parent chain |
 | Implicit authority when no CoC | `visibility_service.py` — if no same-side units have assigned users, all same-side players have authority |
 | Subordinate user authority | `visibility_service.py: check_subordinate_authority` — user A has authority if target is assigned to a subordinate of A |

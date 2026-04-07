@@ -236,6 +236,19 @@ const KAdmin = (() => {
         const win = document.getElementById('admin-window');
         if (win) win.style.display = 'none';
 
+        // Lock admin panel when window is closed
+        _adminUnlocked = false;
+        const gate = document.getElementById('admin-lock-gate');
+        const content = document.getElementById('admin-content');
+        if (gate) gate.style.display = 'block';
+        if (content) content.style.display = 'none';
+        const pw = document.getElementById('admin-pw-input');
+        if (pw) pw.value = '';
+
+        // Close any open unit context menu (admin items would be stale)
+        const ctxMenu = document.getElementById('unit-ctx-menu');
+        if (ctxMenu) ctxMenu.style.display = 'none';
+
         // Disable admin drag-and-drop when admin window is closed
         try { KUnits.setAdminDrag(false); } catch(e) {}
 

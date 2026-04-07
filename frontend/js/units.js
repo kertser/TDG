@@ -791,6 +791,7 @@ const KUnits = (() => {
         html += `</div>`; // end unit-info-card
 
         // ── Action items ──
+        const _isAdminMode = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
         if (canSel) {
             const selLabel = isSel ? '✓ Deselect' : '☐ Select';
             html += `<div class="ctx-item" data-action="select">${selLabel}</div>`;
@@ -798,12 +799,9 @@ const KUnits = (() => {
         if (canSel) {
             html += `<div class="ctx-item" data-action="rename">✏ Rename</div>`;
         }
-        if (canSel) {
-            // Formation sub-menu
-            const curFormation = u.formation || (u.capabilities && u.capabilities.formation) || '';
+        // Formation, Move, Stop — admin-only (direct manipulation bypasses orders)
+        if (canSel && _isAdminMode) {
             html += `<div class="ctx-item" data-action="formation">🔲 Formation ▸</div>`;
-        }
-        if (canSel) {
             html += `<div class="ctx-item" data-action="move">🚶 Set Move ▸</div>`;
             html += `<div class="ctx-item" data-action="stop">⏹ Stop</div>`;
         }
@@ -822,6 +820,10 @@ const KUnits = (() => {
             if (nearbyMergeable.length > 0) {
                 html += `<div class="ctx-item" data-action="merge">🔗 Merge Unit ▸</div>`;
             }
+        }
+        // Delete unit — admin only
+        if (_isAdminMode) {
+            html += `<div class="ctx-item ctx-item-danger" data-action="delete">🗑 Delete Unit</div>`;
         }
         if (canAsgn) {
             const assignLabel = isAssignedToMe ? '✕ Unassign me' : '+ Assign to me';
@@ -862,6 +864,8 @@ const KUnits = (() => {
                     _splitUnit(u);
                 } else if (action === 'merge') {
                     _showMergePicker(u, e);
+                } else if (action === 'delete') {
+                    _deleteUnit(u);
                 }
             });
         });
@@ -1063,6 +1067,30 @@ const KUnits = (() => {
             } else {
                 const d = await resp.json().catch(() => ({}));
                 alert(d.detail || 'Stop failed');
+            }
+        } catch (err) { alert(err.message); }
+    }
+
+    /** Delete unit via admin API. */
+    async function _deleteUnit(u) {
+        if (!confirm(`Delete unit "${u.name}"? This cannot be undone.`)) return;
+        const token = KSessionUI.getToken();
+        const sessionId = KSessionUI.getSessionId();
+        if (!token || !sessionId) return;
+
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sessionId}/units/${u.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok || resp.status === 204) {
+                selectedUnitIds.delete(u.id);
+                KGameLog.addEntry(`Unit "${u.name}" deleted`, 'info');
+                await load(sessionId, token);
+                try { KAdmin.loadPublicCoC(); } catch(e) {}
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert(d.detail || 'Delete failed');
             }
         } catch (err) { alert(err.message); }
     }
@@ -1292,59 +1320,84 @@ const KUnits = (() => {
         });
     }
 
-    /** Draw a single movement arrow from unit center to target on the movement pane. */
+    /** Draw a single movement arrow: elegant tapered line (max 300m) with pointed arrowhead. */
     function _drawMovementArrow(from, target, accent) {
         const to = target;
 
         const dLat = to.lat - from.lat;
         const dLon = to.lng - from.lng;
-        const dist = Math.sqrt(dLat * dLat + dLon * dLon);
+        const geoLen = Math.sqrt(dLat * dLat + dLon * dLon);
 
-        if (dist < 0.0001) return;
+        if (geoLen < 0.00005) return;
 
-        // Dashed movement line from unit center (no offset!)
-        _movementArrowsLayer.addLayer(L.polyline([from, to], {
-            color: '#ffd740',
-            weight: 2,
-            dashArray: '8,6',
-            opacity: 0.7,
-            interactive: false,
-            pane: 'movementArrowsPane',
-        }));
+        // Cap line at ~300m in geographic degrees (approx 0.0027° at mid-latitudes)
+        const MAX_LEN = 0.0027;
+        let endLat, endLon, arrowLen;
+        if (geoLen > MAX_LEN) {
+            const ratio = MAX_LEN / geoLen;
+            endLat = from.lat + dLat * ratio;
+            endLon = from.lng + dLon * ratio;
+            arrowLen = MAX_LEN;
+        } else {
+            endLat = to.lat;
+            endLon = to.lng;
+            arrowLen = geoLen;
+        }
 
-        // Arrowhead at target end
-        const ahSize = Math.min(dist * 0.12, 0.001);
-        _drawArrowheadOnPane(from.lat, from.lng, to.lat, to.lng, '#ffd740', ahSize);
+        // Draw tapered line: multiple segments from thick to thin
+        const SEGMENTS = 5;
+        const startWeight = 5;
+        const endWeight = 1.2;
+        // Shorten the line so arrowhead sits at the tip
+        const ahLen = arrowLen * 0.18;
+        const lineLen = arrowLen - ahLen;
 
-        // Target crosshair
-        _movementArrowsLayer.addLayer(L.circleMarker(to, {
-            radius: 5,
-            color: '#ffd740',
-            weight: 2,
-            fillColor: '#ffd740',
-            fillOpacity: 0.2,
-            interactive: false,
-            pane: 'movementArrowsPane',
-        }));
+        for (let i = 0; i < SEGMENTS; i++) {
+            const t0 = i / SEGMENTS;
+            const t1 = (i + 1) / SEGMENTS;
+            const lat0 = from.lat + (endLat - from.lat) * (t0 * lineLen / arrowLen);
+            const lon0 = from.lng + (endLon - from.lng) * (t0 * lineLen / arrowLen);
+            const lat1 = from.lat + (endLat - from.lat) * (t1 * lineLen / arrowLen);
+            const lon1 = from.lng + (endLon - from.lng) * (t1 * lineLen / arrowLen);
+            const w = startWeight + (endWeight - startWeight) * ((t0 + t1) / 2);
+            const op = 0.7 - 0.15 * t0; // slight fade
+
+            _movementArrowsLayer.addLayer(L.polyline(
+                [[lat0, lon0], [lat1, lon1]], {
+                    color: accent,
+                    weight: w,
+                    opacity: op,
+                    lineCap: 'round',
+                    lineJoin: 'round',
+                    interactive: false,
+                    pane: 'movementArrowsPane',
+                }
+            ));
+        }
+
+        // Arrowhead at the end
+        _drawArrowheadOnPane(from.lat, from.lng, endLat, endLon, accent, ahLen);
     }
 
-    /** Draw arrowhead on the movement arrows pane. */
+    /** Draw a sleek triangular arrowhead on the movement arrows pane. */
     function _drawArrowheadOnPane(fromLat, fromLon, toLat, toLon, color, size) {
-        size = size || 0.0005;
+        size = size || 0.0004;
         const dLat = toLat - fromLat;
         const dLon = toLon - fromLon;
         const angle = Math.atan2(dLon, dLat);
-        const spread = 0.5;
+        const spread = 0.35;
 
         const tip   = [toLat, toLon];
         const left  = [toLat - size * Math.cos(angle - spread), toLon - size * Math.sin(angle - spread)];
         const right = [toLat - size * Math.cos(angle + spread), toLon - size * Math.sin(angle + spread)];
+        const notch = size * 0.35;
+        const back  = [toLat - notch * Math.cos(angle), toLon - notch * Math.sin(angle)];
 
-        _movementArrowsLayer.addLayer(L.polygon([tip, left, right], {
+        _movementArrowsLayer.addLayer(L.polygon([tip, left, back, right], {
             color: color,
             fillColor: color,
-            fillOpacity: 0.7,
-            weight: 1,
+            fillOpacity: 0.85,
+            weight: 0.5,
             interactive: false,
             pane: 'movementArrowsPane',
         }));

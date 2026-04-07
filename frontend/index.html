@@ -22,6 +22,9 @@
         <!-- Spacer pushes right-side controls to the end -->
         <div style="flex:1;"></div>
 
+        <!-- Orders Complete (advance turn) — visible only to commanders -->
+        <button id="turn-btn" class="topbar-orders-complete-btn" style="display:none;" title="Submit your orders and advance to the next turn">✔ Orders Complete</button>
+
         <!-- Rules button -->
         <button id="rules-topbar-btn" class="topbar-text-btn" title="Rules &amp; Instructions">📖 Rules</button>
 
@@ -70,7 +73,6 @@
                 </div>
                 <div id="session-panel" style="display:none;">
                     <button id="start-session-btn" style="display:none;" title="Start the session (creates units from scenario)">Start Session</button>
-                    <button id="turn-btn" style="display:none;" title="Advance simulation by one turn">▶ Next Turn</button>
                     <div id="session-list"></div>
                 </div>
                 <div id="participants-panel"></div>
@@ -847,7 +849,7 @@
                         <li><b>Join a Session</b> — Select a session from the list and choose your side (Blue/Red) and role.</li>
                         <li><b>Start</b> — Once joined, click <b>Start Session</b> to spawn units from the scenario.</li>
                         <li><b>Issue Orders</b> — Select units on the map, then type orders in the <b>Orders</b> tab.</li>
-                        <li><b>Advance Turns</b> — Click <b>▶ Next Turn</b> to advance the simulation by one tick.</li>
+                        <li><b>Advance Turns</b> — Click <b>✔ Orders Complete</b> in the top bar to submit your orders and advance the simulation by one turn.</li>
                     </ol>
                 </div>
 

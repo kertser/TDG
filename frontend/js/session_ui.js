@@ -89,7 +89,7 @@ const KSessionUI = (() => {
                     const data = await resp.json();
                     KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
                     startBtn.style.display = 'none';
-                    if (turnBtn && _canAdvanceTurn) turnBtn.style.display = 'block';
+                    if (turnBtn && _canAdvanceTurn) turnBtn.style.display = 'inline-block';
 
                     // Reload grid + units + contacts after session start
                     // (grid & units are created on start from scenario data)
@@ -386,11 +386,11 @@ const KSessionUI = (() => {
 
         if (status === 'running') {
             if (startBtn) startBtn.style.display = 'none';
-            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'block' : 'none';
+            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'inline-block' : 'none';
         } else if (status === 'paused') {
             if (startBtn && _canAdvanceTurn) { startBtn.style.display = 'block'; startBtn.textContent = '▶ Resume Session'; }
             else if (startBtn) startBtn.style.display = 'none';
-            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'block' : 'none';
+            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'inline-block' : 'none';
         } else {
             if (startBtn && _canAdvanceTurn) { startBtn.style.display = 'block'; startBtn.textContent = 'Start Session'; }
             else if (startBtn) startBtn.style.display = 'none';
