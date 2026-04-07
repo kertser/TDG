@@ -79,12 +79,51 @@ const KUnits = (() => {
         broken: '#9c27b0', destroyed: '#666', supporting: '#4caf50',
     };
 
-    // ── Movement speed labels ─────────────────────────
-    const SPEED_LABELS = {
-        slow: { label: 'Slow', mps: 1.5, desc: '~5 km/h' },
-        average: { label: 'Average', mps: 4.0, desc: '~14 km/h' },
-        fast: { label: 'Fast', mps: 8.0, desc: '~29 km/h' },
+    // ── Movement speed options ───────────────────────
+    const SPEED_OPTIONS = {
+        slow: { label: 'Slow', icon: '🐢', color: '#81c784' },
+        fast: { label: 'Fast', icon: '⚡', color: '#ff9800' },
     };
+
+    // ── Unit-type-specific base speeds (m/s), matching backend ──
+    const UNIT_TYPE_SPEEDS = {
+        'infantry_platoon':   { slow: 1.2, fast: 3.0 },
+        'infantry_company':   { slow: 1.0, fast: 2.5 },
+        'infantry_section':   { slow: 1.2, fast: 3.0 },
+        'infantry_team':      { slow: 1.5, fast: 3.5 },
+        'infantry_squad':     { slow: 1.2, fast: 3.0 },
+        'infantry_battalion': { slow: 0.8, fast: 2.0 },
+        'mech_platoon':       { slow: 3.0, fast: 10.0 },
+        'mech_company':       { slow: 2.5, fast: 8.0 },
+        'tank_platoon':       { slow: 3.0, fast: 12.0 },
+        'tank_company':       { slow: 2.5, fast: 10.0 },
+        'artillery_battery':  { slow: 1.5, fast: 5.0 },
+        'artillery_platoon':  { slow: 1.5, fast: 5.0 },
+        'mortar_section':     { slow: 1.0, fast: 2.5 },
+        'mortar_team':        { slow: 1.2, fast: 3.0 },
+        'at_team':            { slow: 1.2, fast: 3.0 },
+        'recon_team':         { slow: 2.0, fast: 4.0 },
+        'recon_section':      { slow: 2.0, fast: 4.0 },
+        'sniper_team':        { slow: 1.0, fast: 2.5 },
+        'observation_post':   { slow: 0.5, fast: 1.5 },
+        'engineer_platoon':   { slow: 1.0, fast: 2.5 },
+        'engineer_section':   { slow: 1.0, fast: 2.5 },
+        'logistics_unit':     { slow: 2.0, fast: 6.0 },
+        'headquarters':       { slow: 1.5, fast: 5.0 },
+        'command_post':       { slow: 1.0, fast: 3.0 },
+    };
+    const DEFAULT_UNIT_SPEEDS = { slow: 1.2, fast: 3.0 };
+
+    /** Get the base speed (m/s) for a unit type and speed label. */
+    function _getUnitSpeed(unitType, speedLabel) {
+        const speeds = UNIT_TYPE_SPEEDS[unitType] || DEFAULT_UNIT_SPEEDS;
+        return speeds[speedLabel] || speeds.slow;
+    }
+
+    /** Format m/s as km/h string. */
+    function _mpsToKmh(mps) {
+        return (mps * 3.6).toFixed(0);
+    }
 
     // ── Formation options ─────────────────────────────
     const FORMATIONS = [
@@ -432,10 +471,17 @@ const KUnits = (() => {
             const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
             const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
             const status = u.unit_status || 'idle';
-            const statusIcon = STATUS_ICONS[status] || '•';
             const statusColor = STATUS_COLORS[status] || '#aaa';
+            // Show speed label in tooltip when moving
+            let ttStatus = status;
+            let ttStatusIcon = STATUS_ICONS[status] || '•';
+            const ttSpeed = u.current_task && u.current_task.speed;
+            if (status === 'moving' && ttSpeed && SPEED_OPTIONS[ttSpeed]) {
+                ttStatusIcon = SPEED_OPTIONS[ttSpeed].icon;
+                ttStatus = ttSpeed;
+            }
             const tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span><br>`
-                + `<span style="color:${statusColor};font-weight:600;">${statusIcon} ${status}</span> `
+                + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
                 + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}</span> `
                 + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
             marker.bindTooltip(tooltipHtml, {
@@ -622,6 +668,9 @@ const KUnits = (() => {
         // Current task info
         if (u.current_task && u.current_task.type) {
             let taskStr = u.current_task.type;
+            const tSpeed = u.current_task.speed;
+            const tSpeedOpt = tSpeed && SPEED_OPTIONS[tSpeed];
+            if (tSpeedOpt) taskStr += ` ${tSpeedOpt.icon}`;
             if (u.current_task.target_location) {
                 const tLat = u.current_task.target_location.lat?.toFixed(4);
                 const tLon = u.current_task.target_location.lon?.toFixed(4);
@@ -743,6 +792,15 @@ const KUnits = (() => {
 
         const statusBg = statusColor + '22';
 
+        // Derive display status: if moving, include speed label
+        let displayStatus = status;
+        let displayStatusIcon = statusIcon;
+        const taskSpeed = u.current_task && u.current_task.speed;
+        if (status === 'moving' && taskSpeed && SPEED_OPTIONS[taskSpeed]) {
+            displayStatusIcon = SPEED_OPTIONS[taskSpeed].icon;
+            displayStatus = `${taskSpeed}`;
+        }
+
         // Build elegant card with stat bars
         let html = `<div class="unit-info-card">`;
         html += `<div class="unit-info-header">`;
@@ -751,7 +809,7 @@ const KUnits = (() => {
         html += `<div class="unit-info-name">${u.name}</div>`;
         html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${pers} personnel</div>`;
         html += `</div>`;
-        html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${statusIcon} ${status}</span></div>`;
+        html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${displayStatusIcon} ${displayStatus}</span></div>`;
         html += `</div>`;
 
         // ── Stat bars (visual & compact) ──
@@ -769,15 +827,21 @@ const KUnits = (() => {
         html += `<span title="Detection range" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
         html += `<span title="Fire range" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
         if (u.move_speed_mps) {
-            html += `<span title="Movement speed" style="color:#81c784;">⚡ ${u.move_speed_mps.toFixed(1)}m/s</span>`;
+            const speedOpt = taskSpeed && SPEED_OPTIONS[taskSpeed];
+            const speedIcon = speedOpt ? speedOpt.icon : '⚡';
+            const speedClr = speedOpt ? speedOpt.color : '#81c784';
+            html += `<span title="Movement speed (${taskSpeed || 'base'})" style="color:${speedClr};">${speedIcon} ${u.move_speed_mps.toFixed(1)}m/s</span>`;
         }
         html += `</div>`;
 
         // ── Current task ──
         if (u.current_task && u.current_task.type) {
             const taskType = u.current_task.type;
+            const tSpeed = u.current_task.speed;
+            const tSpeedOpt = tSpeed && SPEED_OPTIONS[tSpeed];
+            const tSpeedStr = tSpeedOpt ? ` ${tSpeedOpt.icon} ${tSpeedOpt.label}` : '';
             html += `<div style="padding:2px 12px 3px;font-size:10px;">`;
-            html += `<span style="color:#ffd740;">📋 Task: <b>${taskType}</b></span>`;
+            html += `<span style="color:#ffd740;">📋 Task: <b>${taskType}</b>${tSpeedStr}</span>`;
             if (u.current_task.target_location) {
                 const tLat = u.current_task.target_location.lat?.toFixed(4);
                 const tLon = u.current_task.target_location.lon?.toFixed(4);
@@ -1013,8 +1077,10 @@ const KUnits = (() => {
     function _showMovePicker(u, origEvent) {
         const menu = _createUnitContextMenu();
         let html = '<div class="ctx-menu-header">Move Speed</div>';
-        for (const [key, info] of Object.entries(SPEED_LABELS)) {
-            html += `<div class="ctx-item" data-speed="${key}">⚡ ${info.label} <span style="color:#888;font-size:10px;">(${info.desc})</span></div>`;
+        for (const [key, opt] of Object.entries(SPEED_OPTIONS)) {
+            const mps = _getUnitSpeed(u.unit_type, key);
+            const kmh = _mpsToKmh(mps);
+            html += `<div class="ctx-item" data-speed="${key}">${opt.icon} ${opt.label} <span style="color:#888;font-size:10px;">(~${kmh} km/h)</span></div>`;
         }
         menu.innerHTML = html;
         menu.style.left = origEvent.clientX + 'px';

@@ -156,7 +156,7 @@ class UnitFormationRequest(BaseModel):
 class UnitMoveRequest(BaseModel):
     target_lat: float
     target_lon: float
-    speed: str = "average"
+    speed: str = "slow"
 
 
 class UnitSplitRequest(BaseModel):
@@ -350,7 +350,44 @@ async def set_unit_formation(
 # ── Movement Command ──────────────────────────────
 # ══════════════════════════════════════════════════
 
-SPEED_VALUES = {"slow": 1.5, "average": 4.0, "fast": 8.0}
+# Unit-type-specific base speeds (m/s) for slow and fast movement.
+# Terrain modifiers are applied at runtime by the engine.
+# slow  = cautious/tactical movement (better concealment, less fatigue)
+# fast  = rapid movement (exposed, tiring, vehicles at higher speed)
+UNIT_TYPE_SPEEDS: dict[str, dict[str, float]] = {
+    # Foot infantry
+    "infantry_platoon":  {"slow": 1.2, "fast": 3.0},    # ~4 km/h / ~11 km/h
+    "infantry_company":  {"slow": 1.0, "fast": 2.5},    # ~4 km/h / ~9 km/h (larger = slower)
+    "infantry_section":  {"slow": 1.2, "fast": 3.0},
+    "infantry_team":     {"slow": 1.5, "fast": 3.5},    # small team = faster
+    "infantry_squad":    {"slow": 1.2, "fast": 3.0},
+    "infantry_battalion": {"slow": 0.8, "fast": 2.0},   # large formation
+    # Mechanized / motorized
+    "mech_platoon":      {"slow": 3.0, "fast": 10.0},   # ~11 km/h / ~36 km/h
+    "mech_company":      {"slow": 2.5, "fast": 8.0},
+    # Armor
+    "tank_platoon":      {"slow": 3.0, "fast": 12.0},   # ~11 km/h / ~43 km/h
+    "tank_company":      {"slow": 2.5, "fast": 10.0},
+    # Artillery
+    "artillery_battery": {"slow": 1.5, "fast": 5.0},
+    "artillery_platoon": {"slow": 1.5, "fast": 5.0},
+    # Support / light
+    "mortar_section":    {"slow": 1.0, "fast": 2.5},    # heavy load
+    "mortar_team":       {"slow": 1.2, "fast": 3.0},
+    "at_team":           {"slow": 1.2, "fast": 3.0},
+    "recon_team":        {"slow": 2.0, "fast": 4.0},    # scouts are faster
+    "recon_section":     {"slow": 2.0, "fast": 4.0},
+    "sniper_team":       {"slow": 1.0, "fast": 2.5},    # stealthy
+    "observation_post":  {"slow": 0.5, "fast": 1.5},    # rarely moves
+    "engineer_platoon":  {"slow": 1.0, "fast": 2.5},
+    "engineer_section":  {"slow": 1.0, "fast": 2.5},
+    "logistics_unit":    {"slow": 2.0, "fast": 6.0},    # trucks
+    "headquarters":      {"slow": 1.5, "fast": 5.0},
+    "command_post":      {"slow": 1.0, "fast": 3.0},
+}
+DEFAULT_SPEEDS = {"slow": 1.2, "fast": 3.0}  # fallback for unknown types
+
+VALID_SPEED_LABELS = {"slow", "fast"}
 
 
 @router.put("/{session_id}/units/{unit_id}/move")
@@ -376,9 +413,14 @@ async def set_unit_move(
         if not has_authority:
             raise HTTPException(status_code=403, detail="No command authority over this unit")
     speed_label = body.speed.lower()
-    if speed_label not in SPEED_VALUES:
-        raise HTTPException(status_code=400, detail="Invalid speed. Valid: slow, average, fast")
-    unit.move_speed_mps = SPEED_VALUES[speed_label]
+    # Accept "average" as alias for backwards compatibility, map to "slow"
+    if speed_label == "average":
+        speed_label = "slow"
+    if speed_label not in VALID_SPEED_LABELS:
+        raise HTTPException(status_code=400, detail="Invalid speed. Valid: slow, fast")
+    # Look up unit-type-specific speed
+    speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+    unit.move_speed_mps = speeds[speed_label]
 
     # Resolve target coordinates to snail path for display
     target_snail = None
