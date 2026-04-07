@@ -38,6 +38,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS name VARCHAR(200)"
         ))
+        # Add target_unit_id column to contacts (migration for existing DBs)
+        await conn.execute(text(
+            "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS target_unit_id UUID"
+        ))
 
     yield
     # ── Shutdown ──────────────────────────────────────
@@ -79,6 +83,10 @@ def create_app() -> FastAPI:
     # Terrain endpoints
     from backend.api import terrain as terrain_router
     app.include_router(terrain_router.router, prefix="/api/sessions", tags=["terrain"])
+
+    # Map Objects endpoints (obstacles, structures)
+    from backend.api import map_objects as map_objects_router
+    app.include_router(map_objects_router.router, prefix="/api/sessions", tags=["map_objects"])
 
     # Admin endpoints
     from backend.api import admin as admin_router

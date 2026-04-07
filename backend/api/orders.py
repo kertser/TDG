@@ -76,7 +76,14 @@ async def submit_order(
     )
     db.add(order)
     await db.flush()
-    return {"id": str(order.id), "status": order.status.value}
+    return {
+        "id": str(order.id),
+        "status": order.status.value,
+        "original_text": order.original_text,
+        "issued_at": order.issued_at.isoformat() if order.issued_at else None,
+        "issued_by_side": side_val,
+        "target_unit_ids": [str(uid) for uid in order.target_unit_ids] if order.target_unit_ids else [],
+    }
 
 
 @router.get("/{session_id}/orders")
@@ -92,6 +99,18 @@ async def list_orders(
         query = query.where(Order.status == status)
     result = await db.execute(query)
     orders = result.scalars().all()
+
+    # Batch-load issuer names
+    from backend.models.user import User
+    issuer_ids = {o.issued_by_user_id for o in orders if o.issued_by_user_id}
+    issuer_names = {}
+    if issuer_ids:
+        user_result = await db.execute(
+            select(User.id, User.display_name).where(User.id.in_(issuer_ids))
+        )
+        for uid, name in user_result.all():
+            issuer_names[uid] = name
+
     return [
         {
             "id": str(o.id),
@@ -99,6 +118,9 @@ async def list_orders(
             "status": o.status.value,
             "original_text": o.original_text,
             "issued_at": o.issued_at.isoformat() if o.issued_at else None,
+            "issued_by_side": o.issued_by_side.value if hasattr(o.issued_by_side, 'value') else o.issued_by_side,
+            "issuer_name": issuer_names.get(o.issued_by_user_id, "AI") if o.issued_by_user_id else "AI",
+            "target_unit_ids": [str(uid) for uid in o.target_unit_ids] if o.target_unit_ids else [],
         }
         for o in orders
     ]
@@ -144,4 +166,42 @@ async def cancel_order(
     order.status = OrderStatus.cancelled
     await db.flush()
     return {"id": str(order.id), "status": order.status.value}
+
+
+@router.get("/{session_id}/chat")
+async def list_chat_messages(
+    session_id: uuid.UUID,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """Load chat message history for a session."""
+    from backend.models.chat_message import ChatMessage
+
+    query = (
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at.asc())
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    messages = result.scalars().all()
+
+    my_user_id = participant.user_id
+
+    return [
+        {
+            "sender_id": str(m.sender_id),
+            "sender_name": m.sender_name,
+            "text": m.text,
+            "recipient": m.recipient,
+            "side": m.side,
+            "timestamp": m.created_at.isoformat() if m.created_at else None,
+            "own": m.sender_id == my_user_id,
+        }
+        for m in messages
+        # Include if broadcast (all) or if I'm sender or recipient
+        if m.recipient == "all" or m.sender_id == my_user_id or m.recipient == str(my_user_id)
+    ]
+
 

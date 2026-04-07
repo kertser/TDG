@@ -59,6 +59,7 @@ const KAdmin = (() => {
                 else if (panelId === 'admin-builder-panel') refreshScenarioList();
                 else if (panelId === 'admin-types-panel') _renderUnitTypes();
                 else if (panelId === 'admin-terrain-panel') { _loadTerrainStats(); _updateCellEstimate(); }
+                else if (panelId === 'admin-objects-panel') { _initObjectsPanel(); }
             });
         });
 
@@ -225,6 +226,7 @@ const KAdmin = (() => {
             // Re-enable admin drag when admin window is reopened
             if (_adminUnlocked) {
                 try { KUnits.setAdminDrag(true); } catch(e) {}
+                try { KMapObjects.render(); } catch(e) {}
             }
         } else {
             _closeAdminWindow();
@@ -245,12 +247,18 @@ const KAdmin = (() => {
         const pw = document.getElementById('admin-pw-input');
         if (pw) pw.value = '';
 
+        // Deactivate scenario builder if it's active
+        try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
+
         // Close any open unit context menu (admin items would be stale)
         const ctxMenu = document.getElementById('unit-ctx-menu');
         if (ctxMenu) ctxMenu.style.display = 'none';
 
         // Disable admin drag-and-drop when admin window is closed
         try { KUnits.setAdminDrag(false); } catch(e) {}
+
+        // Re-render map objects so draggable markers become non-draggable
+        try { KMapObjects.render(); } catch(e) {}
 
         // Disable god view if it was on
         if (_godViewEnabled) {
@@ -308,6 +316,8 @@ const KAdmin = (() => {
                 _loadAdminSessions();
                 // Enable admin drag-and-drop on unit markers
                 try { KUnits.setAdminDrag(true); } catch(e) {}
+                // Re-render map objects so draggable markers become draggable
+                try { KMapObjects.render(); } catch(e) {}
                 // Mark god view for auto-enable once a session is available
                 if (!_godViewEnabled) {
                     _pendingGodViewEnable = true;
@@ -477,11 +487,11 @@ const KAdmin = (() => {
     // ── Scenario Builder Toggle ──────────────────────
     // ══════════════════════════════════════════════════
 
-    function _toggleBuilder() {
+    async function _toggleBuilder() {
         if (KScenarioBuilder.isActive()) {
             KScenarioBuilder.deactivate();
         } else {
-            KScenarioBuilder.activate();
+            await KScenarioBuilder.activate();
         }
     }
 
@@ -541,7 +551,7 @@ const KAdmin = (() => {
     }
 
     async function editScenario(scenarioId) {
-        KScenarioBuilder.activate(scenarioId);
+        await KScenarioBuilder.activate(scenarioId);
         // Switch to builder sub-tab
         document.querySelectorAll('.admin-subtab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.admin-subtab-panel').forEach(p => p.style.display = 'none');
@@ -1449,7 +1459,8 @@ const KAdmin = (() => {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             const units = await resp.json();
-            KUnits.render(units);
+            // Use update() so viewshed cache is properly invalidated for moved units
+            KUnits.update(units);
             _showInfo('admin-god-status', `Showing all ${units.length} units`, 'success');
         } catch (err) {
             _showInfo('admin-god-status', `✗ ${err.message}`, 'error');
@@ -1473,6 +1484,7 @@ const KAdmin = (() => {
         }
     }
 
+    // ══════════════════════════════════════════════════
     // ── Unit Dashboard ───────────────────────────────
 
     let _dashboardSort = { field: 'side_name', asc: true }; // default: side then name
@@ -1634,10 +1646,14 @@ const KAdmin = (() => {
             });
             if (resp.ok || resp.status === 204) {
                 _loadUnitDashboard();
+                KUnits.invalidateAllViewsheds();
                 // Reload units on map
                 const userSid = _getUserSessionId();
-                if (sid === userSid) {
-                    try { await KUnits.load(userSid, token); } catch(e) {}
+                if (sid === userSid || _godViewEnabled) {
+                    try {
+                        if (_godViewEnabled) await _refreshGodView();
+                        else await KUnits.load(userSid, token);
+                    } catch(e) { console.warn('Unit refresh after delete:', e); }
                 }
                 KGameLog.addEntry(`Unit "${unitName}" deleted (admin)`, 'info');
             } else {
@@ -1926,16 +1942,18 @@ const KAdmin = (() => {
             if (resp.ok) {
                 const verb = isNew ? 'Created' : 'Saved';
                 if (statusEl) { statusEl.textContent = `✓ ${verb}`; statusEl.className = 'ue-status admin-success'; }
-                setTimeout(() => {
+                setTimeout(async () => {
                     _closeUnitEdit();
                     _loadUnitDashboard();
                     // Refresh map units if this is the active session
                     const userSid = _getUserSessionId();
                     if (sid === userSid || _godViewEnabled) {
                         try {
-                            if (_godViewEnabled) _refreshGodView();
-                            else KUnits.load(userSid, token);
-                        } catch(e) {}
+                            // Clear viewshed cache so new/updated units get fresh LoS
+                            KUnits.invalidateAllViewsheds();
+                            if (_godViewEnabled) await _refreshGodView();
+                            else await KUnits.load(userSid, token);
+                        } catch(e) { console.warn('Unit refresh after save:', e); }
                     }
                 }, 300);
             } else {
@@ -1947,6 +1965,7 @@ const KAdmin = (() => {
         }
     }
 
+    // ══════════════════════════════════════════════════
     // ── All Orders ───────────────────────────────────
 
     async function _loadAllOrders() {
@@ -2765,7 +2784,7 @@ const KAdmin = (() => {
             candidates.forEach(c => {
                 const opt = document.createElement('option');
                 opt.value = c.id;
-                const sideIcon = c.side === 'blue' ? '🔵' : '🔴';
+                const sideIcon = c.side === 'blue' ? '🔵' : c.side === 'red' ? '🔴' : '⚪';
                 opt.textContent = `${sideIcon} ${c.name} (${c.unit_type})`;
                 sel.appendChild(opt);
             });
@@ -2987,13 +3006,13 @@ const KAdmin = (() => {
                     if (_adminUnlocked) _loadChainOfCommand();
                     // Reload units on map to show updated assignment
                     const reloadToken = _getToken();
-                    const reloadSid = _getUserSessionId();
-                    if (reloadSid && reloadToken) {
+                    const sid = _getUserSessionId();
+                    if (sid && reloadToken) {
                         try {
                             if (_godViewEnabled) {
                                 await _refreshGodView();
                             } else {
-                                await KUnits.load(reloadSid, reloadToken);
+                                await KUnits.load(sid, reloadToken);
                             }
                         } catch(e) {}
                     }
@@ -3027,9 +3046,10 @@ const KAdmin = (() => {
         } catch (err) { alert(err.message); }
     }
 
-    // ── Unit Edit Modal ──────────────────────────────
+    // ══════════════════════════════════════════════════
+    // ── Admin Split / Merge ──────────────────────────
+    // ══════════════════════════════════════════════════
 
-    /** Admin split: splits a unit from the dashboard (via admin endpoint, no auth check). */
     async function adminSplitUnit(unitId) {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { alert('Select a session first'); return; }
@@ -3042,14 +3062,14 @@ const KAdmin = (() => {
             if (resp.ok) {
                 const data = await resp.json();
                 KGameLog.addEntry(`Admin split: ${data.original.name} + ${data.new_unit.name}`, 'info');
-                // Refresh everything
                 await _loadUnitDashboard();
+                KUnits.invalidateAllViewsheds();
                 const userSid = _getUserSessionId();
-                if (userSid) {
+                if (userSid || _godViewEnabled) {
                     try {
                         if (_godViewEnabled) await _refreshGodView();
                         else await KUnits.load(userSid, token);
-                    } catch(e) {}
+                    } catch(e) { console.warn('Unit refresh after split:', e); }
                 }
                 try { _loadChainOfCommand(); } catch(e) {}
                 try { loadPublicCoC(); } catch(e) {}
@@ -3060,7 +3080,6 @@ const KAdmin = (() => {
         } catch (err) { alert(err.message); }
     }
 
-    /** Admin merge: show picker of nearby same-type units and merge. */
     async function adminMergeUnit(unitId) {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { alert('Select a session first'); return; }
@@ -3068,7 +3087,6 @@ const KAdmin = (() => {
         const unit = _dashboardUnits.find(u => u.id === unitId);
         if (!unit) { alert('Unit not found in dashboard'); return; }
 
-        // Find mergeable units (same principal type, same side — no distance restriction for admin)
         const principalType = _getPrincipalType(unit.unit_type);
         const nearby = _dashboardUnits.filter(ou => {
             if (ou.id === unit.id || ou.side !== unit.side || ou.is_destroyed) return false;
@@ -3081,7 +3099,6 @@ const KAdmin = (() => {
             return;
         }
 
-        // Show a simple selection prompt
         let msg = `Merge into "${unit.name}".\nSelect unit to absorb:\n\n`;
         nearby.forEach((ou, i) => {
             const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
@@ -3111,12 +3128,13 @@ const KAdmin = (() => {
                 const data = await resp.json();
                 KGameLog.addEntry(`Admin merge: ${mergeTarget.name} → ${unit.name}`, 'info');
                 await _loadUnitDashboard();
+                KUnits.invalidateAllViewsheds();
                 const userSid = _getUserSessionId();
-                if (userSid) {
+                if (userSid || _godViewEnabled) {
                     try {
                         if (_godViewEnabled) await _refreshGodView();
                         else await KUnits.load(userSid, token);
-                    } catch(e) {}
+                    } catch(e) { console.warn('Unit refresh after merge:', e); }
                 }
                 try { _loadChainOfCommand(); } catch(e) {}
                 try { loadPublicCoC(); } catch(e) {}
@@ -3127,7 +3145,6 @@ const KAdmin = (() => {
         } catch (err) { alert(err.message); }
     }
 
-    /** Extract principal type from unit_type by stripping size suffixes. */
     function _getPrincipalType(unitType) {
         if (!unitType) return '';
         const suffixes = ['_battalion', '_company', '_battery', '_platoon', '_section', '_squad', '_team', '_post', '_unit'];
@@ -3137,7 +3154,6 @@ const KAdmin = (() => {
         return unitType;
     }
 
-    /** Haversine distance in meters. */
     function _haversineDist(lat1, lon1, lat2, lon2) {
         const R = 6371000;
         const toRad = (d) => d * Math.PI / 180;
@@ -3147,13 +3163,16 @@ const KAdmin = (() => {
         return 2 * R * Math.asin(Math.sqrt(a));
     }
 
+    // ══════════════════════════════════════════════════
+    // ── Unit Edit Modal ──────────────────────────────
+    // ══════════════════════════════════════════════════
+
     function _initUnitEditModal() {
         _bind('admin-ue-save', 'click', _saveUnitEdit);
         _bind('admin-ue-cancel', 'click', _closeUnitEdit);
         _bind('admin-ue-close', 'click', _closeUnitEdit);
         _bind('admin-ue-pick-map', 'click', _pickUnitPositionOnMap);
 
-        // ── Range sliders: live value display + track coloring ──
         const sliders = [
             { id: 'admin-ue-strength',    valId: 'admin-ue-strength-val',    color: '#4caf50', lowColor: '#f44336' },
             { id: 'admin-ue-morale',      valId: 'admin-ue-morale-val',      color: '#2196f3', lowColor: '#ff9800' },
@@ -3167,13 +3186,11 @@ const KAdmin = (() => {
                 const updateSlider = () => {
                     const v = parseInt(range.value);
                     valEl.textContent = v + '%';
-                    // Color-coded value text
                     if (s.id === 'admin-ue-suppression') {
                         valEl.style.color = v > 50 ? '#f44336' : v > 20 ? '#ff9800' : '#4caf50';
                     } else {
                         valEl.style.color = v > 60 ? '#4caf50' : v > 30 ? '#ff9800' : '#f44336';
                     }
-                    // Gradient fill on range track
                     const pct = v;
                     const fillColor = s.id === 'admin-ue-suppression'
                         ? (v > 50 ? '#f44336' : v > 20 ? '#ff9800' : '#4caf50')
@@ -3185,12 +3202,9 @@ const KAdmin = (() => {
             }
         });
 
-        // ── Live symbol preview: update on side change ──
-        // Note: unit type change preview is handled by typeEl.onchange set in editUnit/addUnit
         const sideEl = document.getElementById('admin-ue-side');
         if (sideEl) sideEl.addEventListener('change', _updateUnitEditPreview);
 
-        // ── Draggable header ──
         _initUnitEditDrag();
     }
 
@@ -3199,7 +3213,6 @@ const KAdmin = (() => {
         if (modal) {
             modal.style.display = 'none';
             modal.classList.remove('ue-dragged');
-            // Reset centering for next open
             modal.style.left = '50%';
             modal.style.top = '50%';
             modal.style.right = '';
@@ -3241,7 +3254,6 @@ const KAdmin = (() => {
         header.addEventListener('pointerup', () => { isDragging = false; });
     }
 
-    /** Update milsymbol preview in unit edit dialog. */
     function _updateUnitEditPreview() {
         const previewEl = document.getElementById('admin-ue-symbol-preview');
         if (!previewEl) return;
@@ -3260,24 +3272,20 @@ const KAdmin = (() => {
                 return;
             } catch(e) {}
         }
-        // Fallback
         const emoji = sideVal === 'red' ? '🔴' : '🔵';
         previewEl.innerHTML = `<span style="font-size:28px;">${emoji}</span>`;
     }
 
-    /** Pick unit position on map (hide modal, click map, restore modal). */
     function _pickUnitPositionOnMap() {
         const map = KMap.getMap();
         if (!map) return;
         const modal = document.getElementById('admin-unit-edit-modal');
         if (!modal) return;
 
-        // Temporarily hide the edit dialog
         modal.style.opacity = '0.3';
         modal.style.pointerEvents = 'none';
         map.getContainer().classList.add('pick-mode-active');
 
-        // Banner
         const banner = document.createElement('div');
         banner.className = 'pick-mode-banner';
         banner.id = 'ue-pick-banner';
@@ -3308,7 +3316,6 @@ const KAdmin = (() => {
         document.addEventListener('keydown', _onKey, { once: true });
     }
 
-    /** Helper: trigger range slider visual update (after setting value programmatically). */
     function _fireRangeUpdate(id) {
         const el = document.getElementById(id);
         if (el) el.dispatchEvent(new Event('input'));
@@ -3322,13 +3329,11 @@ const KAdmin = (() => {
         if (statusEl) {
             statusEl.textContent = sid ? `Active: ${sid.substring(0, 8)}...` : 'No active session';
         }
-        // Auto-select in admin dropdown if no selection
         if (sid && !_adminSelectedSessionId) {
             _adminSelectedSessionId = sid;
             const sel = document.getElementById('admin-session-selector');
             if (sel) sel.value = sid;
         }
-        // Refresh admin sessions list
         if (_adminUnlocked) {
             _loadAdminSessions();
             _tryAutoEnableGodView();
@@ -3337,7 +3342,6 @@ const KAdmin = (() => {
 
     // ── Helpers ──────────────────────────────────────
 
-    /** Try to auto-enable god view (called when sessions become available). */
     function _tryAutoEnableGodView() {
         if (!_pendingGodViewEnable || _godViewEnabled) return;
         const sid = _getAdminSessionId();
@@ -3348,7 +3352,6 @@ const KAdmin = (() => {
         }
     }
 
-    /** Load the grid for the admin-selected session onto the map. */
     async function _tryLoadAdminSessionGrid() {
         const sid = _getAdminSessionId();
         if (!sid) return;
@@ -3644,8 +3647,14 @@ const KAdmin = (() => {
     }
 
     function _resetUnitTypes() {
-        if (!confirm('Reset all unit types to defaults? Custom types will be lost.')) return;
-        alert('Please reload the page to reset unit types to defaults.');
+        if (!confirm('Reset all unit types to defaults from config file? Custom types will be lost.')) return;
+        try {
+            KScenarioBuilder.resetUnitTypes();
+            _renderUnitTypes();
+            try { _populateUnitTypeDropdown(); } catch(e) {}
+        } catch(e) {
+            alert('Reset failed. Please reload the page.');
+        }
     }
 
     /** Refresh the unit type dropdown in the admin unit edit modal. */
@@ -3873,8 +3882,189 @@ const KAdmin = (() => {
         container.innerHTML = html;
     }
 
+    // ══════════════════════════════════════════════════════════
+    // ── Map Objects (Obstacles & Structures) Admin Panel ─────
+    // ══════════════════════════════════════════════════════════
+
+    let _objectsPanelInitialized = false;
+
+    async function _initObjectsPanel() {
+        const sid = _getAdminSessionId();
+        if (!sid) return;
+
+        // Load definitions from server
+        await KMapObjects.loadDefinitions(sid);
+        const defs = KMapObjects.getDefinitions();
+        if (!defs) return;
+
+        // Only render buttons once
+        if (!_objectsPanelInitialized) {
+            _renderObjectButtons(defs);
+            _bindObjectsPanelEvents();
+            _objectsPanelInitialized = true;
+        }
+
+        // Refresh object list
+        _refreshObjectsList();
+    }
+
+    function _renderObjectButtons(defs) {
+        const obstacleContainer = document.getElementById('admin-obstacle-buttons');
+        const structureContainer = document.getElementById('admin-structure-buttons');
+        if (!obstacleContainer || !structureContainer) return;
+
+        const ICONS = {
+            barbed_wire: '🪡', concertina_wire: '🔪', minefield: '💣',
+            at_minefield: '🎯', entrenchment: '⛏', anti_tank_ditch: '🕳',
+            dragons_teeth: '🦷', roadblock: '🚧',
+            pillbox: '🛡', observation_tower: '👁',
+            field_hospital: '✚', command_post_structure: '⚑',
+            fuel_depot: '⛽', airfield: '✈️', supply_cache: '🗃',
+            bridge_structure: '🌁',
+        };
+        const GEOM_HINTS = {
+            LineString: '(draw line, right-click to finish)',
+            Polygon: '(draw polygon, right-click to finish)',
+            Point: '(click to place)',
+        };
+
+        let obstacleHtml = '';
+        let structureHtml = '';
+
+        for (const [key, defn] of Object.entries(defs)) {
+            const icon = ICONS[key] || '⬟';
+            const label = key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const color = defn.color || '#888';
+            const hint = GEOM_HINTS[defn.geometry_type] || '';
+            const btn = `<button class="map-obj-place-btn" data-objtype="${key}" title="${defn.description || label}\n${hint}" style="border-left:3px solid ${color};">
+                <span class="map-obj-btn-icon">${icon}</span>
+                <span class="map-obj-btn-label">${label}</span>
+            </button>`;
+
+            if (defn.category === 'obstacle') {
+                obstacleHtml += btn;
+            } else {
+                structureHtml += btn;
+            }
+        }
+
+        obstacleContainer.innerHTML = obstacleHtml;
+        structureContainer.innerHTML = structureHtml;
+
+        // Bind click handlers
+        document.querySelectorAll('.map-obj-place-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const objType = btn.dataset.objtype;
+                document.querySelectorAll('.map-obj-place-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                KMapObjects.startPlacement(objType);
+
+                const stats = document.getElementById('admin-objects-stats');
+                if (stats) stats.innerHTML = `<span style="color:#4fc3f7;">🎯 Placing: ${objType.replace(/_/g, ' ')}</span>`;
+            });
+        });
+    }
+
+    function _bindObjectsPanelEvents() {
+        _bind('admin-objects-refresh', 'click', _refreshObjectsList);
+        _bind('admin-objects-clear-all', 'click', async () => {
+            const sid = _getAdminSessionId();
+            if (!sid) return;
+            if (!confirm('Delete ALL map objects for this session?')) return;
+            const token = _getToken();
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            try {
+                await fetch(`/api/sessions/${sid}/map-objects`, { method: 'DELETE', headers });
+                KMapObjects.clearAll();
+                _refreshObjectsList();
+            } catch (e) { console.warn('Clear all objects failed:', e); }
+        });
+        _bind('admin-objects-toggle-vis', 'click', () => {
+            const visible = KMapObjects.toggle();
+            const btn = document.getElementById('admin-objects-toggle-vis');
+            if (btn) btn.textContent = visible ? '👁 Hide' : '👁 Show';
+        });
+    }
+
+    async function _refreshObjectsList() {
+        const sid = _getAdminSessionId();
+        if (!sid) return;
+        const token = _getToken();
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/map-objects`, { headers });
+            if (!resp.ok) return;
+            const objects = await resp.json();
+
+            const listEl = document.getElementById('admin-objects-list');
+            const statsEl = document.getElementById('admin-objects-stats');
+            if (!listEl) return;
+
+            if (objects.length === 0) {
+                listEl.innerHTML = '<div style="color:#888;padding:4px;">No objects placed yet</div>';
+                if (statsEl) statsEl.innerHTML = '';
+                return;
+            }
+
+            const ICONS = {
+                barbed_wire: '🪡', concertina_wire: '🔪', minefield: '💣',
+                at_minefield: '🎯', entrenchment: '⛏', anti_tank_ditch: '🕳',
+                dragons_teeth: '🦷', roadblock: '🚧',
+                pillbox: '🛡', observation_tower: '👁',
+                field_hospital: '✚', command_post_structure: '⚑',
+                fuel_depot: '⛽', airfield: '✈️', supply_cache: '🗃',
+                bridge_structure: '🌁',
+            };
+
+            let html = '';
+            for (const obj of objects) {
+                const icon = ICONS[obj.object_type] || '⬟';
+                const label = obj.label || obj.object_type.replace(/_/g, ' ');
+                const status = obj.is_active ? '✓' : '✗';
+                const statusColor = obj.is_active ? '#4caf50' : '#f44336';
+                const health = obj.health !== undefined ? ` HP:${Math.round(obj.health * 100)}%` : '';
+                const color = (obj.definition && obj.definition.color) || '#888';
+
+                html += `<div class="map-obj-list-item" style="border-left:3px solid ${color};">
+                    <span>${icon} ${label}</span>
+                    <span style="color:${statusColor};font-size:10px;">${status}${health}</span>
+                    <button class="map-obj-list-del" data-objid="${obj.id}" title="Delete">🗑</button>
+                </div>`;
+            }
+            listEl.innerHTML = html;
+
+            // Bind delete buttons
+            listEl.querySelectorAll('.map-obj-list-del').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const objId = btn.dataset.objid;
+                    const tok = _getToken();
+                    const h = { 'Content-Type': 'application/json' };
+                    if (tok) h['Authorization'] = `Bearer ${tok}`;
+                    try {
+                        await fetch(`/api/sessions/${sid}/map-objects/${objId}`, { method: 'DELETE', headers: h });
+                        _refreshObjectsList();
+                        KMapObjects.onObjectDeleted({ id: objId });
+                    } catch (e) { console.warn('Delete object failed:', e); }
+                });
+            });
+
+            // Stats summary
+            if (statsEl) {
+                const obstCount = objects.filter(o => o.object_category === 'obstacle').length;
+                const structCount = objects.filter(o => o.object_category === 'structure').length;
+                const activeCount = objects.filter(o => o.is_active).length;
+                statsEl.innerHTML = `<span style="color:#4fc3f7;">${objects.length} objects</span> (${obstCount} obstacles, ${structCount} structures, ${activeCount} active)`;
+            }
+        } catch (e) {
+            console.warn('Failed to refresh objects list:', e);
+        }
+    }
+
     return {
         init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
+        getAdminSessionId: _getAdminSessionId,
         onStateUpdate, resetOnLogout,
         editScenario, deleteScenario, deleteSession, createSessionFromScenario,
         renameSession, enterSession,

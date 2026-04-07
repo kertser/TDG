@@ -1,7 +1,7 @@
 /**
  * app.js – Main entry point: initialize all modules.
  */
-(function () {
+(async function () {
     'use strict';
 
     // Initialize map — default center near Reims area (updated per scenario)
@@ -11,7 +11,7 @@
     KUI.init();
     KUI.addMapControls(map);
     KSessionUI.init();
-    KScenarioBuilder.init(map);
+    await KScenarioBuilder.init(map);  // async — loads unit_types.json
     KAdmin.init();
 
     // Initialize map layers
@@ -19,6 +19,7 @@
     KContacts.init(map);
     KOverlays.init(map);
     KTerrain.init(map);
+    KMapObjects.init(map);
 
     // Fetch and display app version
     fetch('/api/version').then(r => r.json()).then(data => {
@@ -99,6 +100,13 @@
             KTerrain.load(sessionId, token);  // intentionally not awaited
         } catch (err) { console.warn('Terrain load error:', err); }
 
+        // Load map objects (obstacles, structures)
+        try {
+            KMapObjects.setSession(sessionId);
+            KMapObjects.loadDefinitions(sessionId);
+            KMapObjects.load(sessionId, token);
+        } catch (err) { console.warn('Map objects load error:', err); }
+
         // Initialize orders panel
         try { KOrders.init(sessionId, token); } catch (err) { console.warn('Orders init error:', err); }
 
@@ -140,6 +148,11 @@
 
         KWebSocket.on('order_status', (data) => {
             KGameLog.addEntry(`Order [${data.status}]: ${data.original_text || data.id}`, 'order');
+            KOrders.onOrderStatus(data);
+        });
+
+        KWebSocket.on('chat_message', (data) => {
+            KOrders.onChatMessage(data);
         });
 
         KWebSocket.on('participant_joined', (data) => {
@@ -159,10 +172,24 @@
             KGameLog.addEntry(`[${data.channel}] ${data.text}`, 'report');
         });
 
+        KWebSocket.on('map_object_created', (data) => {
+            KMapObjects.onObjectCreated(data);
+        });
+
+        KWebSocket.on('map_object_updated', (data) => {
+            KMapObjects.onObjectUpdated(data);
+        });
+
+        KWebSocket.on('map_object_deleted', (data) => {
+            KMapObjects.onObjectDeleted(data);
+        });
+
         KWebSocket.on('tick_update', (data) => {
             KGameLog.addEntry(`Turn ${data.tick}`, 'info');
             // Update game clock on turn
             KMap.setGameTime(data.tick, data.game_time || null);
+            // Refresh command panel datetime
+            try { KOrders.refreshMeta(); } catch(e) {}
         });
 
         KGameLog.addEntry('Connected to session', 'info');

@@ -1153,7 +1153,7 @@ if unit.ammo <= 0:
 | Feature | Files | Description |
 |---|---|---|
 | **Admin Panel** | `admin.js`, `admin.py` | Floating admin window with password gate, sub-tabs (Session, Monitor, Builder, CoC, Users, Types). Session wizard (4-step: Setup → Participants → Terrain → Done) for guided setup. |
-| **Scenario Builder** | `scenario_builder.js`, `admin.js` | Interactive map-click unit placement, grid configuration, save/load scenarios. |
+| **Scenario Builder** | `scenario_builder.js`, `admin.js` | Interactive map-click unit placement, grid configuration, save/load scenarios. **Resync**: saving a scenario auto-resyncs units/grid in the current session via `POST /api/admin/sessions/{id}/resync-units`. |
 | **God View** | `admin.js`, `admin.py` | Admin toggle to see all units from both sides (bypasses fog-of-war). |
 | **Unit Dashboard** | `admin.js` | Admin table of all units with focus, edit, delete, split, merge buttons. |
 | **Chain of Command (Public CoC)** | `admin.js` (sidebar CoC tab) | Sidebar CoC tree visible to all players. Commanders can reassign subordinate units. |
@@ -1194,11 +1194,19 @@ if unit.ammo <= 0:
 | Side check: blue can't command red | `units.js: _canSelect` — rejects cross-side selection (bypassed when admin panel is unlocked) |
 | Side check: blue can't order red units | `orders.py: submit_order` — validates unit side matches order side |
 | Formation/Move/Stop require admin | `units.js: _showUnitContextMenu` — Formation, Set Move, Stop items only shown when `KAdmin.isUnlocked()` is true |
-| Admin close locks panel | `admin.js: _closeAdminWindow` — closing admin window sets `_adminUnlocked = false`, re-shows lock gate, closes open unit context menus |
+| Admin close locks panel | `admin.js: _closeAdminWindow` — closing admin window sets `_adminUnlocked = false`, re-shows lock gate, closes open unit context menus, deactivates scenario builder |
 | Command authority via hierarchy | `visibility_service.py: check_command_authority` — walks parent chain |
 | Implicit authority when no CoC | `visibility_service.py` — if no same-side units have assigned users, all same-side players have authority |
 | Subordinate user authority | `visibility_service.py: check_subordinate_authority` — user A has authority if target is assigned to a subordinate of A |
 | CoC tree assign buttons | `admin.js: _userCanAssign` — mirrors backend logic, includes "no CoC" fallback |
+
+### Authentication
+
+- **Callsign + password** authentication: Users register with a callsign and password (min 4 chars). Passwords hashed with bcrypt via `passlib.context.CryptContext`.
+- **Register**: `POST /api/auth/register` — creates new user with callsign + password. Rejects duplicate callsigns (409).
+- **Login**: `POST /api/auth/login` — authenticates with callsign + password. Returns JWT token.
+- **Legacy users**: Users created before password system (or via admin panel) have NULL `password_hash`. On first login they are prompted to set a password.
+- **Frontend**: Two-button auth card (Register / Login) with callsign + password fields. Error messages shown inline below buttons.
 
 ### Fog-of-War Implementation
 

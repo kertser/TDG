@@ -22,13 +22,21 @@ const KSessionUI = (() => {
 
     async function init() {
         const registerBtn = document.getElementById('register-btn');
+        const loginBtn = document.getElementById('login-btn');
         const nameInput = document.getElementById('display-name-input');
+        const pwInput = document.getElementById('password-input');
         const startBtn = document.getElementById('start-session-btn');
         const turnBtn = document.getElementById('turn-btn');
 
-        registerBtn.addEventListener('click', () => _doLogin(nameInput.value.trim()));
-        nameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') _doLogin(nameInput.value.trim());
+        if (registerBtn) registerBtn.addEventListener('click', () => _doRegister());
+        if (loginBtn) loginBtn.addEventListener('click', () => _doLogin());
+        if (pwInput) pwInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') _doLogin();
+        });
+        if (nameInput) nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                if (pwInput) pwInput.focus();
+            }
         });
 
 
@@ -173,42 +181,84 @@ const KSessionUI = (() => {
         modal.style.display = 'flex';
     }
 
-    async function _doLogin(name) {
-        if (!name) return;
+    function _clearAuthError() {
+        const errEl = document.getElementById('auth-error');
+        if (errEl) errEl.textContent = '';
+    }
+
+    function _showAuthError(msg) {
+        const errEl = document.getElementById('auth-error');
+        if (errEl) errEl.textContent = msg;
+    }
+
+    async function _doRegister() {
+        const name = (document.getElementById('display-name-input')?.value || '').trim();
+        const password = (document.getElementById('password-input')?.value || '');
+        _clearAuthError();
+        if (!name) { _showAuthError('Callsign required'); return; }
+        if (!password || password.length < 4) { _showAuthError('Password must be at least 4 characters'); return; }
 
         try {
-            // Try login first, then register
-            let resp = await fetch('/api/auth/login', {
+            const resp = await fetch('/api/auth/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ display_name: name }),
+                body: JSON.stringify({ display_name: name, password }),
             });
             if (!resp.ok) {
-                resp = await fetch('/api/auth/register', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ display_name: name }),
-                });
+                const err = await resp.json().catch(() => ({}));
+                _showAuthError(err.detail || 'Registration failed');
+                return;
             }
             const data = await resp.json();
-            currentToken = data.token;
-            currentUserId = data.user_id;
-            currentUserName = data.display_name;
-
-            document.getElementById('user-info').textContent = `👤 ${data.display_name}`;
-            document.getElementById('auth-panel').style.display = 'none';
-            document.getElementById('session-panel').style.display = 'block';
-
-
-            // Show admin topbar button (any logged-in user can see it;
-            // the password gate inside the admin tab handles security)
-            const adminTopBtn = document.getElementById('admin-topbar-btn');
-            if (adminTopBtn) adminTopBtn.style.display = '';
-
-            loadSessions();
+            _onAuthSuccess(data);
         } catch (err) {
-            console.error('Auth failed:', err);
+            _showAuthError('Connection error');
+            console.error('Register failed:', err);
         }
+    }
+
+    async function _doLogin() {
+        const name = (document.getElementById('display-name-input')?.value || '').trim();
+        const password = (document.getElementById('password-input')?.value || '');
+        _clearAuthError();
+        if (!name) { _showAuthError('Callsign required'); return; }
+        if (!password) { _showAuthError('Password required'); return; }
+
+        try {
+            const resp = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ display_name: name, password }),
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                _showAuthError(err.detail || 'Login failed');
+                return;
+            }
+            const data = await resp.json();
+            _onAuthSuccess(data);
+        } catch (err) {
+            _showAuthError('Connection error');
+            console.error('Login failed:', err);
+        }
+    }
+
+    function _onAuthSuccess(data) {
+        currentToken = data.token;
+        currentUserId = data.user_id;
+        currentUserName = data.display_name;
+
+        document.getElementById('user-info').textContent = `👤 ${data.display_name}`;
+        document.getElementById('auth-panel').style.display = 'none';
+        document.getElementById('session-panel').style.display = 'block';
+
+
+        // Show admin topbar button (any logged-in user can see it;
+        // the password gate inside the admin tab handles security)
+        const adminTopBtn = document.getElementById('admin-topbar-btn');
+        if (adminTopBtn) adminTopBtn.style.display = '';
+
+        loadSessions();
     }
 
     function _doLogout() {
@@ -232,6 +282,10 @@ const KSessionUI = (() => {
         document.getElementById('session-panel').style.display = 'none';
         document.getElementById('session-info').textContent = '';
         document.getElementById('display-name-input').value = '';
+        const pwField = document.getElementById('password-input');
+        if (pwField) pwField.value = '';
+        const authErr = document.getElementById('auth-error');
+        if (authErr) authErr.textContent = '';
 
 
         // Hide admin topbar button and close admin window
@@ -271,10 +325,11 @@ const KSessionUI = (() => {
         if (orderList) orderList.innerHTML = '';
         const gameLog = document.getElementById('game-log');
         if (gameLog) gameLog.innerHTML = '';
-        const selectedUnits = document.getElementById('selected-units-display');
-        if (selectedUnits) selectedUnits.innerHTML = '<span style="color:#888;font-size:11px;">No units selected</span>';
         const participantsPanel = document.getElementById('participants-panel');
         if (participantsPanel) participantsPanel.innerHTML = '';
+
+        // Hide command panel
+        try { KOrders.hide(); } catch(e) {}
 
         // Reset sidebar to session tab
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));

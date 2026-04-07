@@ -72,6 +72,7 @@ class Session(Base):
     red_agents = relationship("RedAgent", back_populates="session", cascade="all, delete-orphan")
     terrain_cells = relationship("TerrainCell", back_populates="session", cascade="all, delete-orphan")
     elevation_cells = relationship("ElevationCell", back_populates="session", cascade="all, delete-orphan")
+    map_objects = relationship("MapObject", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Session {self.id} status={self.status.value}>"

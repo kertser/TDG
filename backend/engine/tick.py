@@ -35,6 +35,7 @@ from backend.models.event import Event
 from backend.models.terrain_cell import TerrainCell
 from backend.models.elevation_cell import ElevationCell
 from backend.models.grid import GridDefinition
+from backend.models.map_object import MapObject
 
 from backend.engine.terrain import TerrainService
 from backend.engine.movement import process_movement
@@ -46,6 +47,8 @@ from backend.engine.contacts import process_contacts
 from backend.engine.ammo import process_ammo
 from backend.engine.suppression import process_suppression_recovery
 from backend.engine.events import create_event
+from backend.engine.engineering import process_engineering
+from backend.engine.structures import process_structures
 
 
 async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
@@ -143,9 +146,23 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     blue_units = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
 
-    # ── 2. Execute movement ──────────────────────────────────────
-    movement_events = process_movement(all_units, tick_duration, terrain)
+    # ── Load map objects (obstacles, structures) ─────────────
+    mo_result = await db.execute(
+        select(MapObject).where(MapObject.session_id == session_id)
+    )
+    map_objects_list = list(mo_result.scalars().all())
+
+    # ── 2. Execute movement (with obstacle effects) ──────────
+    movement_events = process_movement(all_units, tick_duration, terrain, map_objects_list)
     all_events.extend(movement_events)
+
+    # ── 2b. Process engineering tasks ─────────────────────────
+    new_map_objects: list = []
+    eng_events = process_engineering(all_units, map_objects_list, session_id, new_map_objects)
+    all_events.extend(eng_events)
+    for new_obj in new_map_objects:
+        db.add(new_obj)
+        map_objects_list.append(new_obj)
 
     # ── 3. Execute detection ─────────────────────────────────────
     # Reload unit lists after movement (positions changed)
@@ -177,23 +194,27 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         await db.delete(c)
 
     # ── 5. Execute combat ────────────────────────────────────────
-    combat_events, under_fire = process_combat(all_units, terrain)
+    combat_events, under_fire = process_combat(all_units, terrain, map_objects_list)
     all_events.extend(combat_events)
 
-    # ── 6. Suppression recovery ──────────────────────────────────
+    # ── 6. Suppression recovery ──────────────────────────────
     process_suppression_recovery(all_units, under_fire)
 
-    # ── 7. Morale effects ────────────────────────────────────────
+    # ── 7. Morale effects ────────────────────────────────────
     morale_events = process_morale(all_units, under_fire)
     all_events.extend(morale_events)
 
-    # ── 8. Communications ────────────────────────────────────────
+    # ── 8. Communications ────────────────────────────────────
     comms_events = process_comms(all_units, under_fire)
     all_events.extend(comms_events)
 
-    # ── 9. Ammo consumption ──────────────────────────────────────
+    # ── 9. Ammo consumption ──────────────────────────────────
     ammo_events = process_ammo(all_units, under_fire)
     all_events.extend(ammo_events)
+
+    # ── 9b. Structure effects (resupply, comms bonus) ─────────
+    struct_events = process_structures(all_units, map_objects_list)
+    all_events.extend(struct_events)
 
     # ── 10. Persist events ───────────────────────────────────────
     for evt_dict in all_events:

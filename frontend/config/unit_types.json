@@ -1,0 +1,346 @@
+ {
+    "_comment": "Unit type registry — editable config. Personnel numbers based on NATO/standard military TOE.",
+
+    "headquarters": {
+        "label": "Headquarters",
+        "sidc_blue": "10031002151200000000",
+        "sidc_red": "10061002151200000000",
+        "speed": 3.0,
+        "det": 2000,
+        "fire": 200,
+        "personnel": 25,
+        "isHQ": true
+    },
+    "command_post": {
+        "label": "Command Post",
+        "sidc_blue": "10031002151200000000",
+        "sidc_red": "10061002151200000000",
+        "speed": 2.0,
+        "det": 1500,
+        "fire": 100,
+        "personnel": 12,
+        "isHQ": true
+    },
+
+    "infantry_team": {
+        "label": "Infantry Team",
+        "sidc_blue": "10031000121211000000",
+        "sidc_red": "10061000121211000000",
+        "speed": 3.5,
+        "det": 1500,
+        "fire": 300,
+        "personnel": 4
+    },
+    "infantry_squad": {
+        "label": "Infantry Squad",
+        "sidc_blue": "10031000131211000000",
+        "sidc_red": "10061000131211000000",
+        "speed": 3.0,
+        "det": 1500,
+        "fire": 400,
+        "personnel": 9
+    },
+    "infantry_section": {
+        "label": "Infantry Section",
+        "sidc_blue": "10031000131211000000",
+        "sidc_red": "10061000131211000000",
+        "speed": 3.0,
+        "det": 1500,
+        "fire": 400,
+        "personnel": 8
+    },
+    "infantry_platoon": {
+        "label": "Infantry Platoon",
+        "sidc_blue": "10031000141211000000",
+        "sidc_red": "10061000141211000000",
+        "speed": 4.0,
+        "det": 1500,
+        "fire": 600,
+        "personnel": 36
+    },
+    "infantry_company": {
+        "label": "Infantry Company",
+        "sidc_blue": "10031000151211000000",
+        "sidc_red": "10061000151211000000",
+        "speed": 3.5,
+        "det": 1500,
+        "fire": 800,
+        "personnel": 130
+    },
+    "infantry_battalion": {
+        "label": "Infantry Battalion",
+        "sidc_blue": "10031000161211000000",
+        "sidc_red": "10061000161211000000",
+        "speed": 2.0,
+        "det": 1500,
+        "fire": 1200,
+        "personnel": 650
+    },
+
+    "mech_platoon": {
+        "label": "Mech Infantry Plt",
+        "sidc_blue": "10031000141211000000",
+        "sidc_red": "10061000141211000000",
+        "speed": 10.0,
+        "det": 1800,
+        "fire": 1200,
+        "personnel": 35
+    },
+    "mech_company": {
+        "label": "Mech Infantry Co",
+        "sidc_blue": "10031000151211000000",
+        "sidc_red": "10061000151211000000",
+        "speed": 7.0,
+        "det": 1800,
+        "fire": 1500,
+        "personnel": 115
+    },
+
+    "tank_platoon": {
+        "label": "Tank Platoon",
+        "sidc_blue": "10031000141301000000",
+        "sidc_red": "10061000141301000000",
+        "speed": 12.0,
+        "det": 2000,
+        "fire": 2000,
+        "personnel": 16
+    },
+    "tank_company": {
+        "label": "Tank Company",
+        "sidc_blue": "10031000151301000000",
+        "sidc_red": "10061000151301000000",
+        "speed": 8.0,
+        "det": 2000,
+        "fire": 2500,
+        "personnel": 58
+    },
+
+    "artillery_battery": {
+        "label": "Artillery Battery",
+        "sidc_blue": "10031000151303000000",
+        "sidc_red": "10061000151303000000",
+        "speed": 3.0,
+        "det": 1200,
+        "fire": 5000,
+        "personnel": 90
+    },
+    "artillery_platoon": {
+        "label": "Artillery Platoon",
+        "sidc_blue": "10031000141303000000",
+        "sidc_red": "10061000141303000000",
+        "speed": 3.0,
+        "det": 1200,
+        "fire": 5000,
+        "personnel": 30
+    },
+
+    "mortar_section": {
+        "label": "Mortar Section",
+        "sidc_blue": "10031000131215000000",
+        "sidc_red": "10061000131215000000",
+        "speed": 3.0,
+        "det": 1000,
+        "fire": 3500,
+        "personnel": 8
+    },
+    "mortar_team": {
+        "label": "Mortar Team",
+        "sidc_blue": "10031000121215000000",
+        "sidc_red": "10061000121215000000",
+        "speed": 3.0,
+        "det": 1000,
+        "fire": 3000,
+        "personnel": 4
+    },
+
+    "at_team": {
+        "label": "Anti-Tank Team",
+        "sidc_blue": "10031000111211004000",
+        "sidc_red": "10061000111211004000",
+        "speed": 3.5,
+        "det": 2000,
+        "fire": 2000,
+        "personnel": 4
+    },
+
+    "recon_team": {
+        "label": "Recon Team",
+        "sidc_blue": "10031000111213000000",
+        "sidc_red": "10061000111213000000",
+        "speed": 5.0,
+        "det": 3000,
+        "fire": 400,
+        "personnel": 4
+    },
+    "recon_section": {
+        "label": "Recon Section",
+        "sidc_blue": "10031000131213000000",
+        "sidc_red": "10061000131213000000",
+        "speed": 4.0,
+        "det": 3000,
+        "fire": 500,
+        "personnel": 10
+    },
+
+    "observation_post": {
+        "label": "Observation Post",
+        "sidc_blue": "10031000111213000000",
+        "sidc_red": "10061000111213000000",
+        "speed": 5.0,
+        "det": 4000,
+        "fire": 300,
+        "personnel": 3
+    },
+    "sniper_team": {
+        "label": "Sniper Team",
+        "sidc_blue": "10031000111211000000",
+        "sidc_red": "10061000111211000000",
+        "speed": 3.0,
+        "det": 2500,
+        "fire": 1000,
+        "personnel": 2
+    },
+
+    "engineer_platoon": {
+        "label": "Engineer Platoon",
+        "sidc_blue": "10031000141206000000",
+        "sidc_red": "10061000141206000000",
+        "speed": 3.5,
+        "det": 1200,
+        "fire": 400,
+        "personnel": 35
+    },
+    "engineer_section": {
+        "label": "Engineer Section",
+        "sidc_blue": "10031000131206000000",
+        "sidc_red": "10061000131206000000",
+        "speed": 3.0,
+        "det": 1200,
+        "fire": 300,
+        "personnel": 10
+    },
+    "combat_engineer_platoon": {
+        "label": "Combat Engr Plt",
+        "sidc_blue": "10031000141206000000",
+        "sidc_red": "10061000141206000000",
+        "speed": 3.0,
+        "det": 1200,
+        "fire": 500,
+        "personnel": 34
+    },
+    "combat_engineer_section": {
+        "label": "Combat Engr Sect",
+        "sidc_blue": "10031000131206000000",
+        "sidc_red": "10061000131206000000",
+        "speed": 3.0,
+        "det": 1200,
+        "fire": 400,
+        "personnel": 10
+    },
+    "combat_engineer_team": {
+        "label": "Combat Engr Team",
+        "sidc_blue": "10031000121206000000",
+        "sidc_red": "10061000121206000000",
+        "speed": 3.5,
+        "det": 1200,
+        "fire": 300,
+        "personnel": 5
+    },
+
+    "mine_layer_section": {
+        "label": "Mine Layer Sect",
+        "sidc_blue": "10031000131206000000",
+        "sidc_red": "10061000131206000000",
+        "speed": 2.5,
+        "det": 1000,
+        "fire": 200,
+        "personnel": 8
+    },
+    "mine_layer_team": {
+        "label": "Mine Layer Team",
+        "sidc_blue": "10031000121206000000",
+        "sidc_red": "10061000121206000000",
+        "speed": 3.0,
+        "det": 1000,
+        "fire": 150,
+        "personnel": 4
+    },
+
+    "obstacle_breacher_team": {
+        "label": "Obstacle Breacher",
+        "sidc_blue": "10031000121206000000",
+        "sidc_red": "10061000121206000000",
+        "speed": 3.0,
+        "det": 1200,
+        "fire": 300,
+        "personnel": 5
+    },
+    "obstacle_breacher_section": {
+        "label": "Breach Section",
+        "sidc_blue": "10031000131206000000",
+        "sidc_red": "10061000131206000000",
+        "speed": 2.5,
+        "det": 1200,
+        "fire": 350,
+        "personnel": 10
+    },
+
+    "engineer_recon_team": {
+        "label": "Engr Recon Team",
+        "sidc_blue": "10031000111213000000",
+        "sidc_red": "10061000111213000000",
+        "speed": 4.0,
+        "det": 2500,
+        "fire": 300,
+        "personnel": 4
+    },
+
+    "construction_engineer_platoon": {
+        "label": "Construct Engr Plt",
+        "sidc_blue": "10031000141206000000",
+        "sidc_red": "10061000141206000000",
+        "speed": 2.0,
+        "det": 800,
+        "fire": 100,
+        "personnel": 30
+    },
+    "construction_engineer_section": {
+        "label": "Construct Engr Sect",
+        "sidc_blue": "10031000131206000000",
+        "sidc_red": "10061000131206000000",
+        "speed": 2.0,
+        "det": 800,
+        "fire": 100,
+        "personnel": 10
+    },
+
+    "avlb_vehicle": {
+        "label": "AVLB Vehicle",
+        "sidc_blue": "10031000121206000000",
+        "sidc_red": "10061000121206000000",
+        "speed": 6.0,
+        "det": 1000,
+        "fire": 100,
+        "personnel": 3
+    },
+    "avlb_section": {
+        "label": "AVLB Section",
+        "sidc_blue": "10031000131206000000",
+        "sidc_red": "10061000131206000000",
+        "speed": 6.0,
+        "det": 1000,
+        "fire": 100,
+        "personnel": 6
+    },
+
+    "logistics_unit": {
+        "label": "Logistics Unit",
+        "sidc_blue": "10031000141207000000",
+        "sidc_red": "10061000141207000000",
+        "speed": 5.0,
+        "det": 800,
+        "fire": 100,
+        "personnel": 20
+    }
+}
+

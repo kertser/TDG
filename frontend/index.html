@@ -58,7 +58,7 @@
         <div id="sidebar">
             <div id="sidebar-tabs">
                 <button class="tab-btn active" data-tab="session-tab">Session</button>
-                <button class="tab-btn" data-tab="orders-tab">Orders</button>
+                <button class="tab-btn" data-tab="orders-tab">Radio Log</button>
                 <button class="tab-btn" data-tab="events-tab">Events</button>
                 <button class="tab-btn" data-tab="coc-tab">CoC</button>
                 <button class="tab-btn" data-tab="log-tab">Log</button>
@@ -66,31 +66,54 @@
 
             <!-- Session panel -->
             <div id="session-tab" class="tab-panel active">
-                <h3>Session</h3>
                 <div id="auth-panel">
-                    <input type="text" id="display-name-input" placeholder="Your display name" title="Enter your display name to register or login" />
-                    <button id="register-btn" title="Register a new account or login with existing name">Register / Login</button>
+                    <div class="auth-card">
+                        <div class="auth-icon">
+                            <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                        </div>
+                        <div class="auth-title">Welcome, Commander</div>
+                        <div class="auth-subtitle">Enter your callsign and password</div>
+                        <div class="auth-field">
+                            <div class="auth-input-group">
+                                <input type="text" id="display-name-input" class="auth-input" placeholder="Callsign" title="Enter your callsign" autocomplete="off" spellcheck="false" />
+                            </div>
+                        </div>
+                        <div class="auth-field">
+                            <div class="auth-input-group">
+                                <input type="password" id="password-input" class="auth-input" placeholder="Password" title="Enter your password" autocomplete="off" />
+                            </div>
+                        </div>
+                        <div class="auth-actions">
+                            <button id="register-btn" class="auth-btn auth-btn-secondary" title="Create a new account with this callsign and password">
+                                <span>Register</span>
+                            </button>
+                            <button id="login-btn" class="auth-btn" title="Login with existing callsign and password">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                <span>Login</span>
+                            </button>
+                        </div>
+                        <div id="auth-error" class="auth-error"></div>
+                        <div class="auth-hint">Min. 4 characters for password</div>
+                    </div>
                 </div>
                 <div id="session-panel" style="display:none;">
+                    <h3>Sessions</h3>
                     <button id="start-session-btn" style="display:none;" title="Start the session (creates units from scenario)">Start Session</button>
                     <div id="session-list"></div>
                 </div>
                 <div id="participants-panel"></div>
             </div>
 
-            <!-- Orders panel -->
+            <!-- Orders panel (radio-style order log) -->
             <div id="orders-tab" class="tab-panel">
-                <h3>Orders</h3>
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                    <span style="font-size:11px;color:#aaa;white-space:nowrap;">Target units (left-click to select):</span>
-                    <button id="clear-unit-selection-btn" style="font-size:10px;padding:2px 6px;" title="Clear selection">✕</button>
+                <h3>📡 Order Log</h3>
+                <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                    Radio transcript of all orders issued during this session.
                 </div>
-                <div id="selected-units-display" style="min-height:20px;margin-bottom:6px;">
-                    <span style="color:#888;font-size:11px;">No units selected</span>
-                </div>
-                <textarea id="order-text" placeholder="Enter order text...&#10;e.g. 1st Plt move to B4-3&#10;&#10;Left-click units on map to select, then type order."></textarea>
-                <button id="submit-order-btn" title="Submit the order to selected units">Submit Order</button>
-                <div id="order-list"></div>
+                <div id="order-list" class="order-radio-log"></div>
             </div>
 
             <!-- Events panel -->
@@ -122,6 +145,56 @@
         </div>
     </div>
 
+    <!-- ── Bottom Command Panel (on the map, bottom-center) ──── -->
+    <div id="command-panel" style="display:none;">
+        <div id="command-panel-header">
+            <div class="cmd-tabs">
+                <button class="cmd-tab-btn active" data-cmd-tab="cmd-orders" title="Issue orders to selected units">📡 Orders</button>
+                <button class="cmd-tab-btn" data-cmd-tab="cmd-radio" title="Tactical radio — send messages to commanders">📻 Radio</button>
+            </div>
+            <div class="cmd-meta">
+                <span id="cmd-author" class="cmd-author-badge" title="Sender"></span>
+                <span id="cmd-datetime" class="cmd-datetime-badge" title="Game time"></span>
+            </div>
+            <button id="cmd-panel-toggle" class="cmd-toggle-btn" title="Pin panel open">
+                <svg viewBox="0 0 16 16" width="10" height="10"><path d="M8 2L8 10M4 6L8 2L12 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
+
+        <!-- Orders sub-panel -->
+        <div id="cmd-orders" class="cmd-tab-panel active">
+            <div class="cmd-selected-units">
+                <div id="selected-units-display" class="cmd-unit-chips">
+                    <span class="cmd-hint">Select units on the map</span>
+                </div>
+                <button id="clear-unit-selection-btn" class="cmd-chip-clear" title="Clear selection">✕</button>
+            </div>
+            <div class="cmd-input-row">
+                <textarea id="order-text" class="cmd-textarea" placeholder="Type your order… (Ctrl+Enter to send)" rows="1"></textarea>
+                <button id="submit-order-btn" class="cmd-send-btn" title="Issue Order (Ctrl+Enter)">
+                    <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 8L6 14L15 2" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Radio sub-panel -->
+        <div id="cmd-radio" class="cmd-tab-panel">
+            <div class="cmd-radio-header">
+                <select id="radio-recipient" class="cmd-radio-select" title="Select recipient">
+                    <option value="all">📢 All Commanders</option>
+                </select>
+                <span class="cmd-radio-freq">CH 1 · SECURE</span>
+            </div>
+            <div id="radio-messages" class="cmd-radio-messages"></div>
+            <div class="cmd-input-row">
+                <textarea id="radio-text" class="cmd-textarea" placeholder="Type message… (Enter to send)" rows="1"></textarea>
+                <button id="radio-send-btn" class="cmd-send-btn" title="Send Message (Enter)">
+                    <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 14L14 8L2 2L2 6.5L10 8L2 9.5Z" fill="currentColor"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ── Admin Floating Window ─────────────────────── -->
     <div id="admin-window" style="display:none;">
         <div id="admin-window-header">
@@ -132,12 +205,24 @@
 
             <!-- Admin password gate -->
             <div id="admin-lock-gate">
-                <div class="admin-section" style="text-align:center;padding:20px 10px;">
-                    <div style="font-size:24px;margin-bottom:8px;">🔒</div>
-                    <div style="font-size:12px;color:#aaa;margin-bottom:10px;">Enter admin password to unlock</div>
-                    <input type="password" id="admin-pw-input" placeholder="Password…" style="width:160px;text-align:center;margin-bottom:8px;" title="Enter the admin password configured in server settings" />
-                    <br>
-                    <button id="admin-unlock-btn" class="admin-btn" style="padding:6px 20px;" title="Verify admin password and unlock admin panel">🔓 Unlock</button>
+                <div class="admin-lock-card">
+                    <div class="admin-lock-icon">
+                        <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            <circle cx="12" cy="16" r="1"/>
+                        </svg>
+                    </div>
+                    <div class="admin-lock-title">Admin Access</div>
+                    <div class="admin-lock-subtitle">Enter admin password to unlock</div>
+                    <div class="admin-lock-input-group">
+                        <input type="password" id="admin-pw-input" class="admin-lock-input" placeholder="Password…" autocomplete="off" spellcheck="false" title="Enter the admin password configured in server settings" />
+                        <button id="admin-unlock-btn" class="admin-lock-btn" title="Verify admin password and unlock admin panel">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                            <span>Unlock</span>
+                        </button>
+                    </div>
+                    <div class="admin-lock-hint">Restricted to authorized personnel</div>
                 </div>
             </div>
 
@@ -165,6 +250,7 @@
                 <button class="admin-subtab-btn" data-panel="admin-users-panel" title="Manage registered users">Users</button>
                 <button class="admin-subtab-btn" data-panel="admin-types-panel" title="Manage unit types and icons">Types</button>
                 <button class="admin-subtab-btn" data-panel="admin-terrain-panel" title="Terrain analysis & painting">Terrain</button>
+                <button class="admin-subtab-btn" data-panel="admin-objects-panel" title="Tactical obstacles & structures">Objects</button>
             </div>
 
             <!-- ═══ BUILDER SUB-TAB ═══════════════════════ -->
@@ -394,7 +480,7 @@
                     <div style="font-size:10px;color:#888;margin-bottom:6px;">
                         View and customize unit types, SIDCs, default stats, and icons. Changes apply to the current session.
                     </div>
-                    <div id="admin-types-list" style="max-height:400px;overflow-y:auto;"></div>
+                    <div id="admin-types-list" style="max-height:600px;overflow-y:auto;"></div>
                     <div style="margin-top:8px;display:flex;gap:4px;">
                         <button id="admin-add-unit-type" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Add a new custom unit type">➕ Add Type</button>
                         <button id="admin-reset-unit-types" class="admin-btn" style="font-size:10px;" title="Reset all types to defaults">↺ Reset Defaults</button>
@@ -477,6 +563,52 @@
                         <button id="terrain-show-btn" class="admin-btn" title="Show/hide terrain overlay on map">👁 Toggle Terrain</button>
                         <button id="terrain-elev-btn" class="admin-btn" title="Show/hide elevation heatmap">📈 Toggle Elevation</button>
                         <button id="terrain-legend-btn" class="admin-btn" title="Show/hide terrain legend">📋 Toggle Legend</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══ CHAIN OF COMMAND SUB-TAB ═════════════════ -->
+
+            <!-- ═══ OBJECTS SUB-TAB ═══════════════════════════ -->
+            <div id="admin-objects-panel" class="admin-subtab-panel" style="display:none;">
+                <div class="admin-section">
+                    <h4>🚧 Obstacles</h4>
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                        Place tactical obstacles on the map. Click a type to start drawing.
+                    </div>
+                    <div id="admin-obstacle-buttons" class="map-obj-btn-grid"></div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>🏗 Structures</h4>
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                        Place static structures and fortifications.
+                    </div>
+                    <div id="admin-structure-buttons" class="map-obj-btn-grid"></div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>📋 Placed Objects</h4>
+                    <div style="display:flex;gap:4px;margin-bottom:4px;">
+                        <button id="admin-objects-refresh" class="admin-btn" style="font-size:10px;" title="Refresh object list">🔄 Refresh</button>
+                        <button id="admin-objects-clear-all" class="admin-btn admin-btn-danger" style="font-size:10px;" title="Delete all map objects">🗑 Clear All</button>
+                        <button id="admin-objects-toggle-vis" class="admin-btn" style="font-size:10px;" title="Show/hide objects layer">👁 Toggle</button>
+                    </div>
+                    <div id="admin-objects-list" style="max-height:200px;overflow-y:auto;font-size:11px;"></div>
+                    <div id="admin-objects-stats" class="admin-info" style="margin-top:4px;"></div>
+                </div>
+
+                <div class="admin-section">
+                    <h4>⚙ Engineering Reference</h4>
+                    <div style="font-size:10px;color:#888;line-height:1.6;">
+                        <b>Engineering units</b> can interact with obstacles:<br>
+                        • <b>Combat Engineers</b> — breach obstacles, construct fortifications<br>
+                        • <b>Mine Layers</b> — lay minefields<br>
+                        • <b>Obstacle Breachers</b> — breach wire, ditches, minefields<br>
+                        • <b>AVLB</b> — deploy bridges over water obstacles<br>
+                        • <b>Construction Engineers</b> — build structures & fortifications<br>
+                        <br>
+                        Right-click a placed object for context menu (toggle/delete).
                     </div>
                 </div>
             </div>
@@ -1033,7 +1165,8 @@
                         <li><b>Register / Login</b> — Enter a display name in the Session tab.</li>
                         <li><b>Join a Session</b> — Select a session from the list and choose your side (Blue/Red) and role.</li>
                         <li><b>Start</b> — Once joined, click <b>Start Session</b> to spawn units from the scenario.</li>
-                        <li><b>Issue Orders</b> — Select units on the map, then type orders in the <b>Orders</b> tab.</li>
+                        <li><b>Issue Orders</b> — Select units on the map, then type orders in the <b>command bar</b> at the bottom of the map.</li>
+                        <li><b>Tactical Radio</b> — Switch to the <b>Radio</b> tab in the command bar to communicate with other commanders.</li>
                         <li><b>Advance Turns</b> — Click <b>Execute Orders</b> in the top bar to submit your orders and advance the simulation by one turn.</li>
                     </ol>
                 </div>
@@ -1130,6 +1263,7 @@
     <script src="/js/session_ui.js"></script>
     <script src="/js/scenario_builder.js"></script>
     <script src="/js/terrain.js"></script>
+    <script src="/js/map_objects.js"></script>
     <script src="/js/admin.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/app.js"></script>

@@ -19,30 +19,46 @@ const KScenarioBuilder = (() => {
     let _rangePreviewLayer = null; // range preview layer for builder
     let _gridPreviewLayer = null;  // grid preview layer for builder
 
-    // ── Unit type registry ──────────────────────────────
-    const UNIT_TYPES = {
-        headquarters:      { label: 'Headquarters',       sidc_blue: '10031002151200000000', sidc_red: '10061002151200000000', speed: 3.0, det: 2000, fire: 200,  personnel: 20, isHQ: true },
-        command_post:      { label: 'Command Post',       sidc_blue: '10031002151200000000', sidc_red: '10061002151200000000', speed: 2.0, det: 1500, fire: 100,  personnel: 10, isHQ: true },
-        infantry_platoon:  { label: 'Infantry Platoon',   sidc_blue: '10031000141211000000', sidc_red: '10061000141211000000', speed: 4.0, det: 1500, fire: 600,  personnel: 30 },
-        infantry_company:  { label: 'Infantry Company',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 3.5, det: 1500, fire: 800,  personnel: 120 },
-        tank_company:      { label: 'Tank Company',       sidc_blue: '10031000151301000000', sidc_red: '10061000151301000000', speed: 8.0, det: 2000, fire: 2500, personnel: 60 },
-        mech_company:      { label: 'Mech Infantry Co',   sidc_blue: '10031000151211000000', sidc_red: '10061000151211000000', speed: 7.0, det: 1800, fire: 1500, personnel: 100 },
-        artillery_battery: { label: 'Artillery Battery',  sidc_blue: '10031000151303000000', sidc_red: '10061000151303000000', speed: 3.0, det: 1200, fire: 5000, personnel: 40 },
-        mortar_section:    { label: 'Mortar Section',     sidc_blue: '10031000131215000000', sidc_red: '10061000131215000000', speed: 3.0, det: 1000, fire: 3500, personnel: 12 },
-        at_team:           { label: 'Anti-Tank Team',     sidc_blue: '10031000111211004000', sidc_red: '10061000111211004000', speed: 3.5, det: 2000, fire: 2000, personnel: 6 },
-        recon_team:        { label: 'Recon Team',         sidc_blue: '10031000111213000000', sidc_red: '10061000111213000000', speed: 5.0, det: 3000, fire: 400,  personnel: 6 },
-        observation_post:  { label: 'Observation Post',   sidc_blue: '10031000111213000000', sidc_red: '10061000111213000000', speed: 5.0, det: 4000, fire: 300,  personnel: 4 },
-        sniper_team:       { label: 'Sniper Team',        sidc_blue: '10031000111211000000', sidc_red: '10061000111211000000', speed: 3.0, det: 2500, fire: 1000, personnel: 2 },
-        engineer_platoon:  { label: 'Engineer Platoon',   sidc_blue: '10031000141206000000', sidc_red: '10061000141206000000', speed: 3.5, det: 1200, fire: 400,  personnel: 30 },
-        logistics_unit:    { label: 'Logistics Unit',     sidc_blue: '10031000141207000000', sidc_red: '10061000141207000000', speed: 5.0, det: 800,  fire: 100,  personnel: 20 },
-    };
+    // ── Unit type registry (loaded from /config/unit_types.json) ──
+    let UNIT_TYPES = {};
+    let _defaultUnitTypes = {};  // pristine copy for reset
 
-    function init(map) {
+    /** Load unit types from the external config JSON file. */
+    async function _loadUnitTypes() {
+        try {
+            const resp = await fetch('/config/unit_types.json?v=' + Date.now());
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            // Strip the _comment key if present
+            delete data._comment;
+            UNIT_TYPES = data;
+            _defaultUnitTypes = JSON.parse(JSON.stringify(data));
+            console.log(`[UnitTypes] Loaded ${Object.keys(UNIT_TYPES).length} types from config`);
+        } catch (err) {
+            console.error('[UnitTypes] Failed to load config/unit_types.json, using empty registry:', err);
+            UNIT_TYPES = {};
+            _defaultUnitTypes = {};
+        }
+    }
+
+    /** Reset UNIT_TYPES back to the loaded defaults. */
+    function resetUnitTypes() {
+        UNIT_TYPES = JSON.parse(JSON.stringify(_defaultUnitTypes));
+        _populateTypeDropdown();
+    }
+
+    async function init(map) {
         _map = map;
         _stagedLayer = L.layerGroup();
         _rangePreviewLayer = L.layerGroup();
         _gridPreviewLayer = L.layerGroup();
         _initContextMenu();
+
+        // Load unit types from external config file
+        await _loadUnitTypes();
+
+        // Populate the unit type dropdown from UNIT_TYPES registry
+        _populateTypeDropdown();
 
         // Auto-update grid preview when grid settings change
         ['sb-grid-origin-lat', 'sb-grid-origin-lon', 'sb-grid-cols', 'sb-grid-rows', 'sb-grid-size'].forEach(id => {
@@ -51,11 +67,34 @@ const KScenarioBuilder = (() => {
         });
     }
 
+    /** Fill the sb-unit-type <select> with entries from UNIT_TYPES. */
+    function _populateTypeDropdown() {
+        const sel = document.getElementById('sb-unit-type');
+        if (!sel) return;
+        sel.innerHTML = '';
+        for (const [key, info] of Object.entries(UNIT_TYPES)) {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = info.label || key;
+            sel.appendChild(opt);
+        }
+    }
+
     // ══════════════════════════════════════════════════
     // ── Activate / Deactivate Builder Mode ───────────
     // ══════════════════════════════════════════════════
 
-    function activate(scenarioId = null) {
+    async function activate(scenarioId = null) {
+        // Clean up if already active (prevent double click handlers, stale state)
+        if (_active) {
+            _map.off('click', _onMapClick);
+            document.removeEventListener('click', _dismissCtxMenu);
+            _dismissCtxMenu();
+            _stagedLayer.clearLayers();
+            _rangePreviewLayer.clearLayers();
+            _gridPreviewLayer.clearLayers();
+        }
+
         _active = true;
         _scenarioId = scenarioId;
         _stagedUnits = [];
@@ -82,8 +121,11 @@ const KScenarioBuilder = (() => {
             toggleBtn.classList.add('admin-btn-danger');
         }
 
-        // If editing an existing scenario, load its data
-        if (scenarioId) _loadScenario(scenarioId);
+        // Refresh the unit type dropdown (may have been modified)
+        _populateTypeDropdown();
+
+        // If editing an existing scenario, load its data (await to prevent race)
+        if (scenarioId) await _loadScenario(scenarioId);
 
         _refreshUnitList();
         // Render a client-side grid preview from the form values
@@ -124,12 +166,14 @@ const KScenarioBuilder = (() => {
 
     function _onMapClick(e) {
         if (!_active) return;
-        // Don't place if clicking on an existing marker or UI
+        // Don't place if clicking on an existing marker or UI elements
         if (e.originalEvent && e.originalEvent.target.closest &&
             (e.originalEvent.target.closest('.leaflet-marker-icon') ||
              e.originalEvent.target.closest('.leaflet-popup') ||
              e.originalEvent.target.closest('#sidebar') ||
-             e.originalEvent.target.closest('#topbar'))) return;
+             e.originalEvent.target.closest('#topbar') ||
+             e.originalEvent.target.closest('#admin-window') ||
+             e.originalEvent.target.closest('.ctx-menu'))) return;
 
         // Pre-fill the form with clicked coordinates
         _showUnitForm(e.latlng.lat, e.latlng.lng);
@@ -338,6 +382,8 @@ const KScenarioBuilder = (() => {
 
     function _refreshUnitList() {
         const listEl = document.getElementById('sb-unit-list');
+        const countEl = document.getElementById('sb-unit-count');
+        if (countEl) countEl.textContent = _stagedUnits.length;
         if (!listEl) return;
 
         if (_stagedUnits.length === 0) {
@@ -462,8 +508,40 @@ const KScenarioBuilder = (() => {
             if (resp.ok) {
                 const data = await resp.json();
                 _scenarioId = data.id;
-                alert(`Scenario "${data.title}" saved!`);
                 KAdmin.refreshScenarioList();
+
+                // If there's an active session, resync its units from the updated scenario
+                const currentSessionId = KSessionUI.getSessionId();
+                const token = KSessionUI.getToken();
+                if (currentSessionId && token) {
+                    try {
+                        const resyncResp = await fetch(`/api/admin/sessions/${currentSessionId}/resync-units`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}` },
+                        });
+                        if (resyncResp.ok) {
+                            const resyncData = await resyncResp.json();
+                            console.log('Resync units:', resyncData.message);
+
+                            // Reload units, grid, and contacts on the map
+                            try {
+                                const map = KMap.getMap();
+                                await KGrid.load(map, currentSessionId);
+                                await KUnits.load(currentSessionId, token);
+                                await KContacts.load(currentSessionId, token);
+                            } catch (e) {
+                                console.warn('Map reload after resync:', e);
+                            }
+
+                            // Refresh admin CoC tree
+                            try { KAdmin.loadPublicCoC(); } catch(e) {}
+                        }
+                    } catch (e) {
+                        console.warn('Resync units after save:', e);
+                    }
+                }
+
+                alert(`Scenario "${data.title}" saved!`);
             } else {
                 const err = await resp.json().catch(() => ({}));
                 alert('Save failed: ' + (err.detail || resp.status));
@@ -845,7 +923,7 @@ const KScenarioBuilder = (() => {
     return {
         init, activate, deactivate, isActive,
         saveScenario, editUnit, removeUnit,
-        getUnitTypes, clearGridPreview,
+        getUnitTypes, resetUnitTypes, clearGridPreview,
         // For form callbacks
         confirmUnit: _confirmUnit,
         hideUnitForm: _hideUnitForm,

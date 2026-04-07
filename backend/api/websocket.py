@@ -128,6 +128,9 @@ async def websocket_endpoint(
             elif msg_type == "order_submit":
                 await _handle_order_submit(session_id, user.id, side, msg_data, websocket)
 
+            elif msg_type == "chat_message":
+                await _handle_chat_message(session_id, user.id, user.display_name, ws_side, msg_data, websocket)
+
             else:
                 await websocket.send_text(
                     json.dumps({
@@ -317,4 +320,76 @@ async def _handle_order_submit(
             await websocket.send_text(
                 json.dumps({"type": "error", "data": {"message": f"Order submit failed: {str(e)}"}})
             )
+
+
+async def _handle_chat_message(
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    display_name: str,
+    side: str,
+    data: dict,
+    websocket: WebSocket,
+):
+    """Handle chat_message WS message – persists to DB and broadcasts to session participants."""
+    text = data.get("text", "").strip()
+    if not text:
+        return
+
+    recipient = data.get("recipient", "all")  # 'all' or a specific user_id
+    from datetime import datetime, timezone
+    from backend.models.chat_message import ChatMessage
+
+    now = datetime.now(timezone.utc)
+
+    # Persist to database
+    async with async_session_factory() as db:
+        try:
+            msg = ChatMessage(
+                session_id=session_id,
+                sender_id=user_id,
+                sender_name=display_name,
+                side=side,
+                recipient=recipient,
+                text=text,
+                created_at=now,
+            )
+            db.add(msg)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            # Log but don't fail the broadcast
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to persist chat message: {e}")
+
+    chat_data = {
+        "sender_id": str(user_id),
+        "sender_name": display_name,
+        "text": text,
+        "recipient": recipient,
+        "side": side,
+        "timestamp": now.isoformat(),
+    }
+
+    if recipient == "all":
+        # Broadcast to all participants in the session (except sender)
+        await ws_manager.broadcast(
+            session_id,
+            {"type": "chat_message", "data": chat_data},
+            exclude_user=user_id,
+        )
+    else:
+        # Direct message — send only to the specific recipient
+        try:
+            target_user_id = uuid.UUID(recipient)
+            await ws_manager.send_to_user(
+                session_id,
+                target_user_id,
+                {"type": "chat_message", "data": chat_data},
+            )
+        except (ValueError, AttributeError):
+            await websocket.send_text(
+                json.dumps({"type": "error", "data": {"message": "Invalid recipient"}})
+            )
+
+
 

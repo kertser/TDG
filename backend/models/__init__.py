@@ -13,6 +13,8 @@ from backend.models.red_agent import RedAgent, RiskPosture
 from backend.models.grid import GridDefinition
 from backend.models.terrain_cell import TerrainCell
 from backend.models.elevation_cell import ElevationCell
+from backend.models.map_object import MapObject, ObjectCategory, ObjectSide
+from backend.models.chat_message import ChatMessage
 
 __all__ = [
     "User",
@@ -28,5 +30,7 @@ __all__ = [
     "GridDefinition",
     "TerrainCell",
     "ElevationCell",
+    "MapObject", "ObjectCategory", "ObjectSide",
+    "ChatMessage",
 ]
 

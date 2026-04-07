@@ -60,6 +60,12 @@ BASE_PERSONNEL = {
     'observation_post': 4, 'sniper_team': 2,
     'engineer_platoon': 30, 'engineer_section': 15,
     'logistics_unit': 20,
+    'combat_engineer_platoon': 30, 'combat_engineer_section': 15, 'combat_engineer_team': 8,
+    'mine_layer_section': 10, 'mine_layer_team': 5,
+    'obstacle_breacher_team': 6, 'obstacle_breacher_section': 12,
+    'engineer_recon_team': 4,
+    'construction_engineer_platoon': 30, 'construction_engineer_section': 15,
+    'avlb_vehicle': 4, 'avlb_section': 8,
 }
 DEFAULT_PERSONNEL = 20
 
@@ -384,6 +390,19 @@ UNIT_TYPE_SPEEDS: dict[str, dict[str, float]] = {
     "logistics_unit":    {"slow": 2.0, "fast": 6.0},    # trucks
     "headquarters":      {"slow": 1.5, "fast": 5.0},
     "command_post":      {"slow": 1.0, "fast": 3.0},
+    # Engineering units
+    "combat_engineer_platoon":  {"slow": 1.2, "fast": 3.0},
+    "combat_engineer_section":  {"slow": 1.2, "fast": 3.0},
+    "combat_engineer_team":     {"slow": 1.5, "fast": 3.5},
+    "mine_layer_section":       {"slow": 1.0, "fast": 2.5},
+    "mine_layer_team":          {"slow": 1.2, "fast": 3.0},
+    "obstacle_breacher_team":   {"slow": 1.2, "fast": 3.0},
+    "obstacle_breacher_section": {"slow": 1.0, "fast": 2.5},
+    "engineer_recon_team":      {"slow": 2.0, "fast": 4.0},
+    "construction_engineer_platoon": {"slow": 0.8, "fast": 2.0},
+    "construction_engineer_section": {"slow": 0.8, "fast": 2.0},
+    "avlb_vehicle":             {"slow": 2.0, "fast": 6.0},   # armored vehicle
+    "avlb_section":             {"slow": 2.0, "fast": 6.0},
 }
 DEFAULT_SPEEDS = {"slow": 1.2, "fast": 3.0}  # fallback for unknown types
 
@@ -738,6 +757,17 @@ async def get_unit_viewshed(
     terrain feature occlusion (forest, urban, etc.).
     Falls back to a simple circle if no elevation data exists.
     """
+    return await _compute_viewshed(session_id, unit_id, db, rays, step)
+
+
+async def _compute_viewshed(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    db: AsyncSession,
+    rays: int = 72,
+    step: float | None = None,
+):
+    """Core viewshed computation, shared by participant and admin endpoints."""
     from backend.models.grid import GridDefinition
     from backend.models.terrain_cell import TerrainCell
     from backend.models.elevation_cell import ElevationCell

@@ -675,12 +675,21 @@ const KUnits = (() => {
         // Already fetching — return the existing promise so callers wait
         if (_viewshedPending[unitId]) return _viewshedPending[unitId];
 
-        const sessionId = KSessionUI.getSessionId();
+        // When god view is active, use admin endpoint (no participant check)
+        const godView = typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled();
+        const sessionId = (godView && typeof KAdmin !== 'undefined' && KAdmin.getAdminSessionId)
+            ? (KAdmin.getAdminSessionId() || KSessionUI.getSessionId())
+            : KSessionUI.getSessionId();
         const token = KSessionUI.getToken();
         if (!sessionId || !token) return Promise.resolve();
 
+        // Use admin viewshed endpoint when god view is active to bypass participant check
+        const apiBase = godView
+            ? `/api/admin/sessions/${sessionId}/units/${unitId}/viewshed?rays=72`
+            : `/api/sessions/${sessionId}/units/${unitId}/viewshed?rays=72`;
+
         const promise = fetch(
-            `/api/sessions/${sessionId}/units/${unitId}/viewshed?rays=72`,
+            apiBase,
             { headers: { 'Authorization': `Bearer ${token}` } }
         ).then(resp => {
             if (resp.ok) return resp.json();
@@ -1912,21 +1921,21 @@ const KUnits = (() => {
     }
 
     function _updateSelectionUI() {
-        const selDisplay = document.getElementById('selected-units-display');
-        if (!selDisplay) return;
-
-        if (selectedUnitIds.size === 0) {
-            selDisplay.innerHTML = '<span style="color:#888;font-size:11px;">No units selected</span>';
-            return;
+        // Delegate to KOrders for styled unit chip display
+        const ids = Array.from(selectedUnitIds);
+        try { KOrders.updateSelectedDisplay(ids); } catch(e) {
+            // Fallback if KOrders not loaded yet
+            const selDisplay = document.getElementById('selected-units-display');
+            if (!selDisplay) return;
+            if (ids.length === 0) {
+                selDisplay.innerHTML = '<span class="cmd-hint">Select units on the map</span>';
+            } else {
+                const names = allUnitsData.filter(u => selectedUnitIds.has(u.id)).map(u => u.name);
+                selDisplay.innerHTML = names.map(n =>
+                    `<span class="orders-unit-chip">${n}</span>`
+                ).join(' ');
+            }
         }
-
-        const names = allUnitsData
-            .filter(u => selectedUnitIds.has(u.id))
-            .map(u => u.name);
-
-        selDisplay.innerHTML = names.map(n =>
-            `<span class="selected-unit-tag">${n}</span>`
-        ).join(' ');
     }
 
     function getAllUnits() {
@@ -1975,6 +1984,12 @@ const KUnits = (() => {
         }
     }
 
+    /** Force-clear the entire viewshed cache (e.g., after admin adds/removes a unit). */
+    function _invalidateAllViewsheds() {
+        _viewshedCache = {};
+        _viewshedPending = {};
+    }
+
     function getMarker(unitId) {
         return unitMarkers[unitId] || null;
     }
@@ -1986,5 +2001,6 @@ const KUnits = (() => {
         getSelectedIds, clearSelection, getAllUnits,
         clearAll, setAdminDrag,
         invalidateViewshedCache: _invalidateViewshedCache,
+        invalidateAllViewsheds: _invalidateAllViewsheds,
     };
 })();

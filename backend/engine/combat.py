@@ -5,6 +5,8 @@ Uses formulas from AGENTS.MD Section 8.4:
   fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod
   damage = fire_effectiveness × DAMAGE_SCALAR / target_protection
   suppression_inflicted = fire_effectiveness × 0.03
+
+Also accounts for protection bonuses from map objects (entrenchments, pillboxes).
 """
 
 from __future__ import annotations
@@ -13,7 +15,10 @@ import math
 import uuid
 
 from geoalchemy2.shape import to_shape
+from shapely.geometry import Point
+
 from backend.engine.terrain import TerrainService
+from backend.engine.map_objects import MAP_OBJECT_DEFS
 
 METERS_PER_DEG_LAT = 111_320.0
 METERS_PER_DEG_LON_AT_48 = 74_000.0
@@ -27,6 +32,15 @@ BASE_FIREPOWER = {
     "at_team": 15,
     "recon_team": 5,
     "observation_post": 2,
+    "combat_engineer_platoon": 8,
+    "combat_engineer_section": 5,
+    "combat_engineer_team": 3,
+    "mine_layer_section": 3,
+    "obstacle_breacher_team": 4,
+    "obstacle_breacher_section": 6,
+    "engineer_recon_team": 3,
+    "construction_engineer_platoon": 4,
+    "avlb_vehicle": 2,
 }
 
 # Default weapon range by unit type (meters)
@@ -38,6 +52,15 @@ WEAPON_RANGE = {
     "at_team": 3000,
     "recon_team": 600,
     "observation_post": 400,
+    "combat_engineer_platoon": 600,
+    "combat_engineer_section": 600,
+    "combat_engineer_team": 400,
+    "mine_layer_section": 300,
+    "obstacle_breacher_team": 400,
+    "obstacle_breacher_section": 500,
+    "engineer_recon_team": 400,
+    "construction_engineer_platoon": 300,
+    "avlb_vehicle": 200,
 }
 
 DAMAGE_SCALAR = 0.02  # ~2% strength loss per tick under sustained fire
@@ -68,9 +91,59 @@ def _get_position(unit) -> tuple[float, float] | None:
         return None
 
 
+def _get_protection_from_objects(lat: float, lon: float, map_objects: list) -> float:
+    """
+    Get the best protection bonus from nearby structures/entrenchments.
+    Returns multiplier >= 1.0.
+    """
+    best_protection = 1.0
+    unit_point = Point(lon, lat)
+
+    for obj in map_objects:
+        if not obj.is_active:
+            continue
+        if obj.geometry is None:
+            continue
+
+        defn = MAP_OBJECT_DEFS.get(obj.object_type)
+        if not defn:
+            continue
+
+        prot = defn.get("protection_bonus", 1.0)
+        if prot <= 1.0:
+            continue  # No bonus from this object type
+
+        try:
+            obj_shape = to_shape(obj.geometry)
+        except Exception:
+            continue
+
+        geom_type = obj_shape.geom_type
+        in_range = False
+
+        if geom_type in ("Polygon", "MultiPolygon"):
+            in_range = obj_shape.contains(unit_point)
+        elif geom_type in ("LineString", "MultiLineString"):
+            effect_r = defn.get("effect_radius_m", 20)
+            buffer_deg = effect_r / 111_320.0
+            in_range = obj_shape.buffer(buffer_deg).contains(unit_point)
+        elif geom_type == "Point":
+            effect_r = defn.get("effect_radius_m", 30)
+            dist_dlat = (lat - obj_shape.y) * 111_320.0
+            dist_dlon = (lon - obj_shape.x) * 74_000.0
+            dist = math.sqrt(dist_dlat * dist_dlat + dist_dlon * dist_dlon)
+            in_range = dist <= effect_r
+
+        if in_range and prot > best_protection:
+            best_protection = prot
+
+    return best_protection
+
+
 def process_combat(
     all_units: list,
     terrain: TerrainService,
+    map_objects: list | None = None,
 ) -> tuple[list[dict], set[uuid.UUID]]:
     """
     Resolve combat for all units with attack/engage tasks.
@@ -151,6 +224,12 @@ def process_combat(
             tgt_protection = 2.0
         else:
             tgt_protection = tgt_terrain
+
+        # Check for protection bonus from map objects (entrenchments, pillboxes, etc.)
+        if map_objects:
+            obj_protection = _get_protection_from_objects(tgt_pos[0], tgt_pos[1], map_objects)
+            if obj_protection > tgt_protection:
+                tgt_protection = obj_protection
 
         # Apply damage
         damage = fire_effectiveness * DAMAGE_SCALAR / tgt_protection

@@ -4,6 +4,9 @@ Movement engine – moves units toward their task targets.
 Uses formulas from AGENTS.MD Section 8.2:
   effective_speed = base_speed × terrain_factor × (1 - suppression × 0.7) × morale_factor
   distance_this_tick = effective_speed × tick_duration_seconds
+
+Also handles obstacle interactions — map objects (minefields, wire, ditches)
+slow movement and may deal damage to crossing units.
 """
 
 from __future__ import annotations
@@ -11,14 +14,25 @@ from __future__ import annotations
 import math
 
 from geoalchemy2.shape import to_shape, from_shape
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString
 
 from backend.engine.terrain import TerrainService
+from backend.engine.map_objects import MAP_OBJECT_DEFS
 
 
 # Approximate meters per degree at mid-latitudes
 METERS_PER_DEG_LAT = 111_320.0
-METERS_PER_DEG_LON_AT_48 = 74_000.0  # ~cos(48°) * 111320
+METERS_PER_DEG_LON_AT_48 = 74_000.0
+
+# Unit types considered "vehicles" for obstacle passability
+VEHICLE_UNIT_TYPES = {
+    "tank_company", "tank_platoon", "tank_section",
+    "mech_company", "mech_platoon", "mech_section",
+    "avlb_vehicle", "avlb_section",
+    "artillery_battery", "artillery_platoon",
+    "logistics_unit",
+    "headquarters",
+}
 
 
 def _morale_factor(morale: float) -> float:
@@ -62,10 +76,121 @@ def _move_toward(
     return new_lat, new_lon, heading
 
 
+def _is_vehicle(unit) -> bool:
+    """Check if a unit is a vehicle type."""
+    return unit.unit_type in VEHICLE_UNIT_TYPES
+
+
+def _check_obstacles(
+    cur_lat: float, cur_lon: float,
+    target_lat: float, target_lon: float,
+    unit,
+    map_objects: list,
+) -> tuple[float, float, list[dict]]:
+    """
+    Check movement path against active map objects (obstacles).
+
+    Returns:
+        (movement_factor, damage_total, events)
+    """
+    if not map_objects:
+        return 1.0, 0.0, []
+
+    is_veh = _is_vehicle(unit)
+    move_factor = 1.0
+    damage_total = 0.0
+    events = []
+
+    try:
+        path_line = LineString([(cur_lon, cur_lat), (target_lon, target_lat)])
+    except Exception:
+        return 1.0, 0.0, []
+
+    unit_point = Point(cur_lon, cur_lat)
+
+    for obj in map_objects:
+        if not obj.is_active:
+            continue
+        if obj.geometry is None:
+            continue
+
+        defn = MAP_OBJECT_DEFS.get(obj.object_type)
+        if not defn or defn["category"] != "obstacle":
+            continue
+
+        try:
+            obj_shape = to_shape(obj.geometry)
+        except Exception:
+            continue
+
+        intersects = False
+        geom_type = obj_shape.geom_type
+
+        if geom_type in ("Polygon", "MultiPolygon"):
+            intersects = obj_shape.contains(unit_point) or path_line.intersects(obj_shape)
+        elif geom_type in ("LineString", "MultiLineString"):
+            effect_r = defn.get("effect_radius_m", 15)
+            buffer_deg = effect_r / METERS_PER_DEG_LAT
+            buffered = obj_shape.buffer(buffer_deg)
+            intersects = buffered.contains(unit_point) or path_line.intersects(buffered)
+        elif geom_type == "Point":
+            effect_r = defn.get("effect_radius_m", 30)
+            dist = _distance_m(cur_lat, cur_lon, obj_shape.y, obj_shape.x)
+            intersects = dist <= effect_r
+
+        if not intersects:
+            continue
+
+        if is_veh and not defn.get("vehicle_passable", True):
+            move_factor = 0.0
+            events.append({
+                "event_type": "obstacle_blocked",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} blocked by {obj.label or obj.object_type} (impassable for vehicles)",
+                "payload": {"object_type": obj.object_type, "object_id": str(obj.id)},
+            })
+            break
+        elif not is_veh and not defn.get("infantry_passable", True):
+            move_factor = 0.0
+            events.append({
+                "event_type": "obstacle_blocked",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} blocked by {obj.label or obj.object_type}",
+                "payload": {"object_type": obj.object_type, "object_id": str(obj.id)},
+            })
+            break
+
+        if is_veh:
+            obj_move = defn.get("movement_factor_vehicle", 1.0)
+        else:
+            obj_move = defn.get("movement_factor_infantry", 1.0)
+        move_factor = min(move_factor, obj_move)
+
+        if is_veh:
+            dmg = defn.get("damage_per_tick_vehicle", defn.get("damage_per_tick", 0.0))
+        else:
+            dmg = defn.get("damage_per_tick_infantry", defn.get("damage_per_tick", 0.0))
+        if dmg > 0:
+            damage_total += dmg
+            events.append({
+                "event_type": "obstacle_damage",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} taking damage from {obj.label or obj.object_type}",
+                "payload": {
+                    "object_type": obj.object_type,
+                    "object_id": str(obj.id),
+                    "damage": round(dmg, 4),
+                },
+            })
+
+    return move_factor, damage_total, events
+
+
 def process_movement(
     units: list,
     tick_duration_sec: int,
     terrain: TerrainService,
+    map_objects: list | None = None,
 ) -> list[dict]:
     """
     Process movement for all units with movement tasks.
@@ -74,6 +199,7 @@ def process_movement(
         units: list of Unit ORM objects (will be mutated in-place)
         tick_duration_sec: seconds per tick
         terrain: TerrainService instance
+        map_objects: list of MapObject ORM objects for obstacle interaction
 
     Returns:
         list of event dicts for movement events
@@ -117,9 +243,35 @@ def process_movement(
         morale = unit.morale or 1.0
         base_speed = unit.move_speed_mps or 4.0
 
+        # Check obstacles along path
+        obstacle_factor = 1.0
+        obstacle_damage = 0.0
+        if map_objects:
+            obstacle_factor, obstacle_damage, obs_events = _check_obstacles(
+                cur_lat, cur_lon, target_lat, target_lon, unit, map_objects or []
+            )
+            events.extend(obs_events)
+
+            if obstacle_damage > 0:
+                unit.strength = max(0.0, (unit.strength or 1.0) - obstacle_damage)
+                if unit.strength <= 0.01:
+                    unit.is_destroyed = True
+                    unit.current_task = None
+                    events.append({
+                        "event_type": "unit_destroyed",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} destroyed by obstacle",
+                        "payload": {"cause": "obstacle"},
+                    })
+                    continue
+
+        if obstacle_factor <= 0.0:
+            continue
+
         effective_speed = (
             base_speed
             * terrain_factor
+            * obstacle_factor
             * (1.0 - suppression * 0.7)
             * _morale_factor(morale)
         )
@@ -148,7 +300,6 @@ def process_movement(
                     "text_summary": f"{unit.name} arrived at destination",
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
-            # For attack/advance, keep the task (combat will handle it)
         else:
             # Move toward target
             new_lat, new_lon, heading = _move_toward(

@@ -708,6 +708,21 @@ async def admin_delete_unit(session_id: uuid.UUID, unit_id: uuid.UUID, db: DB, u
     await db.flush()
 
 
+@router.get("/sessions/{session_id}/units/{unit_id}/viewshed")
+async def admin_get_unit_viewshed(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    db: DB,
+    user: CurrentUser,
+    rays: int = 72,
+    step: float | None = None,
+):
+    """Admin viewshed endpoint — no participant check required."""
+    # Reuse the regular viewshed logic from units.py
+    from backend.api.units import _compute_viewshed
+    return await _compute_viewshed(session_id, unit_id, db, rays, step)
+
+
 class AdminSplitRequest(BaseModel):
     ratio: float = 0.5
 
@@ -988,6 +1003,49 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     await initialize_session_from_scenario(session, session.scenario, db)
 
     return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0"}
+
+
+@router.post("/sessions/{session_id}/resync-units")
+async def admin_resync_units(session_id: uuid.UUID, db: DB, user: CurrentUser):
+    """Admin: resync session units and grid from the source scenario.
+    
+    Deletes existing units + grid and re-creates them from the scenario's
+    initial_units / grid_settings. Preserves session status, tick, participants,
+    events, overlays and other data. Used after editing a scenario via the builder.
+    """
+    from sqlalchemy.orm import selectinload as _sel
+    result = await db.execute(
+        select(Session).options(_sel(Session.scenario)).where(Session.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.scenario is None:
+        raise HTTPException(status_code=400, detail="Session has no linked scenario")
+
+    # Delete existing units, grid and contacts (which reference units)
+    await db.execute(sa_delete(Contact).where(Contact.session_id == session_id))
+    await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
+    await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
+    await db.flush()
+
+    # Re-initialize from scenario
+    from backend.services.session_service import initialize_session_from_scenario
+    await initialize_session_from_scenario(session, session.scenario, db)
+
+    # Count new units
+    unit_count_result = await db.execute(
+        select(func.count()).select_from(Unit).where(Unit.session_id == session_id)
+    )
+    unit_count = unit_count_result.scalar() or 0
+
+    return {
+        "status": session.status.value,
+        "tick": session.tick,
+        "units_created": unit_count,
+        "message": f"Resynced {unit_count} units from scenario '{session.scenario.title}'",
+    }
 
 
 class ApplyScenarioRequest(BaseModel):

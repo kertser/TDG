@@ -6,7 +6,6 @@
 const KUI = (() => {
     let _mapCtrlControl = null;
     let _compassControl = null;
-    let _compassVisible = true;
 
     // ...existing code...
     function init() {
@@ -111,7 +110,7 @@ const KUI = (() => {
                     '<button id="units-toggle-btn" class="topbar-icon-btn" title="Show/hide units"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2C5.8 2 4 3.6 4 5.5C4 8 8 12 8 12S12 8 12 5.5C12 3.6 10.2 2 8 2Z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><line x1="4" y1="14" x2="12" y2="14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>' +
                     '<button id="overlays-toggle-btn" class="topbar-icon-btn" title="Show/hide overlays"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2L1.5 6L8 10L14.5 6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M1.5 8.5L8 12.5L14.5 8.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" opacity="0.7"/><path d="M1.5 11L8 15L14.5 11" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.45"/></svg></button>' +
                     '<button id="terrain-toggle-btn" class="topbar-icon-btn" title="Show/hide terrain"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 14 L5 5 L8 9 L11 4 L15 14 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="12" cy="3" r="1.5" fill="currentColor" opacity="0.5"/></svg></button>' +
-                    '<button id="compass-toggle-btn" class="topbar-icon-btn" title="Show/hide compass"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6.8" stroke="currentColor" stroke-width="0.8" fill="none"/><circle cx="8" cy="8" r="5.2" stroke="currentColor" stroke-width="0.4" fill="none" opacity="0.4"/><line x1="8" y1="1" x2="8" y2="3" stroke="currentColor" stroke-width="0.7" opacity="0.5"/><line x1="8" y1="13" x2="8" y2="15" stroke="currentColor" stroke-width="0.7" opacity="0.5"/><line x1="1" y1="8" x2="3" y2="8" stroke="currentColor" stroke-width="0.7" opacity="0.5"/><line x1="13" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="0.7" opacity="0.5"/><polygon points="8,2.2 6.8,7.5 8,6.8 9.2,7.5" fill="#ef5350" opacity="0.85"/><polygon points="8,13.8 6.8,8.5 8,9.2 9.2,8.5" fill="currentColor" opacity="0.4"/><circle cx="8" cy="8" r="1.2" fill="none" stroke="currentColor" stroke-width="0.6" opacity="0.6"/><text x="8" y="2" text-anchor="middle" font-size="2.8" font-weight="bold" fill="#ef5350" font-family="sans-serif" opacity="0.9">N</text></svg></button>';
+                    '<button id="objects-toggle-btn" class="topbar-icon-btn" title="Show/hide tactical objects"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 13 L8 3 L14 13 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><line x1="5" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="1" stroke-dasharray="1.5,1"/><circle cx="8" cy="10" r="1" fill="currentColor"/></svg></button>';
 
                 L.DomEvent.disableClickPropagation(wrapper);
                 L.DomEvent.disableScrollPropagation(wrapper);
@@ -189,16 +188,6 @@ const KUI = (() => {
             });
         }
 
-        const compassToggleBtn = wrapper.querySelector('#compass-toggle-btn');
-        if (compassToggleBtn) {
-            compassToggleBtn.addEventListener('click', () => {
-                _compassVisible = !_compassVisible;
-                const el = _compassControl ? _compassControl.getContainer() : null;
-                if (el) el.style.display = _compassVisible ? '' : 'none';
-                compassToggleBtn.classList.toggle('toggled-off', !_compassVisible);
-                compassToggleBtn.title = _compassVisible ? 'Hide compass' : 'Show compass';
-            });
-        }
 
         const terrainToggleBtn = wrapper.querySelector('#terrain-toggle-btn');
         if (terrainToggleBtn) {
@@ -208,6 +197,15 @@ const KUI = (() => {
                 terrainToggleBtn.title = visible ? 'Hide terrain' : 'Show terrain';
                 if (visible) KTerrain.showLegend();
                 else KTerrain.hideLegend();
+            });
+        }
+
+        const objectsToggleBtn = wrapper.querySelector('#objects-toggle-btn');
+        if (objectsToggleBtn) {
+            objectsToggleBtn.addEventListener('click', () => {
+                const visible = KMapObjects.toggle();
+                objectsToggleBtn.classList.toggle('toggled-off', !visible);
+                objectsToggleBtn.title = visible ? 'Hide tactical objects' : 'Show tactical objects';
             });
         }
 
