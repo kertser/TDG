@@ -368,11 +368,45 @@ const KUnits = (() => {
         }
     }
 
+    // ── Snail path resolution cache (coord key → snail string) ──
+    const _snailCache = {};
+
+    /**
+     * Resolve missing target_snail for units with move tasks.
+     * Uses KGrid.getSnailAtPoint and caches results.
+     */
+    async function _enrichSnailPaths(units) {
+        for (const u of units) {
+            const task = u.current_task;
+            if (!task || !task.target_location) continue;
+            if (task.target_snail) continue; // already resolved
+            const lat = task.target_location.lat;
+            const lon = task.target_location.lon;
+            if (lat == null || lon == null) continue;
+            const key = `${lat.toFixed(6)},${lon.toFixed(6)}`;
+            if (_snailCache[key] !== undefined) {
+                task.target_snail = _snailCache[key];
+                continue;
+            }
+            try {
+                if (typeof KGrid !== 'undefined' && KGrid.getSnailAtPoint) {
+                    const result = await KGrid.getSnailAtPoint(lat, lon, 2);
+                    const snail = result && result.snail_path ? result.snail_path : null;
+                    _snailCache[key] = snail;
+                    task.target_snail = snail;
+                }
+            } catch { /* ignore */ }
+        }
+    }
+
     function render(units) {
         if (!unitsLayer) return;
         unitsLayer.clearLayers();
         unitMarkers = {};
         allUnitsData = units;
+
+        // Eagerly resolve missing snail paths in background
+        _enrichSnailPaths(units);
 
         // Compute zoom scale factor for current zoom level
         const zoomScale = _map ? KSymbols.getZoomScale(_map.getZoom()) : 1.0;
@@ -587,7 +621,14 @@ const KUnits = (() => {
 
         // Current task info
         if (u.current_task && u.current_task.type) {
-            html += `<span style="font-size:10px;color:#ffd740;">📋 Task: ${u.current_task.type}</span><br>`;
+            let taskStr = u.current_task.type;
+            if (u.current_task.target_location) {
+                const tLat = u.current_task.target_location.lat?.toFixed(4);
+                const tLon = u.current_task.target_location.lon?.toFixed(4);
+                const snail = u.current_task.target_snail;
+                taskStr += snail ? ` → ${snail} (${tLat}, ${tLon})` : ` → ${tLat}, ${tLon}`;
+            }
+            html += `<span style="font-size:10px;color:#ffd740;">📋 Task: ${taskStr}</span><br>`;
         }
 
         // ── Chain of Command info ────────────────────────
@@ -738,7 +779,14 @@ const KUnits = (() => {
             html += `<div style="padding:2px 12px 3px;font-size:10px;">`;
             html += `<span style="color:#ffd740;">📋 Task: <b>${taskType}</b></span>`;
             if (u.current_task.target_location) {
-                html += ` <span style="color:#aaa;">→ ${u.current_task.target_location.lat?.toFixed(4)}, ${u.current_task.target_location.lon?.toFixed(4)}</span>`;
+                const tLat = u.current_task.target_location.lat?.toFixed(4);
+                const tLon = u.current_task.target_location.lon?.toFixed(4);
+                const snail = u.current_task.target_snail;
+                if (snail) {
+                    html += ` <span style="color:#aaa;">→ ${snail} (${tLat}, ${tLon})</span>`;
+                } else {
+                    html += ` <span style="color:#aaa;">→ ${tLat}, ${tLon}</span>`;
+                }
             }
             html += `</div>`;
         }
@@ -1030,7 +1078,10 @@ const KUnits = (() => {
                         Object.assign(allUnitsData[idx], updated);
                     }
                     render(allUnitsData);
-                    KGameLog.addEntry(`${unitName} moving ${speed} → ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`, 'info');
+                    const snail = updated.current_task && updated.current_task.target_snail;
+                    const coordStr = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+                    const destStr = snail ? `${snail} (${coordStr})` : coordStr;
+                    KGameLog.addEntry(`${unitName} moving ${speed} → ${destStr}`, 'info');
                 } else {
                     const d = await resp.json().catch(() => ({}));
                     alert(d.detail || 'Move command failed');

@@ -305,18 +305,20 @@ async def enrich_units_with_command_info(
                     names.append(name)
         u["assigned_user_names"] = names
 
-        # Walk up parent chain to find commanding user (first assigned user)
+        # Walk up parent chain to find commanding officer ABOVE this unit.
+        # CO is the first assigned user found starting from the PARENT unit
+        # (not the unit itself). This mirrors real CoC: CO is your superior.
         cmd_name = None
-        current = u
+        parent_id = u.get("parent_unit_id")
         visited = set()
-        while current:
-            cid = current["id"]
-            if cid in visited:
+        while parent_id and parent_id in unit_lookup:
+            if parent_id in visited:
                 break
-            visited.add(cid)
+            visited.add(parent_id)
+            parent = unit_lookup[parent_id]
 
-            if current.get("assigned_user_ids"):
-                for uid in current["assigned_user_ids"]:
+            if parent.get("assigned_user_ids"):
+                for uid in parent["assigned_user_ids"]:
                     name = user_map.get(uid)
                     if name:
                         cmd_name = name
@@ -324,11 +326,7 @@ async def enrich_units_with_command_info(
                 if cmd_name:
                     break
 
-            parent_id = current.get("parent_unit_id")
-            if parent_id and parent_id in unit_lookup:
-                current = unit_lookup[parent_id]
-            else:
-                break
+            parent_id = parent.get("parent_unit_id")
         u["commanding_user_name"] = cmd_name
 
     return units_data

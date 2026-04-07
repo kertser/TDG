@@ -379,9 +379,27 @@ async def set_unit_move(
     if speed_label not in SPEED_VALUES:
         raise HTTPException(status_code=400, detail="Invalid speed. Valid: slow, average, fast")
     unit.move_speed_mps = SPEED_VALUES[speed_label]
+
+    # Resolve target coordinates to snail path for display
+    target_snail = None
+    try:
+        from backend.models.grid import GridDefinition
+        grid_result = await db.execute(
+            select(GridDefinition).where(GridDefinition.session_id == session_id)
+        )
+        grid_def = grid_result.scalar_one_or_none()
+        if grid_def:
+            from backend.services.grid_service import GridService
+            grid_svc = GridService(grid_def)
+            target_snail = grid_svc.point_to_snail(body.target_lat, body.target_lon, depth=2)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Snail path resolution failed: %s", e)
+
     unit.current_task = {
         "type": "move",
         "target_location": {"lat": body.target_lat, "lon": body.target_lon},
+        "target_snail": target_snail,
         "speed": speed_label,
     }
     await db.flush()
