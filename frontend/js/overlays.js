@@ -27,6 +27,10 @@ const KOverlays = (() => {
     let _previewLine = null;
     let _previewShape = null;
 
+    // ── Shape Edit Mode state ────────────────────────
+    let _editState = null;   // null or {overlayId, shapeType, params, layer, handleGroup, ...}
+    let _editHandleInteracting = false;
+
     // ── Side-based colors ────────────────────────────
     const BLUE_COLOR = '#2196f3';
     const RED_COLOR  = '#f44336';
@@ -51,7 +55,13 @@ const KOverlays = (() => {
         // Global ESC handler
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                cancelDraw();
+                if (_editState) {
+                    // Revert to original params and exit without saving
+                    _editState.params = JSON.parse(JSON.stringify(_editState.originalParams));
+                    _exitEditMode(false);
+                } else {
+                    cancelDraw();
+                }
                 _hideCtxMenu();
             }
         });
@@ -96,10 +106,20 @@ const KOverlays = (() => {
         // Delete button
         _ctxMenu.querySelector('[data-action="delete"]').addEventListener('click', () => {
             if (_ctxOverlayId) {
+                if (_editState && _editState.overlayId === _ctxOverlayId) _exitEditMode(false);
                 KWebSocket.send('overlay_delete', { overlay_id: _ctxOverlayId });
             }
             _hideCtxMenu();
         });
+
+        // Edit shape button
+        const editBtn = _ctxMenu.querySelector('[data-action="edit"]');
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                if (_ctxOverlayId) _enterEditMode(_ctxOverlayId);
+                _hideCtxMenu();
+            });
+        }
 
         // Label apply button
         const labelApply = document.getElementById('ctx-label-apply');
@@ -182,6 +202,13 @@ const KOverlays = (() => {
         if (colorsSection) colorsSection.style.display = isMarker ? 'none' : 'block';
         if (widthsSection) widthsSection.style.display = isMarker ? 'none' : 'block';
 
+        // Edit Shape button — only for rectangle/ellipse, and only if user can edit
+        const editSection = _ctxMenu.querySelector('.ctx-section-edit');
+        if (editSection) {
+            const isEditable = (overlayType === 'rectangle' || overlayType === 'circle') && _canEditOverlays();
+            editSection.style.display = isEditable ? 'block' : 'none';
+        }
+
         // Highlight current color/width
         _ctxMenu.querySelectorAll('.ctx-color-swatch').forEach(s => {
             s.classList.toggle('active', s.dataset.color === currentColor);
@@ -235,6 +262,7 @@ const KOverlays = (() => {
 
     function startDraw(type) {
         if (!map) return;
+        if (_editState) _exitEditMode(true); // save and exit any active edit
         cancelDraw();
 
         activeTool = type;
@@ -432,10 +460,19 @@ const KOverlays = (() => {
             [minLng, minLat],
         ]];
 
+        // Store parametric form for editing (resize, rotate, move)
+        const rect_params = {
+            center: [(minLat + maxLat) / 2, (minLng + maxLng) / 2],
+            halfW: (maxLng - minLng) / 2,
+            halfH: (maxLat - minLat) / 2,
+            rotation: 0,
+        };
+
         KWebSocket.send('overlay_create', {
             overlay_type: 'rectangle',
             geometry: { type: 'Polygon', coordinates },
             style_json: { color, weight: 2, dashArray: '8,6', fillOpacity: 0.08 },
+            properties: { rect_params },
         });
 
         _stopDraw();
@@ -492,11 +529,20 @@ const KOverlays = (() => {
         const ring = pts.map(p => [p[1], p[0]]);
         ring.push(ring[0]); // close ring
 
+        const dLat = Math.abs(edge[0] - center[0]);
+        const dLng = Math.abs(edge[1] - center[1]);
+        const ellipse_params = {
+            center: [...center],
+            semiA: dLng || dLat * 0.5,
+            semiB: dLat || dLng * 0.5,
+            rotation: 0,
+        };
+
         KWebSocket.send('overlay_create', {
             overlay_type: 'circle',  // stored as circle type, geometry is polygon
             geometry: { type: 'Polygon', coordinates: [ring] },
             style_json: { color, weight: 2, dashArray: '8,6', fillOpacity: 0.08 },
-            properties: { is_ellipse: true, center, edge },
+            properties: { is_ellipse: true, center, edge, ellipse_params },
         });
 
         _stopDraw();
@@ -518,6 +564,447 @@ const KOverlays = (() => {
             ]);
         }
         return pts;
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Shape Edit Mode (Resize / Rotate / Move) ─────
+    // ══════════════════════════════════════════════════
+    //
+    // Entry: double-click on a rectangle/ellipse overlay, or context menu "Edit Shape".
+    // Exit:  ESC (revert), click outside (save), start draw tool (save).
+    // Handles: corner/axis handles for resize, rotation handle, body drag for move.
+
+    // ── Coordinate transforms: local (x=east, y=north) ↔ geo ──
+
+    function _localToGeo(x, y, center, rotation) {
+        const c = Math.cos(rotation), s = Math.sin(rotation);
+        // x is in lng-degree units, y is in lat-degree units.
+        // Equalize to physical scale before rotation, then convert back.
+        const cosLat = Math.cos(center[0] * Math.PI / 180);
+        const eqX = x * cosLat;          // now same physical scale as y
+        const rotEqX = eqX * c - y * s;  // rotated east (equalized)
+        const rotY   = eqX * s + y * c;  // rotated north
+        return [
+            center[0] + rotY,                // lat offset is direct
+            center[1] + rotEqX / cosLat,     // lng offset: convert back from equalized
+        ];
+    }
+
+    function _geoToLocal(lat, lng, center, rotation) {
+        const cosLat = Math.cos(center[0] * Math.PI / 180);
+        const eqDx = (lng - center[1]) * cosLat;  // equalize lng to match lat scale
+        const dy   = lat - center[0];
+        const c = Math.cos(rotation), s = Math.sin(rotation);
+        // Inverse rotation in equalized space
+        const localEqX =  eqDx * c + dy * s;
+        const localY   = -eqDx * s + dy * c;
+        return { x: localEqX / cosLat, y: localY };  // convert eqX back to lng-degrees
+    }
+
+    // ── Polygon computation from params ──
+
+    function _rectPolygonFromParams(p) {
+        return [
+            _localToGeo(-p.halfW, +p.halfH, p.center, p.rotation),
+            _localToGeo(+p.halfW, +p.halfH, p.center, p.rotation),
+            _localToGeo(+p.halfW, -p.halfH, p.center, p.rotation),
+            _localToGeo(-p.halfW, -p.halfH, p.center, p.rotation),
+        ];
+    }
+
+    function _ellipsePolygonFromParams(p, n = 48) {
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+            const a = (2 * Math.PI * i) / n;
+            pts.push(_localToGeo(p.semiA * Math.cos(a), p.semiB * Math.sin(a), p.center, p.rotation));
+        }
+        return pts;
+    }
+
+    // ── Extract params from existing overlay data ──
+
+    function _extractShapeParams(overlay) {
+        if (overlay.overlay_type === 'rectangle') {
+            if (overlay.properties?.rect_params) {
+                const rp = overlay.properties.rect_params;
+                return { center: [...rp.center], halfW: rp.halfW, halfH: rp.halfH, rotation: rp.rotation || 0 };
+            }
+            const coords = overlay.geometry.coordinates[0];
+            const lats = coords.map(c => c[1]), lngs = coords.map(c => c[0]);
+            const mnLat = Math.min(...lats), mxLat = Math.max(...lats);
+            const mnLng = Math.min(...lngs), mxLng = Math.max(...lngs);
+            return { center: [(mnLat + mxLat) / 2, (mnLng + mxLng) / 2], halfW: (mxLng - mnLng) / 2, halfH: (mxLat - mnLat) / 2, rotation: 0 };
+        }
+        if (overlay.overlay_type === 'circle') {
+            if (overlay.properties?.ellipse_params) {
+                const ep = overlay.properties.ellipse_params;
+                return { center: [...ep.center], semiA: ep.semiA, semiB: ep.semiB, rotation: ep.rotation || 0 };
+            }
+            const ct = overlay.properties?.center, ed = overlay.properties?.edge;
+            if (ct && ed) {
+                const dLat = Math.abs(ed[0] - ct[0]), dLng = Math.abs(ed[1] - ct[1]);
+                return { center: [...ct], semiA: dLng || dLat * 0.5, semiB: dLat || dLng * 0.5, rotation: 0 };
+            }
+            const coords = overlay.geometry.coordinates[0];
+            const lats = coords.map(c => c[1]), lngs = coords.map(c => c[0]);
+            return {
+                center: [(Math.min(...lats) + Math.max(...lats)) / 2, (Math.min(...lngs) + Math.max(...lngs)) / 2],
+                semiA: (Math.max(...lngs) - Math.min(...lngs)) / 2,
+                semiB: (Math.max(...lats) - Math.min(...lats)) / 2,
+                rotation: 0,
+            };
+        }
+        return null;
+    }
+
+    function _canEditOverlays() {
+        const role = typeof KSessionUI !== 'undefined' ? KSessionUI.getRole() : null;
+        const side = typeof KSessionUI !== 'undefined' ? KSessionUI.getSide() : null;
+        return role !== 'observer' && side !== 'observer';
+    }
+
+    // ── Enter / Exit Edit Mode ──
+
+    function _enterEditMode(overlayId) {
+        if (_editState) _exitEditMode(true);
+        if (activeTool) cancelDraw();
+        if (!_canEditOverlays()) return;
+
+        const data = overlayDataMap[overlayId];
+        if (!data) return;
+        const isRect = data.overlay_type === 'rectangle';
+        const isEllipse = data.overlay_type === 'circle';
+        if (!isRect && !isEllipse) return;
+
+        const params = _extractShapeParams(data);
+        if (!params) return;
+
+        const style = data.style_json || {};
+        const color = style.color || BLUE_COLOR;
+
+        // Remove the existing rendered overlay temporarily
+        if (overlayMap[overlayId]) {
+            overlaysLayer.removeLayer(overlayMap[overlayId]);
+        }
+
+        // Create editable shape with highlight
+        const pts = isRect ? _rectPolygonFromParams(params) : _ellipsePolygonFromParams(params);
+        const editLayer = L.polygon(pts, {
+            color: '#4fc3f7', weight: 2, dashArray: '6,4',
+            fillOpacity: 0.12, fillColor: color, interactive: true,
+            className: 'overlay-editing',
+        });
+        editLayer.addTo(map);
+
+        // Right-click on edit shape → context menu still works
+        editLayer.on('contextmenu', (e) => {
+            L.DomEvent.stopPropagation(e);
+            L.DomEvent.preventDefault(e);
+            _showCtxMenu(overlayId, e.originalEvent.clientX, e.originalEvent.clientY);
+        });
+
+        const handleGroup = L.layerGroup().addTo(map);
+
+        _editState = {
+            overlayId,
+            shapeType: isRect ? 'rectangle' : 'ellipse',
+            params,
+            originalParams: JSON.parse(JSON.stringify(params)),
+            style,
+            layer: editLayer,
+            handleGroup,
+            handles: {},
+            rotLine: null,
+            isDragging: false,
+            dragStartLatLng: null,
+            dragStartCenter: null,
+            activeDragKey: null, // key of handle currently being dragged (skip its setLatLng)
+        };
+
+        _createEditHandles();
+
+        // Shape body drag
+        editLayer.on('mousedown', _onShapeMouseDown);
+
+        // Map mousedown outside edit UI → exit edit mode (with flag-based protection)
+        _editHandleInteracting = false;
+        setTimeout(() => {
+            if (_editState?.overlayId === overlayId) {
+                map.on('mousedown', _onMapMouseDownDuringEdit);
+            }
+        }, 300);
+    }
+
+    function _exitEditMode(save = true) {
+        if (!_editState) return;
+
+        map.off('mousedown', _onMapMouseDownDuringEdit);
+        map.off('mousemove', _onShapeDragMove);
+        map.off('mouseup', _onShapeDragEnd);
+
+        if (save) _sendEditUpdate();
+
+        // Clean up edit layers
+        if (_editState.layer) map.removeLayer(_editState.layer);
+        if (_editState.handleGroup) map.removeLayer(_editState.handleGroup);
+        if (_editState.rotLine) map.removeLayer(_editState.rotLine);
+
+        // Re-render the overlay from data
+        const oid = _editState.overlayId;
+        const data = overlayDataMap[oid];
+        _editState = null;
+        if (data) addOverlayToMap(data);
+        map.dragging.enable();
+    }
+
+    function isEditing() {
+        return _editState !== null;
+    }
+
+    function _onMapMouseDownDuringEdit() {
+        // Check after a delay — if a handle/shape mousedown set the flag, don't exit.
+        // The flag is reset AFTER the check (not before) to avoid a race condition
+        // where the map handler resets it after a handle already set it.
+        setTimeout(() => {
+            if (!_editHandleInteracting && _editState && !_editState.isDragging) {
+                _exitEditMode(true);
+            }
+            _editHandleInteracting = false;
+        }, 150);
+    }
+
+    // ── Send update to server ──
+
+    function _sendEditUpdate() {
+        if (!_editState) return;
+        const { overlayId, shapeType, params } = _editState;
+        const isRect = shapeType === 'rectangle';
+        const pts = isRect ? _rectPolygonFromParams(params) : _ellipsePolygonFromParams(params);
+        const ring = pts.map(p => [p[1], p[0]]);
+        ring.push(ring[0]);
+        const geometry = { type: 'Polygon', coordinates: [ring] };
+
+        // Merge with existing properties to preserve other fields
+        const existing = overlayDataMap[overlayId]?.properties || {};
+        const properties = isRect
+            ? { ...existing, rect_params: { ...params } }
+            : { ...existing, is_ellipse: true, center: params.center, ellipse_params: { ...params } };
+
+        KWebSocket.send('overlay_update', { overlay_id: overlayId, geometry, properties });
+        if (overlayDataMap[overlayId]) {
+            overlayDataMap[overlayId].geometry = geometry;
+            overlayDataMap[overlayId].properties = properties;
+        }
+    }
+
+    // ── Handle Creation ──
+
+    function _createEditHandles() {
+        if (_editState.shapeType === 'rectangle') _createRectHandles();
+        else _createEllipseHandles();
+        _createRotationHandle();
+    }
+
+    function _makeHandle(pos, cls, size) {
+        cls = cls || 'overlay-edit-handle';
+        size = size || 12;
+        const h = L.marker(pos, {
+            draggable: true,
+            icon: L.divIcon({ className: cls, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+            zIndexOffset: 1000,
+        });
+        h.on('mousedown', () => { _editHandleInteracting = true; });
+        return h;
+    }
+
+    function _createRectHandles() {
+        const { params, handleGroup } = _editState;
+        const { center, halfW, halfH, rotation } = params;
+        const defs = {
+            tl: { local: [-halfW, +halfH], opp: 'br' },
+            tr: { local: [+halfW, +halfH], opp: 'bl' },
+            br: { local: [+halfW, -halfH], opp: 'tl' },
+            bl: { local: [-halfW, -halfH], opp: 'tr' },
+        };
+        for (const [key, def] of Object.entries(defs)) {
+            const pos = _localToGeo(def.local[0], def.local[1], center, rotation);
+            const h = _makeHandle(pos);
+            h._editKey = key;
+            h._oppKey = def.opp;
+            h.on('dragstart', () => { if (_editState) _editState.activeDragKey = key; });
+            h.on('drag', _onRectCornerDrag);
+            h.on('dragend', () => { if (_editState) _editState.activeDragKey = null; _sendEditUpdate(); });
+            handleGroup.addLayer(h);
+            _editState.handles[key] = h;
+        }
+    }
+
+    function _createEllipseHandles() {
+        const { params, handleGroup } = _editState;
+        const { center, semiA, semiB, rotation } = params;
+        const defs = {
+            r: [+semiA, 0], l: [-semiA, 0],
+            t: [0, +semiB], b: [0, -semiB],
+        };
+        for (const [key, local] of Object.entries(defs)) {
+            const pos = _localToGeo(local[0], local[1], center, rotation);
+            const h = _makeHandle(pos);
+            h._editKey = key;
+            h.on('dragstart', () => { if (_editState) _editState.activeDragKey = key; });
+            h.on('drag', _onEllipseAxisDrag);
+            h.on('dragend', () => { if (_editState) _editState.activeDragKey = null; _sendEditUpdate(); });
+            handleGroup.addLayer(h);
+            _editState.handles[key] = h;
+        }
+    }
+
+    function _createRotationHandle() {
+        const { params, shapeType, handleGroup } = _editState;
+        const { center, rotation } = params;
+        const topVal = shapeType === 'rectangle' ? params.halfH : params.semiB;
+        const maxDim = shapeType === 'rectangle' ? Math.max(params.halfW, params.halfH) : Math.max(params.semiA, params.semiB);
+        const offset = Math.max(maxDim * 0.3, 0.0005);
+        const topDist = topVal + offset;
+
+        const rotPos = _localToGeo(0, topDist, center, rotation);
+        const shapeTopPos = _localToGeo(0, topVal, center, rotation);
+
+        const rotLine = L.polyline([shapeTopPos, rotPos], {
+            color: '#4fc3f7', weight: 1.5, dashArray: '4,4', opacity: 0.7, interactive: false,
+        }).addTo(map);
+        _editState.rotLine = rotLine;
+
+        const h = _makeHandle(rotPos, 'overlay-edit-handle-rotate', 16);
+        h.on('dragstart', () => { if (_editState) _editState.activeDragKey = 'rotate'; });
+        h.on('drag', _onRotationDrag);
+        h.on('dragend', () => { if (_editState) _editState.activeDragKey = null; _sendEditUpdate(); });
+        handleGroup.addLayer(h);
+        _editState.handles.rotate = h;
+    }
+
+    // ── Handle Drag Handlers ──
+
+    function _onRectCornerDrag(e) {
+        const pos = e.target.getLatLng();
+        const oppPos = _editState.handles[e.target._oppKey].getLatLng();
+        const { rotation } = _editState.params;
+
+        // New center = midpoint between dragged corner and its opposite (which stays fixed)
+        const newCenter = [(pos.lat + oppPos.lat) / 2, (pos.lng + oppPos.lng) / 2];
+        const local = _geoToLocal(pos.lat, pos.lng, newCenter, rotation);
+        _editState.params.center = newCenter;
+        _editState.params.halfW = Math.max(Math.abs(local.x), 0.00002);
+        _editState.params.halfH = Math.max(Math.abs(local.y), 0.00002);
+        _refreshEditVisuals();
+    }
+
+    function _onEllipseAxisDrag(e) {
+        const pos = e.target.getLatLng();
+        const key = e.target._editKey;
+        const { center, rotation } = _editState.params;
+        const local = _geoToLocal(pos.lat, pos.lng, center, rotation);
+
+        if (key === 'r' || key === 'l') {
+            _editState.params.semiA = Math.max(Math.abs(local.x), 0.00002);
+        } else {
+            _editState.params.semiB = Math.max(Math.abs(local.y), 0.00002);
+        }
+        _refreshEditVisuals();
+    }
+
+    function _onRotationDrag(e) {
+        const pos = e.target.getLatLng();
+        const { center } = _editState.params;
+        const dx = pos.lng - center[1], dy = pos.lat - center[0];
+        _editState.params.rotation = Math.atan2(-dx, dy);
+        _refreshEditVisuals();
+    }
+
+    // ── Shape Body Drag (move) ──
+
+    function _onShapeMouseDown(e) {
+        if (!_editState || e.originalEvent.button !== 0) return;
+        L.DomEvent.stop(e);
+        _editHandleInteracting = true;
+
+        _editState.isDragging = true;
+        _editState.dragStartLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
+        _editState.dragStartCenter = [..._editState.params.center];
+        map.dragging.disable();
+        map.on('mousemove', _onShapeDragMove);
+        map.on('mouseup', _onShapeDragEnd);
+    }
+
+    function _onShapeDragMove(e) {
+        if (!_editState?.isDragging) return;
+        _editState.params.center = [
+            _editState.dragStartCenter[0] + (e.latlng.lat - _editState.dragStartLatLng.lat),
+            _editState.dragStartCenter[1] + (e.latlng.lng - _editState.dragStartLatLng.lng),
+        ];
+        _refreshEditVisuals();
+    }
+
+    function _onShapeDragEnd() {
+        if (!_editState) return;
+        map.off('mousemove', _onShapeDragMove);
+        map.off('mouseup', _onShapeDragEnd);
+        map.dragging.enable();
+        _editState.isDragging = false;
+        _sendEditUpdate();
+    }
+
+    // ── Refresh all edit visuals (shape + handles + rotation line) ──
+
+    function _refreshEditVisuals() {
+        const { shapeType, params, layer, handles, rotLine, activeDragKey } = _editState;
+
+        // Update polygon
+        const pts = shapeType === 'rectangle' ? _rectPolygonFromParams(params) : _ellipsePolygonFromParams(params);
+        layer.setLatLngs(pts);
+
+        // Update resize handles — skip the one being dragged to avoid feedback loop
+        if (shapeType === 'rectangle') {
+            const { center, halfW, halfH, rotation } = params;
+            const pos = {
+                tl: _localToGeo(-halfW, +halfH, center, rotation),
+                tr: _localToGeo(+halfW, +halfH, center, rotation),
+                br: _localToGeo(+halfW, -halfH, center, rotation),
+                bl: _localToGeo(-halfW, -halfH, center, rotation),
+            };
+            for (const [k, p] of Object.entries(pos)) {
+                if (handles[k] && k !== activeDragKey) handles[k].setLatLng(p);
+            }
+        } else {
+            const { center, semiA, semiB, rotation } = params;
+            const pos = {
+                r: _localToGeo(+semiA, 0, center, rotation),
+                l: _localToGeo(-semiA, 0, center, rotation),
+                t: _localToGeo(0, +semiB, center, rotation),
+                b: _localToGeo(0, -semiB, center, rotation),
+            };
+            for (const [k, p] of Object.entries(pos)) {
+                if (handles[k] && k !== activeDragKey) handles[k].setLatLng(p);
+            }
+        }
+
+        // Update rotation handle + dashed line — skip handle if it's being dragged
+        if (handles.rotate) {
+            const { center, rotation } = params;
+            const topVal = shapeType === 'rectangle' ? params.halfH : params.semiB;
+            const maxDim = shapeType === 'rectangle' ? Math.max(params.halfW, params.halfH) : Math.max(params.semiA, params.semiB);
+            const topDist = topVal + Math.max(maxDim * 0.3, 0.0005);
+            if (activeDragKey !== 'rotate') {
+                handles.rotate.setLatLng(_localToGeo(0, topDist, center, rotation));
+            }
+            if (rotLine) {
+                const shapeTop = _localToGeo(0, topVal, center, rotation);
+                // Line end: use actual handle position during drag, computed position otherwise
+                const lineEnd = activeDragKey === 'rotate'
+                    ? [handles.rotate.getLatLng().lat, handles.rotate.getLatLng().lng]
+                    : _localToGeo(0, topDist, center, rotation);
+                rotLine.setLatLngs([shapeTop, lineEnd]);
+            }
+        }
     }
 
     // ══════════════════════════════════════════════════
@@ -638,15 +1125,41 @@ const KOverlays = (() => {
                 }));
                 const ah = _createArrowhead(coords, style);
                 if (ah) group.addLayer(ah);
+                // Label at midpoint for arrows
+                if (overlay.label && coords.length >= 2) {
+                    const mid = coords[Math.floor(coords.length / 2)];
+                    const lbl = L.marker(mid, {
+                        icon: L.divIcon({ className: 'overlay-shape-label', html: overlay.label, iconSize: [0, 0] }),
+                        interactive: false,
+                    });
+                    group.addLayer(lbl);
+                }
                 layer = group;
             } else if (overlay.overlay_type === 'polyline' && overlay.geometry.type === 'LineString') {
                 const coords = overlay.geometry.coordinates.map(c => [c[1], c[0]]);
                 layer = L.polyline(coords, {
                     color: style.color, weight: style.weight || 3, opacity: style.opacity || 0.9,
                 });
+                // Label at midpoint for polylines
+                if (overlay.label && coords.length >= 2) {
+                    const mid = coords[Math.floor(coords.length / 2)];
+                    const lbl = L.marker(mid, {
+                        icon: L.divIcon({ className: 'overlay-shape-label', html: overlay.label, iconSize: [0, 0] }),
+                        interactive: false,
+                    });
+                    // Wrap in layerGroup so both line and label travel together
+                    const group = L.layerGroup();
+                    group.addLayer(layer);
+                    group.addLayer(lbl);
+                    layer = group;
+                }
             } else if (overlay.overlay_type === 'marker' && overlay.geometry.type === 'Point') {
                 const c = overlay.geometry.coordinates;
-                layer = L.marker([c[1], c[0]]);
+                // Make markers draggable for non-observer users
+                const role = typeof KSessionUI !== 'undefined' ? KSessionUI.getRole() : null;
+                const side = typeof KSessionUI !== 'undefined' ? KSessionUI.getSide() : null;
+                const canDrag = role !== 'observer' && side !== 'observer';
+                layer = L.marker([c[1], c[0]], { draggable: canDrag });
                 // If marker has a label, show as permanent tooltip
                 if (overlay.label) {
                     layer.bindTooltip(overlay.label, {
@@ -654,6 +1167,20 @@ const KOverlays = (() => {
                         direction: 'top',
                         offset: [0, -20],
                         className: 'overlay-marker-label',
+                    });
+                }
+                // Send position update on drag end
+                if (canDrag) {
+                    layer.on('dragend', () => {
+                        const pos = layer.getLatLng();
+                        const newGeom = { type: 'Point', coordinates: [pos.lng, pos.lat] };
+                        if (typeof KWebSocket !== 'undefined') {
+                            KWebSocket.send('overlay_update', { overlay_id: overlay.id, geometry: newGeom });
+                        }
+                        // Update local data
+                        if (overlayDataMap[overlay.id]) {
+                            overlayDataMap[overlay.id].geometry = newGeom;
+                        }
                     });
                 }
             } else if (overlay.geometry.type === 'Polygon') {
@@ -664,6 +1191,21 @@ const KOverlays = (() => {
                     dashArray: style.dashArray || null,
                     fillOpacity: style.fillOpacity || 0.08,
                 });
+                // Label at centroid for rectangles, ellipses, polygons
+                if (overlay.label) {
+                    layer.bindTooltip(overlay.label, {
+                        permanent: true,
+                        direction: 'center',
+                        className: 'overlay-shape-label',
+                    });
+                }
+                // Double-click to enter edit mode for rectangles/ellipses
+                if ((overlay.overlay_type === 'rectangle' || overlay.overlay_type === 'circle') && _canEditOverlays()) {
+                    layer.on('dblclick', (e) => {
+                        L.DomEvent.stop(e);
+                        _enterEditMode(overlay.id);
+                    });
+                }
             } else {
                 layer = L.geoJSON(overlay.geometry, {
                     style: () => style,
@@ -702,6 +1244,11 @@ const KOverlays = (() => {
     }
 
     function onOverlayUpdated(data) {
+        // If we're editing this overlay, just update data — don't re-render
+        if (_editState && _editState.overlayId === data.id) {
+            overlayDataMap[data.id] = data;
+            return;
+        }
         if (data.id && overlayMap[data.id]) {
             overlaysLayer.removeLayer(overlayMap[data.id]);
             delete overlayMap[data.id];
@@ -721,6 +1268,7 @@ const KOverlays = (() => {
 
     /** Clear all overlays (used on logout). */
     function clearAll() {
+        if (_editState) _exitEditMode(false);
         cancelDraw();
         if (overlaysLayer) overlaysLayer.clearLayers();
         overlayMap = {};
@@ -730,9 +1278,10 @@ const KOverlays = (() => {
     }
 
     return {
-        init, setSession, startDraw, cancelDraw, isDrawing,
+        init, setSession, startDraw, cancelDraw, isDrawing, isEditing,
         loadFromServer, render, toggle, isVisible,
         onOverlayCreated, onOverlayUpdated, onOverlayDeleted,
         clearAll,
+        enterEditMode: _enterEditMode,
     };
 })();

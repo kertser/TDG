@@ -705,7 +705,7 @@ async def admin_delete_unit(session_id: uuid.UUID, unit_id: uuid.UUID, db: DB, u
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
     await db.delete(unit)
-    await db.flush()
+    await db.commit()
 
 
 @router.get("/sessions/{session_id}/units/{unit_id}/viewshed")

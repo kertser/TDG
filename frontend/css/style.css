@@ -1014,6 +1014,76 @@ button:hover { background: #1a5276; }
 .order-radio-status.completed  { background: rgba(76, 175, 80, 0.2); color: #a5d6a7; }
 .order-radio-status.failed     { background: rgba(239, 83, 80, 0.12); color: #ef9a9a; }
 .order-radio-status.cancelled  { background: rgba(158, 158, 158, 0.12); color: #bdbdbd; }
+
+/* Order classification & LLM parse badges */
+.order-radio-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    margin-top: 3px;
+}
+.order-class-badge {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(79, 195, 247, 0.12);
+    color: #4fc3f7;
+    text-transform: lowercase;
+}
+.order-conf-badge {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(156, 204, 101, 0.12);
+    color: #9ccc65;
+}
+.order-lang-badge {
+    display: inline-block;
+    font-size: 7px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 2px;
+    background: rgba(171, 71, 188, 0.15);
+    color: #ce93d8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.order-processing {
+    font-size: 8px;
+    color: #ffb74d;
+    animation: orderPulse 1.2s ease-in-out infinite;
+}
+@keyframes orderPulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1.0; }
+}
+
+/* Unit radio response styling in chat */
+.radio-msg.msg-unit {
+    border-left: 2px solid #66bb6a;
+    background: rgba(102, 187, 106, 0.05);
+}
+.radio-msg.msg-unit .radio-msg-sender {
+    color: #66bb6a;
+    font-style: italic;
+}
+
+/* Location highlight tooltip */
+.location-tooltip {
+    background: rgba(255, 102, 0, 0.9) !important;
+    border: 1px solid #FF6600 !important;
+    color: white !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    padding: 2px 6px !important;
+    border-radius: 3px !important;
+}
+
 .order-radio-empty {
     color: #445;
     font-size: 11px;
@@ -1398,8 +1468,26 @@ button:hover { background: #1a5276; }
     background: #e65100;
     color: #ffcc80;
     font-weight: 700;
+    transition: all 0.2s ease;
 }
 #turn-btn:hover { background: #ef6c00; }
+#turn-btn:disabled {
+    background: #555;
+    color: #aaa;
+    cursor: wait;
+}
+#turn-btn.has-pending {
+    background: #2e7d32;
+    color: #a5d6a7;
+    animation: pulse-pending 1.5s ease-in-out infinite;
+}
+#turn-btn.has-pending:hover {
+    background: #388e3c;
+}
+@keyframes pulse-pending {
+    0%, 100% { box-shadow: 0 0 3px rgba(76, 175, 80, 0.4); }
+    50% { box-shadow: 0 0 10px rgba(76, 175, 80, 0.7); }
+}
 
 /* ── Leaflet scale control styling ───────────── */
 .leaflet-control-scale {
@@ -1791,6 +1879,37 @@ button:hover { background: #1a5276; }
     box-shadow: 0 1px 4px rgba(0,0,0,0.4) !important;
 }
 .overlay-marker-label::before { display: none !important; }
+/* Shape label (polygon/rect/ellipse centroid, line midpoint) */
+.overlay-shape-label {
+    background: rgba(16, 24, 48, 0.80) !important;
+    border: 1px solid rgba(79, 195, 247, 0.35) !important;
+    border-radius: 3px !important;
+    padding: 1px 6px !important;
+    color: #e0e0e0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4) !important;
+    white-space: nowrap;
+}
+.overlay-shape-label::before { display: none !important; }
+
+/* ── Overlay Edit Handles ─────────────────────── */
+.overlay-edit-handle {
+    background: #fff;
+    border: 2px solid #4fc3f7;
+    border-radius: 2px;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.overlay-edit-handle-rotate {
+    background: #4fc3f7;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    cursor: grab;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.overlay-edit-handle-rotate:active { cursor: grabbing; }
+.overlay-editing { cursor: move !important; }
 
 /* ── Rubber band selection rectangle ─────────── */
 .selection-rectangle {
@@ -2235,7 +2354,7 @@ button:hover { background: #1a5276; }
     align-items: center;
     justify-content: center;
 }
-.admin-modal-close:hover { background: #5a2020; color: #ef9a9a; border-color: #e53935; }
+.admin-modal-close:hover { color: #ef5350 !important; }
 .admin-modal-body {
     padding: 14px;
 }
@@ -2524,7 +2643,7 @@ button:hover { background: #1a5276; }
     min-height: 16px;
 }
 .ue-status.admin-success { color: #4caf50; }
-.ue-status.admin-error { color: #ef5350; }
+.ue-status.admin-error { color: #ef9a9a; }
 
 /* ── God View Banner (persistent warning) ─────── */
 .god-view-banner {
@@ -2871,7 +2990,7 @@ button:hover { background: #1a5276; }
     border-radius: 4px;
     margin-bottom: 3px;
     font-size: 11px;
-    border-left: 3px solid #0f3460;
+    border-left: 3px solid #1565c0;
     cursor: pointer;
     transition: background 0.12s;
 }
@@ -3310,7 +3429,6 @@ button:hover { background: #1a5276; }
     font-size: 11px !important;
     border-radius: 4px !important;
     padding: 4px 8px !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
 }
 
 /* ── Bottom Command Panel ─────────────────────── */
@@ -3689,3 +3807,151 @@ button:hover { background: #1a5276; }
     padding: 8px;
 }
 
+/* ═════════════════════════════════════════════════
+   KDialogs – Themed custom modal dialogs
+   ═════════════════════════════════════════════════ */
+.kdialog-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.60);
+    z-index: 20000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+.kdialog {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    min-width: 300px;
+    max-width: 460px;
+    width: 90%;
+    overflow: hidden;
+    animation: kdialogIn 0.15s ease-out;
+}
+.kdialog.kdialog-dangerous {
+    border-color: #5a2020;
+}
+@keyframes kdialogIn {
+    from { transform: translateY(-16px) scale(0.97); opacity: 0; }
+    to   { transform: translateY(0) scale(1); opacity: 1; }
+}
+.kdialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: #0f1b38;
+    border-bottom: 1px solid #0f3460;
+    font-size: 13px;
+    font-weight: 700;
+    color: #ff9800;
+}
+.kdialog-dangerous .kdialog-header {
+    color: #ef5350;
+    background: #1a0a0a;
+    border-bottom-color: #5a2020;
+}
+.kdialog-body {
+    padding: 16px 14px;
+}
+.kdialog-message {
+    font-size: 12px;
+    color: #ccc;
+    line-height: 1.6;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.kdialog-input {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 12px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    outline: none;
+    margin-top: 6px;
+    box-sizing: border-box;
+}
+.kdialog-input:focus {
+    border-color: #4fc3f7;
+    box-shadow: 0 0 0 2px rgba(79, 195, 247, 0.15);
+}
+.kdialog-select {
+    width: 100%;
+    padding: 4px;
+    font-size: 12px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    outline: none;
+    margin-top: 6px;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+.kdialog-select:focus {
+    border-color: #4fc3f7;
+}
+.kdialog-select option {
+    padding: 4px 6px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+.kdialog-select option:checked {
+    background: #0f3460;
+    color: #4fc3f7;
+}
+.kdialog-footer {
+    display: flex;
+    gap: 6px;
+    padding: 10px 14px;
+    background: #0d1529;
+    border-top: 1px solid #0f3460;
+}
+.kdialog-btn {
+    flex: 1;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    text-align: center;
+}
+.kdialog-btn-cancel {
+    background: #1a1a2e;
+    color: #aaa;
+}
+.kdialog-btn-cancel:hover {
+    background: #252545;
+    color: #ccc;
+    border-color: #4a4a6a;
+}
+.kdialog-btn-ok,
+.kdialog-btn-confirm {
+    background: #0d3460;
+    color: #4fc3f7;
+    border-color: #1565c0;
+}
+.kdialog-btn-ok:hover,
+.kdialog-btn-confirm:hover {
+    background: #1565c0;
+    color: #fff;
+}
+.kdialog-btn-danger {
+    background: #5a1a1a;
+    color: #ef9a9a;
+    border-color: #8b2020;
+}
+.kdialog-btn-danger:hover {
+    background: #8b2020;
+    color: #fff;
+    border-color: #e53935;
+}

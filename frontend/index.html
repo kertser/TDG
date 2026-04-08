@@ -258,6 +258,7 @@
                 <button class="admin-subtab-btn" data-panel="admin-types-panel" title="Manage unit types and icons">Types</button>
                 <button class="admin-subtab-btn" data-panel="admin-terrain-panel" title="Terrain analysis & painting">Terrain</button>
                 <button class="admin-subtab-btn" data-panel="admin-objects-panel" title="Tactical obstacles & structures">Objects</button>
+                <button class="admin-subtab-btn" data-panel="admin-redai-panel" title="Red AI commander agents">Red AI</button>
             </div>
 
             <!-- ═══ BUILDER SUB-TAB ═══════════════════════ -->
@@ -629,6 +630,49 @@
                     </div>
                     <button id="admin-load-coc" class="admin-btn" style="margin-bottom:6px;" title="Load unit hierarchy for the current session">🔄 Load Hierarchy</button>
                     <div id="admin-coc-tree" style="max-height:400px;overflow-y:auto;"></div>
+                </div>
+            </div>
+
+            <!-- ═══ RED AI SUB-TAB ═════════════════════════════ -->
+            <div id="admin-redai-panel" class="admin-subtab-panel" style="display:none;">
+                <div class="admin-section">
+                    <h4>🤖 Red AI Commander</h4>
+                    <div style="font-size:10px;color:#888;margin-bottom:8px;">
+                        Configure AI agents that control Red-side units when no human Red commander is present.
+                        AI decisions are made every 3 ticks based on visible contacts and doctrine.
+                    </div>
+
+                    <!-- Create new agent -->
+                    <div style="border:1px solid #333;border-radius:4px;padding:8px;margin-bottom:10px;">
+                        <div style="font-size:11px;font-weight:600;margin-bottom:6px;">Add Agent</div>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                            <input id="redai-name" type="text" value="Red Commander" style="flex:1;min-width:120px;padding:3px 6px;background:#1a1a2e;border:1px solid #333;color:#e0e0e0;border-radius:3px;font-size:11px;" placeholder="Agent name">
+                            <select id="redai-posture" style="padding:3px 6px;background:#1a1a2e;border:1px solid #333;color:#e0e0e0;border-radius:3px;font-size:11px;">
+                                <option value="aggressive">🔥 Aggressive</option>
+                                <option value="balanced" selected>⚖ Balanced</option>
+                                <option value="cautious">🛡 Cautious</option>
+                                <option value="defensive">🏰 Defensive</option>
+                            </select>
+                            <select id="redai-mission" style="padding:3px 6px;background:#1a1a2e;border:1px solid #333;color:#e0e0e0;border-radius:3px;font-size:11px;">
+                                <option value="hold">Hold Position</option>
+                                <option value="patrol">Patrol Area</option>
+                                <option value="attack">Attack</option>
+                                <option value="defend">Defend</option>
+                                <option value="withdraw">Withdraw</option>
+                            </select>
+                            <button id="redai-create-btn" class="admin-btn" style="font-size:11px;padding:3px 10px;">➕ Create</button>
+                        </div>
+                    </div>
+
+                    <!-- Agent list -->
+                    <div id="redai-agents-list" style="max-height:350px;overflow-y:auto;font-size:11px;">
+                        <div style="color:#888;font-style:italic;">No Red AI agents configured. Create one above.</div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div style="margin-top:8px;display:flex;gap:6px;">
+                        <button id="redai-refresh-btn" class="admin-btn" style="font-size:11px;padding:3px 10px;">🔄 Refresh</button>
+                    </div>
                 </div>
             </div>
 
@@ -1081,11 +1125,11 @@
                         <div class="ue-fields" style="gap:6px 8px;">
                             <div class="ue-field ue-span2">
                                 <label>Blue SIDC (20 chars)</label>
-                                <input type="text" id="utype-sidc-blue" class="ue-input utype-sidc-input" maxlength="20" placeholder="10031000151211000000" />
+                                <input type="text" id="utype-sidc-blue" class="ue-input utype-sidc-input" maxlength="20" placeholder="10031000141211000000" />
                             </div>
                             <div class="ue-field ue-span2">
                                 <label>Red SIDC (20 chars)</label>
-                                <input type="text" id="utype-sidc-red" class="ue-input utype-sidc-input" maxlength="20" placeholder="10061000151211000000" />
+                                <input type="text" id="utype-sidc-red" class="ue-input utype-sidc-input" maxlength="20" placeholder="10061000141211000000" />
                             </div>
                         </div>
                     </div>
@@ -1147,6 +1191,9 @@
                 <button class="ctx-width-btn" data-width="3">Medium</button>
                 <button class="ctx-width-btn" data-width="5">Thick</button>
             </div>
+        </div>
+        <div class="ctx-menu-section ctx-section-edit" style="display:none;">
+            <button class="ctx-item" data-action="edit"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:4px;"><path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit Shape</button>
         </div>
         <div class="ctx-menu-section">
             <button class="ctx-item ctx-item-danger" data-action="delete"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:4px;"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Delete</button>
@@ -1256,6 +1303,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/milsymbol@2.2.0/dist/milsymbol.js"></script>
 
+    <script src="/js/dialogs.js"></script>
     <script src="/js/map.js"></script>
     <script src="/js/grid.js"></script>
     <script src="/js/symbols.js"></script>

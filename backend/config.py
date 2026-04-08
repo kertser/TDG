@@ -32,7 +32,15 @@ class Settings(BaseSettings):
 
     # ── OpenAI ────────────────────────────────────────
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4.1"
+    OPENAI_MODEL: str = "gpt-4.1"               # full-power model (ambiguous/complex orders)
+    OPENAI_MODEL_MINI: str = "gpt-4.1-mini"      # mid-tier (intent, reports)
+    OPENAI_MODEL_NANO: str = "gpt-4o-mini"        # cheapest cloud tier (clear-cut orders)
+
+    # ── Local LLM (air-gapped / offline fallback) ────
+    # When OPENAI_API_KEY is empty but LOCAL_MODEL_URL is set,
+    # the parser sends to a local OpenAI-compatible endpoint (e.g. llama.cpp, vLLM, Ollama).
+    LOCAL_MODEL_URL: str = ""                     # e.g. "http://localhost:8080/v1"
+    LOCAL_MODEL_NAME: str = "local"               # model name to send in API requests
 
     # ── Application ───────────────────────────────────
     APP_NAME: str = "TDG Tactical Decision Game Platform"

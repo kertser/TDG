@@ -69,7 +69,7 @@ async def seed():
                     {
                         "name": "1st Platoon, A Company",
                         "unit_type": "infantry_platoon",
-                        "sidc": "10031000151211000000",
+                        "sidc": "10031000141211000000",
                         "lat": 49.035, "lon": 4.465,
                         "strength": 1.0, "ammo": 1.0, "morale": 0.9,
                         "move_speed_mps": 4.0, "detection_range_m": 1500,
@@ -78,7 +78,7 @@ async def seed():
                     {
                         "name": "2nd Platoon, A Company",
                         "unit_type": "infantry_platoon",
-                        "sidc": "10031000151211000000",
+                        "sidc": "10031000141211000000",
                         "lat": 49.035, "lon": 4.475,
                         "strength": 1.0, "ammo": 1.0, "morale": 0.9,
                         "move_speed_mps": 4.0, "detection_range_m": 1500,
@@ -87,7 +87,7 @@ async def seed():
                     {
                         "name": "3rd Platoon, A Company",
                         "unit_type": "infantry_platoon",
-                        "sidc": "10031000151211000000",
+                        "sidc": "10031000141211000000",
                         "lat": 49.033, "lon": 4.470,
                         "strength": 1.0, "ammo": 1.0, "morale": 0.9,
                         "move_speed_mps": 4.0, "detection_range_m": 1500,
@@ -96,7 +96,7 @@ async def seed():
                     {
                         "name": "Mortar Section",
                         "unit_type": "mortar_section",
-                        "sidc": "10031000151215000000",
+                        "sidc": "10031000131308000000",
                         "lat": 49.032, "lon": 4.468,
                         "strength": 1.0, "ammo": 1.0, "morale": 0.85,
                         "move_speed_mps": 3.0, "detection_range_m": 1000,
@@ -105,7 +105,7 @@ async def seed():
                     {
                         "name": "Recon Team",
                         "unit_type": "recon_team",
-                        "sidc": "10031000151213000000",
+                        "sidc": "10031000111213000000",
                         "lat": 49.038, "lon": 4.472,
                         "strength": 1.0, "ammo": 0.8, "morale": 0.95,
                         "move_speed_mps": 5.0, "detection_range_m": 3000,
@@ -116,7 +116,7 @@ async def seed():
                     {
                         "name": "1st Red Platoon",
                         "unit_type": "infantry_platoon",
-                        "sidc": "10061000151211000000",
+                        "sidc": "10061000141211000000",
                         "lat": 49.055, "lon": 4.490,
                         "strength": 1.0, "ammo": 1.0, "morale": 0.8,
                         "move_speed_mps": 4.0, "detection_range_m": 1500,
@@ -125,7 +125,7 @@ async def seed():
                     {
                         "name": "Red AT Group",
                         "unit_type": "at_team",
-                        "sidc": "10061000151211004000",
+                        "sidc": "10061000111204000000",
                         "lat": 49.060, "lon": 4.500,
                         "strength": 1.0, "ammo": 0.9, "morale": 0.75,
                         "move_speed_mps": 3.5, "detection_range_m": 2000,
@@ -134,7 +134,7 @@ async def seed():
                     {
                         "name": "Red Observation Post",
                         "unit_type": "observation_post",
-                        "sidc": "10061000151213000000",
+                        "sidc": "10061000111212000000",
                         "lat": 49.065, "lon": 4.485,
                         "strength": 0.5, "ammo": 0.5, "morale": 0.7,
                         "move_speed_mps": 5.0, "detection_range_m": 4000,

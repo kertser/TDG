@@ -125,6 +125,10 @@ const KSessionUI = (() => {
                     }
 
                     await KUnits.load(currentSessionId, currentToken);
+                    // If admin god view is active, re-fetch all units
+                    if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                        try { await KAdmin.refreshMapUnits(); } catch(e) {}
+                    }
                     await KContacts.load(currentSessionId, currentToken);
 
                     // Refresh chain of command tree after start
@@ -138,6 +142,8 @@ const KSessionUI = (() => {
         if (turnBtn) {
             turnBtn.addEventListener('click', async () => {
                 if (!currentSessionId || !currentToken) return;
+                turnBtn.disabled = true;
+                turnBtn.textContent = '⏳ Executing...';
                 try {
                     const resp = await fetch(`/api/sessions/${currentSessionId}/tick`, {
                         method: 'POST',
@@ -153,15 +159,29 @@ const KSessionUI = (() => {
                         `Turn ${data.tick}: ${data.events_count} events, ${data.units_alive} alive`,
                         'info'
                     );
+                    // Clear pending orders — they've been executed
+                    try { KUnits.clearPendingOrders(); } catch(e) {}
+
                     // Reload units and contacts after turn
-                    await KUnits.load(currentSessionId, currentToken);
+                    // Use god-view-aware refresh to avoid overwriting all-units with fog-of-war data
+                    if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                        await KAdmin.refreshMapUnits();
+                    } else {
+                        await KUnits.load(currentSessionId, currentToken);
+                    }
                     await KContacts.load(currentSessionId, currentToken);
                     await KEvents.load(currentSessionId, currentToken);
 
                     // Refresh chain of command tree after turn
                     try { KAdmin.loadPublicCoC(); } catch(e) {}
+
+                    // Update pending orders badge
+                    _updateTurnBadge();
                 } catch (err) {
                     console.error('Turn advance failed:', err);
+                } finally {
+                    turnBtn.disabled = false;
+                    turnBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders';
                 }
             });
         }
@@ -466,7 +486,7 @@ const KSessionUI = (() => {
     }
 
     async function _renameCurrentUser() {
-        const newName = prompt('Enter new display name:', currentUserName);
+        const newName = await KDialogs.prompt('Enter new display name:', currentUserName);
         if (!newName || newName.trim() === currentUserName) return;
         try {
             const resp = await fetch(`/api/admin/users/${currentUserId}`, {
@@ -480,9 +500,9 @@ const KSessionUI = (() => {
                 const dropdown = document.getElementById('user-dropdown');
                 if (dropdown) dropdown.style.display = 'none';
             } else {
-                alert('Rename failed');
+                await KDialogs.alert('Rename failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     /** Update the dropdown header with current user/session info. */
@@ -608,9 +628,41 @@ const KSessionUI = (() => {
         if (modal) modal.addEventListener('click', (e) => { if (e.target === modal) hideModal(); });
     }
 
+    /** Update pending orders badge on the turn button. */
+    async function _updateTurnBadge() {
+        const turnBtn = document.getElementById('turn-btn');
+        if (!turnBtn || !currentSessionId || !currentToken) return;
+
+        const svgIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>';
+
+        try {
+            // Use local count from KUnits pending orders
+            const localPending = typeof KUnits !== 'undefined' ? KUnits.getPendingOrdersCount() : 0;
+
+            // Also fetch server-side count for accuracy
+            const resp = await fetch(`/api/sessions/${currentSessionId}/pending-orders-count`, {
+                headers: { 'Authorization': `Bearer ${currentToken}` },
+            });
+            const serverPending = resp.ok ? (await resp.json()).count : 0;
+
+            const total = Math.max(localPending, serverPending);
+
+            // Update button text with badge
+            if (total > 0) {
+                turnBtn.innerHTML = `${svgIcon}Execute Orders (${total})`;
+                turnBtn.classList.add('has-pending');
+            } else {
+                turnBtn.innerHTML = `${svgIcon}Execute Orders`;
+                turnBtn.classList.remove('has-pending');
+            }
+        } catch (e) {
+            // Ignore badge update errors
+        }
+    }
+
     return {
         init, getToken, getUserId, getUserName: () => currentUserName,
         getSessionId, getRole, getSide, canAdvanceTurn,
-        loadSessions, joinAndEnter, getSetting,
+        loadSessions, joinAndEnter, getSetting, updateTurnBadge: _updateTurnBadge,
     };
 })();

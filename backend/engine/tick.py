@@ -133,6 +133,15 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     all_events: list[dict] = []
 
+    # ── 0.5. Run Red AI agents (if applicable) ────────────────
+    from backend.services.red_ai.runner import run_red_agents
+    try:
+        red_events = await run_red_agents(session_id, tick, db)
+        all_events.extend(red_events)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Red AI runner failed: %s", e)
+
     # ── 1. Process pending orders → assign tasks ─────────────────
     order_events = await _process_orders(session_id, tick, db)
     all_events.extend(order_events)
@@ -155,6 +164,9 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     # ── 2. Execute movement (with obstacle effects) ──────────
     movement_events = process_movement(all_units, tick_duration, terrain, map_objects_list)
     all_events.extend(movement_events)
+
+    # ── 2a. Mark completed orders from movement arrivals ──────
+    await _complete_orders_from_events(session_id, movement_events, db)
 
     # ── 2b. Process engineering tasks ─────────────────────────
     new_map_objects: list = []
@@ -250,16 +262,28 @@ async def _process_orders(
 ) -> list[dict]:
     """
     Process pending/validated orders and assign tasks to units.
+
+    Order precedence: newer orders for the same unit override older ones.
+    Halt orders clear the unit's current_task.
+    Speed from order data is applied to unit.move_speed_mps.
     """
+    from backend.api.units import UNIT_TYPE_SPEEDS, DEFAULT_SPEEDS
+
     events = []
 
     result = await db.execute(
         select(Order).where(
             Order.session_id == session_id,
             Order.status.in_([OrderStatus.pending, OrderStatus.validated]),
-        )
+        ).order_by(Order.issued_at.asc())  # older first, newer overrides
     )
     orders = list(result.scalars().all())
+
+    if not orders:
+        return events
+
+    # Group orders by target unit — latest order wins for each unit
+    unit_orders: dict[str, tuple[Order, dict | None]] = {}  # unit_id → (order, task)
 
     for order in orders:
         # For MVP: auto-validate pending orders
@@ -268,6 +292,7 @@ async def _process_orders(
 
         # Extract task from parsed_order or parsed_intent
         task = _order_to_task(order)
+
         if task is None:
             order.status = OrderStatus.failed
             events.append({
@@ -277,27 +302,72 @@ async def _process_orders(
             })
             continue
 
-        # Assign task to target units
+        # Map this order to each target unit (latest order wins)
         if order.target_unit_ids:
             for unit_id in order.target_unit_ids:
-                result = await db.execute(
-                    select(Unit).where(
-                        Unit.id == unit_id,
-                        Unit.session_id == session_id,
-                        Unit.is_destroyed == False,
-                    )
-                )
-                unit = result.scalar_one_or_none()
-                if unit:
-                    unit.current_task = task
-                    events.append({
-                        "event_type": "order_issued",
-                        "actor_unit_id": unit_id,
-                        "text_summary": f"{unit.name} received order: {task.get('type', 'unknown')}",
-                        "payload": {"order_id": str(order.id), "task": task},
-                    })
+                uid_str = str(unit_id)
+                unit_orders[uid_str] = (order, task)
+        else:
+            # No specific target — mark executing anyway
+            order.status = OrderStatus.executing
 
-        order.status = OrderStatus.executing
+    # Now assign tasks to units
+    processed_order_ids = set()
+    for uid_str, (order, task) in unit_orders.items():
+        try:
+            unit_uuid = uuid.UUID(uid_str)
+        except ValueError:
+            continue
+
+        result = await db.execute(
+            select(Unit).where(
+                Unit.id == unit_uuid,
+                Unit.session_id == session_id,
+                Unit.is_destroyed == False,
+            )
+        )
+        unit = result.scalar_one_or_none()
+        if not unit:
+            continue
+
+        task_type = task.get("type", "")
+
+        if task_type == "halt":
+            # Halt: clear current task
+            unit.current_task = None
+            events.append({
+                "event_type": "order_issued",
+                "actor_unit_id": unit_uuid,
+                "text_summary": f"{unit.name} halts",
+                "payload": {"order_id": str(order.id), "task": task},
+            })
+        else:
+            # Assign the task
+            unit.current_task = task
+
+            # Apply move speed from order if specified
+            speed_label = task.get("speed")
+            if speed_label and task_type in ("move", "attack", "advance"):
+                speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+                if speed_label in speeds:
+                    unit.move_speed_mps = speeds[speed_label]
+
+            events.append({
+                "event_type": "order_issued",
+                "actor_unit_id": unit_uuid,
+                "text_summary": f"{unit.name} received order: {task_type}",
+                "payload": {"order_id": str(order.id), "task": task},
+            })
+
+        processed_order_ids.add(str(order.id))
+
+    # Mark all processed orders as executing
+    for order in orders:
+        if str(order.id) in processed_order_ids:
+            order.status = OrderStatus.executing
+        elif order.status == OrderStatus.validated and order not in [o for o, _ in unit_orders.values()]:
+            # Orders that weren't assigned to any unit (no valid targets)
+            pass  # Keep as validated for next tick
 
     return events
 
@@ -326,16 +396,24 @@ def _order_to_task(order: Order) -> dict | None:
         task_type = po.get("order_type", po.get("type", order.order_type))
         target_loc = po.get("target_location", po.get("destination"))
         target_unit = po.get("target_unit_id")
+        target_snail = po.get("target_snail")
+        speed = po.get("speed")
         task = {"type": task_type, "order_id": str(order.id)}
         if target_loc:
             task["target_location"] = target_loc
         if target_unit:
             task["target_unit_id"] = target_unit
+        if target_snail:
+            task["target_snail"] = target_snail
+        if speed:
+            task["speed"] = speed
         return task
 
     # Fallback: try to parse simple keywords from original text
     if order.original_text:
         text = order.original_text.lower()
+        if "halt" in text or "stop" in text:
+            return {"type": "halt", "order_id": str(order.id)}
         if "move" in text or "advance" in text:
             return {"type": "move", "order_id": str(order.id)}
         if "attack" in text or "engage" in text:
@@ -346,6 +424,39 @@ def _order_to_task(order: Order) -> dict | None:
             return {"type": "observe", "order_id": str(order.id)}
 
     return None
+
+
+async def _complete_orders_from_events(
+    session_id: uuid.UUID,
+    events: list[dict],
+    db: AsyncSession,
+) -> None:
+    """
+    Mark orders as completed when their associated tasks finish.
+
+    Looks for 'order_completed' events with order_id in the payload
+    and updates the corresponding Order status.
+    """
+    from datetime import datetime, timezone
+
+    for evt in events:
+        if evt.get("event_type") != "order_completed":
+            continue
+        payload = evt.get("payload", {})
+        # Check if the unit that completed had an order_id in its task
+        actor_id = evt.get("actor_unit_id")
+        if actor_id:
+            # Find executing orders for this unit
+            result = await db.execute(
+                select(Order).where(
+                    Order.session_id == session_id,
+                    Order.status == OrderStatus.executing,
+                    Order.target_unit_ids.any(actor_id),
+                )
+            )
+            for order in result.scalars().all():
+                order.status = OrderStatus.completed
+                order.completed_at = datetime.now(timezone.utc)
 
 
 async def _upsert_contacts(
@@ -444,6 +555,9 @@ def _determine_visibility(event_dict: dict) -> str:
     if etype == "object_discovered":
         side = event_dict.get("payload", {}).get("side")
         return side if side else "all"
+    # Red AI events visible to admin only (for after-action review)
+    if etype in ("red_ai_decision", "red_ai_error"):
+        return "admin"
     # Order events visible to the issuing side
     if etype in ("order_issued", "order_completed"):
         return "all"  # MVP: visible to all

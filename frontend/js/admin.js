@@ -60,6 +60,7 @@ const KAdmin = (() => {
                 else if (panelId === 'admin-types-panel') _renderUnitTypes();
                 else if (panelId === 'admin-terrain-panel') { _loadTerrainStats(); _updateCellEstimate(); }
                 else if (panelId === 'admin-objects-panel') { _initObjectsPanel(); }
+                else if (panelId === 'admin-redai-panel') { _loadRedAgents(); }
             });
         });
 
@@ -163,6 +164,7 @@ const KAdmin = (() => {
         _initUnitEditModal();
         _initSessionWizard();
         _initUnitTypes();
+        _initRedAI();
     }
 
     function _bind(id, evt, fn) {
@@ -233,6 +235,10 @@ const KAdmin = (() => {
             if (_adminUnlocked) {
                 try { KUnits.setAdminDrag(true); } catch(e) {}
                 try { KMapObjects.render(); } catch(e) {}
+                // Refresh god view to ensure map is up-to-date
+                if (_godViewEnabled) {
+                    _refreshGodView();
+                }
             }
         } else {
             _closeAdminWindow();
@@ -303,7 +309,7 @@ const KAdmin = (() => {
         const pw = document.getElementById('admin-pw-input');
         if (!pw) return;
         const password = pw.value.trim();
-        if (!password) { alert('Enter admin password'); return; }
+        if (!password) { await KDialogs.alert('Enter admin password'); return; }
 
         try {
             const resp = await fetch('/api/admin/verify-password', {
@@ -338,10 +344,10 @@ const KAdmin = (() => {
                 }
             } else {
                 const data = await resp.json().catch(() => ({}));
-                alert(data.detail || 'Incorrect password');
+                await KDialogs.alert(data.detail || 'Incorrect password');
             }
         } catch (err) {
-            alert('Error: ' + err.message);
+            await KDialogs.alert('Error: ' + err.message);
         }
     }
 
@@ -439,7 +445,7 @@ const KAdmin = (() => {
 
     /** Rename a session. */
     async function renameSession(sessionId, currentName) {
-        const newName = prompt('Rename session:', currentName);
+        const newName = await KDialogs.prompt('Rename session:', currentName);
         if (!newName || newName.trim() === currentName) return;
         const token = _getToken();
         try {
@@ -454,9 +460,9 @@ const KAdmin = (() => {
                 KGameLog.addEntry(`Session renamed to "${newName.trim()}"`, 'info');
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Rename failed');
+                await KDialogs.alert(d.detail || 'Rename failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     /** Enter a session from admin list (auto-join + switch). */
@@ -574,7 +580,7 @@ const KAdmin = (() => {
     }
 
     async function deleteScenario(scenarioId) {
-        if (!confirm('Delete this scenario?')) return;
+        if (!await KDialogs.confirm('Delete this scenario?', {dangerous: true})) return;
         const token = _getToken();
         try {
             await fetch(`/api/admin/scenarios/${scenarioId}`, {
@@ -583,14 +589,14 @@ const KAdmin = (() => {
             });
             refreshScenarioList();
         } catch (err) {
-            alert('Delete failed: ' + err.message);
+            await KDialogs.alert('Delete failed: ' + err.message);
         }
     }
 
     /** Create a new session from a scenario — opens wizard modal. */
     async function createSessionFromScenario(scenarioId) {
         const token = _getToken();
-        if (!token) { alert('Not logged in'); return; }
+        if (!token) { await KDialogs.alert('Not logged in'); return; }
         _openSessionWizard(scenarioId);
     }
 
@@ -705,10 +711,10 @@ const KAdmin = (() => {
         if (doneBtn) doneBtn.style.display = step === 4 ? '' : 'none';
     }
 
-    function _wizardNextStep() {
+    async function _wizardNextStep() {
         if (_wizardStep === 1) {
             const name = document.getElementById('wizard-session-name')?.value?.trim();
-            if (!name) { alert('Session name is required'); return; }
+            if (!name) { await KDialogs.alert('Session name is required'); return; }
             _wizardShowStep(2);
         }
     }
@@ -960,7 +966,7 @@ const KAdmin = (() => {
     }
 
     async function _deleteAllScenarios() {
-        if (!confirm('⚠ Delete ALL scenarios?')) return;
+        if (!await KDialogs.confirm('⚠ Delete ALL scenarios?', {dangerous: true})) return;
         try {
             const resp = await fetch('/api/scenarios');
             const scenarios = await resp.json();
@@ -987,7 +993,7 @@ const KAdmin = (() => {
     async function _deleteAllSessions() {
         const token = _getToken();
         if (!token) { _showInfo('admin-session-count', 'Not logged in', 'error'); return; }
-        if (!confirm('⚠ Delete ALL sessions?')) return;
+        if (!await KDialogs.confirm('⚠ Delete ALL sessions?', {dangerous: true})) return;
 
         try {
             const resp = await fetch('/api/sessions', {
@@ -1019,7 +1025,7 @@ const KAdmin = (() => {
     async function deleteSession(sessionId) {
         const token = _getToken();
         if (!token) return;
-        if (!confirm(`Delete session ${sessionId.substring(0, 8)}…?`)) return;
+        if (!await KDialogs.confirm(`Delete session ${sessionId.substring(0, 8)}…?`, {dangerous: true})) return;
 
         try {
             const resp = await fetch(`/api/admin/sessions/${sessionId}`, {
@@ -1048,9 +1054,9 @@ const KAdmin = (() => {
                 KGameLog.addEntry(`Session ${sessionId.substring(0, 8)}… deleted (admin)`, 'info');
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Delete session failed');
+                await KDialogs.alert(d.detail || 'Delete session failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function _refreshSessions() {
@@ -1086,7 +1092,7 @@ const KAdmin = (() => {
     async function _resetSession() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
-        if (!confirm('⚠ Reset session to turn 0? All progress will be lost.')) return;
+        if (!await KDialogs.confirm('⚠ Reset session to turn 0? All progress will be lost.', {dangerous: true})) return;
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/reset`, {
                 method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
@@ -1096,10 +1102,10 @@ const KAdmin = (() => {
             KGameLog.addEntry('Session reset to turn 0 (admin)', 'info');
             // Reload grid and units on the map if this is the active session
             const userSid = _getUserSessionId();
-            if (sid === userSid) {
+            if (sid === userSid || _godViewEnabled) {
                 const map = KMap.getMap();
-                try { await KGrid.load(map, userSid); } catch(e) {}
-                try { await KUnits.load(userSid, _getToken()); } catch(e) {}
+                try { await KGrid.load(map, _getAdminSessionId()); } catch(e) {}
+                await refreshMapUnits();
             }
         } catch (err) {
             _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
@@ -1110,7 +1116,7 @@ const KAdmin = (() => {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
         const minutes = parseInt(document.getElementById('admin-turn-interval').value);
-        if (!minutes || minutes < 1) { alert('Invalid interval'); return; }
+        if (!minutes || minutes < 1) { await KDialogs.alert('Invalid interval'); return; }
         const seconds = minutes * 60;  // Convert minutes to seconds for backend
         try {
             await fetch(`/api/admin/sessions/${sid}/tick-interval`, {
@@ -1154,7 +1160,7 @@ const KAdmin = (() => {
         const scenarioId = document.getElementById('admin-session-scenario').value;
         if (!scenarioId) { _showInfo('admin-scenario-change-status', 'Select a scenario first', 'error'); return; }
 
-        if (!confirm('⚠ Change scenario for this session?\nThis will RESET all units and grid to the selected scenario.\nAll current progress will be lost.')) return;
+        if (!await KDialogs.confirm('⚠ Change scenario for this session?\nThis will RESET all units and grid to the selected scenario.\nAll current progress will be lost.', {dangerous: true})) return;
 
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/apply-scenario`, {
@@ -1168,10 +1174,10 @@ const KAdmin = (() => {
                 KGameLog.addEntry('Scenario changed (admin)', 'info');
                 // Reload grid and units on the map
                 const userSid = _getUserSessionId();
-                if (sid === userSid) {
+                if (sid === userSid || _godViewEnabled) {
                     const map = KMap.getMap();
-                    try { await KGrid.load(map, userSid); } catch(e) {}
-                    try { await KUnits.load(userSid, token); } catch(e) {}
+                    try { await KGrid.load(map, _getAdminSessionId()); } catch(e) {}
+                    await refreshMapUnits();
                 }
                 await _loadUnitDashboard();
             } else {
@@ -1366,7 +1372,7 @@ const KAdmin = (() => {
     async function kickParticipant(participantId) {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
-        if (!confirm('Kick this participant?')) return;
+        if (!await KDialogs.confirm('Kick this participant?', {dangerous: true})) return;
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/participants/${participantId}`, {
                 method: 'DELETE',
@@ -1376,9 +1382,9 @@ const KAdmin = (() => {
                 _loadParticipants();
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Kick failed');
+                await KDialogs.alert(d.detail || 'Kick failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     // ── Event Injection ──────────────────────────────
@@ -1388,7 +1394,7 @@ const KAdmin = (() => {
         if (!token || !sid) { _showInfo('admin-event-status', 'Select a session first', 'error'); return; }
         const text = document.getElementById('admin-event-text').value.trim();
         const type = document.getElementById('admin-event-type').value || 'custom';
-        if (!text) { alert('Enter event text'); return; }
+        if (!text) { await KDialogs.alert('Enter event text'); return; }
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/events`, {
                 method: 'POST',
@@ -1481,6 +1487,24 @@ const KAdmin = (() => {
     }
 
     function isGodViewEnabled() { return _godViewEnabled; }
+
+    /**
+     * Unified map refresh — respects god view state.
+     * Call this instead of KUnits.load() anywhere units might need refreshing.
+     * If god view is ON, fetches all units via admin endpoint.
+     * Otherwise, loads fog-of-war filtered units normally.
+     */
+    async function refreshMapUnits() {
+        if (_godViewEnabled) {
+            await _refreshGodView();
+        } else {
+            const token = _getToken();
+            const sid = _getUserSessionId();
+            if (sid && token) {
+                try { await KUnits.load(sid, token); } catch(e) { console.warn('refreshMapUnits:', e); }
+            }
+        }
+    }
 
     /** Called by app.js when a state_update arrives via WebSocket.
      *  If god view is on, re-fetch admin units instead of using fog-of-war data.
@@ -1636,10 +1660,10 @@ const KAdmin = (() => {
     let _dashboardUnits = [];
 
     /** Focus map on a unit's position. */
-    function focusUnit(unitId) {
+    async function focusUnit(unitId) {
         const unit = _dashboardUnits.find(u => u.id === unitId);
         if (!unit || unit.lat == null || unit.lon == null) {
-            alert('Unit has no position');
+            await KDialogs.alert('Unit has no position');
             return;
         }
         const map = KMap.getMap();
@@ -1648,7 +1672,7 @@ const KAdmin = (() => {
 
     /** Delete a unit (admin). */
     async function deleteUnit(unitId, unitName) {
-        if (!confirm(`Delete unit "${unitName}"?`)) return;
+        if (!await KDialogs.confirm(`Delete unit "${unitName}"?`, {dangerous: true})) return;
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
         try {
@@ -1657,28 +1681,26 @@ const KAdmin = (() => {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             if (resp.ok || resp.status === 204) {
-                _loadUnitDashboard();
+                // Optimistically remove from local dashboard data immediately
+                _dashboardUnits = _dashboardUnits.filter(u => u.id !== unitId);
+                _renderDashboardTable();
                 KUnits.invalidateAllViewsheds();
-                // Reload units on map
-                const userSid = _getUserSessionId();
-                if (sid === userSid || _godViewEnabled) {
-                    try {
-                        if (_godViewEnabled) await _refreshGodView();
-                        else await KUnits.load(userSid, token);
-                    } catch(e) { console.warn('Unit refresh after delete:', e); }
-                }
+                // Refresh map units (god-view-aware)
+                try { await refreshMapUnits(); } catch(e) { console.warn('Unit refresh after delete:', e); }
+                // Re-fetch dashboard from server to confirm
+                await _loadUnitDashboard();
                 KGameLog.addEntry(`Unit "${unitName}" deleted (admin)`, 'info');
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Delete failed');
+                await KDialogs.alert(d.detail || 'Delete failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     /** Add a unit mid-session (admin) — opens the edit modal for creation. */
     async function addUnit() {
         const token = _getToken(), sid = _getAdminSessionId();
-        if (!token || !sid) { alert('Select a session first'); return; }
+        if (!token || !sid) { await KDialogs.alert('Select a session first'); return; }
 
         // Get map center for default position
         const map = KMap.getMap();
@@ -1760,7 +1782,7 @@ const KAdmin = (() => {
     }
 
     /** Show edit modal for a unit. Also searches KUnits data if not in dashboard. */
-    function editUnit(unitId) {
+    async function editUnit(unitId) {
         let unit = _dashboardUnits.find(u => u.id === unitId);
         // Fall back to map units if not found in dashboard
         if (!unit && typeof KUnits !== 'undefined') {
@@ -1771,10 +1793,10 @@ const KAdmin = (() => {
         }
         if (!unit) {
             // Try reloading dashboard first, then try again
-            _loadUnitDashboard().then(() => {
+            _loadUnitDashboard().then(async () => {
                 const u2 = _dashboardUnits.find(u => u.id === unitId);
                 if (u2) editUnit(unitId);
-                else alert('Unit not found — try reloading the dashboard');
+                else await KDialogs.alert('Unit not found — try reloading the dashboard');
             });
             return;
         }
@@ -2016,6 +2038,13 @@ const KAdmin = (() => {
     // ── DB Stats ─────────────────────────────────────
 
     async function _loadDbStats() {
+        const el = document.getElementById('admin-db-info');
+        if (!el) return;
+        // Toggle: if already showing stats, collapse
+        if (el.innerHTML.trim()) {
+            el.innerHTML = '';
+            return;
+        }
         const token = _getToken();
         if (!token) { _showInfo('admin-db-info', 'Not logged in', 'error'); return; }
         try {
@@ -2029,7 +2058,7 @@ const KAdmin = (() => {
                     html += `<tr><td>${table}</td><td>${count}</td></tr>`;
                 }
                 html += '</table>';
-                document.getElementById('admin-db-info').innerHTML = html;
+                el.innerHTML = html;
             } else {
                 _showInfo('admin-db-info', 'Stats endpoint not available');
             }
@@ -2085,8 +2114,8 @@ const KAdmin = (() => {
 
     async function _bulkDeleteUsers() {
         const checkboxes = document.querySelectorAll('.admin-user-cb:checked');
-        if (checkboxes.length === 0) { alert('No users selected'); return; }
-        if (!confirm(`⚠ Delete ${checkboxes.length} selected user(s)?`)) return;
+        if (checkboxes.length === 0) { await KDialogs.alert('No users selected'); return; }
+        if (!await KDialogs.confirm(`⚠ Delete ${checkboxes.length} selected user(s)?`, {dangerous: true})) return;
 
         const userIds = Array.from(checkboxes).map(cb => cb.dataset.userId);
         try {
@@ -2101,16 +2130,16 @@ const KAdmin = (() => {
                 setTimeout(_loadUsers, 500);
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Bulk delete failed');
+                await KDialogs.alert(d.detail || 'Bulk delete failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function _addUser() {
         const nameEl = document.getElementById('admin-add-user-name');
         if (!nameEl) return;
         const name = nameEl.value.trim();
-        if (!name) { alert('Enter a display name'); return; }
+        if (!name) { await KDialogs.alert('Enter a display name'); return; }
 
         try {
             const resp = await fetch('/api/admin/users', {
@@ -2123,13 +2152,13 @@ const KAdmin = (() => {
                 _loadUsers();
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Failed');
+                await KDialogs.alert(d.detail || 'Failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function renameUser(userId, currentName) {
-        const newName = prompt('New display name:', currentName);
+        const newName = await KDialogs.prompt('New display name:', currentName);
         if (!newName || newName.trim() === currentName) return;
         try {
             await fetch(`/api/admin/users/${userId}`, {
@@ -2138,11 +2167,11 @@ const KAdmin = (() => {
                 body: JSON.stringify({ display_name: newName.trim() }),
             });
             _loadUsers();
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function deleteUser(userId, name) {
-        if (!confirm(`Delete user "${name}"? This will also remove them from all sessions.`)) return;
+        if (!await KDialogs.confirm(`Delete user "${name}"? This will also remove them from all sessions.`, {dangerous: true})) return;
         const token = _getToken();
         try {
             const resp = await fetch(`/api/admin/users/${userId}`, {
@@ -2153,9 +2182,9 @@ const KAdmin = (() => {
                 _loadUsers();
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Delete failed');
+                await KDialogs.alert(d.detail || 'Delete failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     // ── Assign User to Session (from Users panel) ────
@@ -2163,9 +2192,9 @@ const KAdmin = (() => {
     let _assignPendingUserId = null;
     let _assignPendingDisplayName = null;
 
-    function assignUserToSession(userId, displayName) {
+    async function assignUserToSession(userId, displayName) {
         const sid = _getAdminSessionId();
-        if (!sid) { alert('Select a session first in the admin session selector.'); return; }
+        if (!sid) { await KDialogs.alert('Select a session first in the admin session selector.'); return; }
 
         _assignPendingUserId = userId;
         _assignPendingDisplayName = displayName;
@@ -2888,15 +2917,15 @@ const KAdmin = (() => {
 
         const bulkUserSel = document.getElementById('coc-bulk-user-select');
         const userId = bulkUserSel ? bulkUserSel.value : '';
-        if (!userId) { alert('Select a user to assign'); return; }
+        if (!userId) { await KDialogs.alert('Select a user to assign'); return; }
 
         const checkedBoxes = document.querySelectorAll('.coc-bulk-cb:checked');
-        if (checkedBoxes.length === 0) { alert('No units selected'); return; }
+        if (checkedBoxes.length === 0) { await KDialogs.alert('No units selected'); return; }
 
         const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);
         const userName = bulkUserSel.options[bulkUserSel.selectedIndex]?.textContent || '';
 
-        if (!confirm(`Assign ${userName} to ${unitIds.length} unit(s)?`)) return;
+        if (!await KDialogs.confirm(`Assign ${userName} to ${unitIds.length} unit(s)?`)) return;
 
         let success = 0;
         for (const unitId of unitIds) {
@@ -2929,11 +2958,11 @@ const KAdmin = (() => {
         if (!token || !sid) return;
 
         const checkedBoxes = document.querySelectorAll('.coc-bulk-cb:checked');
-        if (checkedBoxes.length === 0) { alert('No units selected'); return; }
+        if (checkedBoxes.length === 0) { await KDialogs.alert('No units selected'); return; }
 
         const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);
 
-        if (!confirm(`Unassign commanders from ${unitIds.length} unit(s)?`)) return;
+        if (!await KDialogs.confirm(`Unassign commanders from ${unitIds.length} unit(s)?`)) return;
 
         let success = 0;
         for (const unitId of unitIds) {
@@ -2963,7 +2992,7 @@ const KAdmin = (() => {
 
     let _cocPickerPendingUnitId = null;
 
-    function _showParentPicker(unitId, allUnits) {
+    async function _showParentPicker(unitId, allUnits) {
         const unit = allUnits.find(u => u.id === unitId);
         if (!unit) return;
 
@@ -2972,7 +3001,7 @@ const KAdmin = (() => {
         );
 
         if (candidates.length === 0) {
-            alert('No available parent units');
+            await KDialogs.alert('No available parent units');
             return;
         }
 
@@ -3273,7 +3302,7 @@ const KAdmin = (() => {
 
     async function adminSplitUnit(unitId) {
         const token = _getToken(), sid = _getAdminSessionId();
-        if (!token || !sid) { alert('Select a session first'); return; }
+        if (!token || !sid) { await KDialogs.alert('Select a session first'); return; }
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}/split`, {
                 method: 'POST',
@@ -3296,17 +3325,17 @@ const KAdmin = (() => {
                 try { loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Split failed');
+                await KDialogs.alert(d.detail || 'Split failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function adminMergeUnit(unitId) {
         const token = _getToken(), sid = _getAdminSessionId();
-        if (!token || !sid) { alert('Select a session first'); return; }
+        if (!token || !sid) { await KDialogs.alert('Select a session first'); return; }
 
         const unit = _dashboardUnits.find(u => u.id === unitId);
-        if (!unit) { alert('Unit not found in dashboard'); return; }
+        if (!unit) { await KDialogs.alert('Unit not found in dashboard'); return; }
 
         const principalType = _getPrincipalType(unit.unit_type);
         const nearby = _dashboardUnits.filter(ou => {
@@ -3316,28 +3345,26 @@ const KAdmin = (() => {
         });
 
         if (nearby.length === 0) {
-            alert(`No compatible units for "${unit.name}" (type: ${principalType})`);
+            await KDialogs.alert(`No compatible units for "${unit.name}" (type: ${principalType})`);
             return;
         }
 
-        let msg = `Merge into "${unit.name}".\nSelect unit to absorb:\n\n`;
-        nearby.forEach((ou, i) => {
+        const choices = nearby.map((ou, i) => {
             const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
             let distInfo = '';
             if (unit.lat != null && ou.lat != null) {
                 const dist = Math.round(_haversineDist(unit.lat, unit.lon, ou.lat, ou.lon));
                 distInfo = `, ${dist}m`;
             }
-            msg += `${i + 1}. ${ou.name} (${strPct}${distInfo})\n`;
+            return { value: String(i), label: `${ou.name} (${strPct}${distInfo})` };
         });
-        msg += '\nEnter number (1-' + nearby.length + '):';
-        const choice = prompt(msg);
-        if (!choice) return;
-        const idx = parseInt(choice) - 1;
-        if (isNaN(idx) || idx < 0 || idx >= nearby.length) { alert('Invalid choice'); return; }
+        const choice = await KDialogs.select(`Select unit to absorb into "${unit.name}":`, choices, {title: 'Merge Units'});
+        if (choice == null) return;
+        const idx = parseInt(choice);
+        if (isNaN(idx) || idx < 0 || idx >= nearby.length) return;
 
         const mergeTarget = nearby[idx];
-        if (!confirm(`Merge "${mergeTarget.name}" into "${unit.name}"?\nThe merged unit will be removed.`)) return;
+        if (!await KDialogs.confirm(`Merge "${mergeTarget.name}" into "${unit.name}"?\nThe merged unit will be removed.`, {dangerous: true})) return;
 
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/units/${unitId}/merge`, {
@@ -3361,9 +3388,9 @@ const KAdmin = (() => {
                 try { loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Merge failed');
+                await KDialogs.alert(d.detail || 'Merge failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     function _getPrincipalType(unitType) {
@@ -3563,13 +3590,17 @@ const KAdmin = (() => {
 
     // ── Helpers ──────────────────────────────────────
 
-    function _tryAutoEnableGodView() {
+    async function _tryAutoEnableGodView() {
         if (!_pendingGodViewEnable || _godViewEnabled) return;
         const sid = _getAdminSessionId();
         const token = _getToken();
         if (sid && token) {
             _pendingGodViewEnable = false;
-            _toggleGodView();
+            try {
+                await _toggleGodView();
+            } catch (e) {
+                console.warn('Auto-enable god view failed:', e);
+            }
         }
     }
 
@@ -3654,8 +3685,8 @@ const KAdmin = (() => {
         _openUnitTypeEditor({
             key: '',
             label: '',
-            sidc_blue: '10031000151211000000',
-            sidc_red: '10061000151211000000',
+            sidc_blue: '10031000141211000000',
+            sidc_red: '10061000141211000000',
             speed: 4.0,
             det: 1500,
             fire: 600,
@@ -3664,10 +3695,10 @@ const KAdmin = (() => {
         }, 'New Unit Type');
     }
 
-    function editUnitType(key) {
+    async function editUnitType(key) {
         const types = KScenarioBuilder.getUnitTypes();
         const info = types[key];
-        if (!info) { alert('Type not found'); return; }
+        if (!info) { await KDialogs.alert('Type not found'); return; }
         _utypeEditingKey = key;
         _openUnitTypeEditor({ key, ...info }, `Edit: ${info.label || key}`);
     }
@@ -3859,22 +3890,22 @@ const KAdmin = (() => {
         header.addEventListener('pointerup', () => { isDragging = false; });
     }
 
-    function removeUnitType(key) {
-        if (!confirm(`Remove unit type "${key}"?`)) return;
+    async function removeUnitType(key) {
+        if (!await KDialogs.confirm(`Remove unit type "${key}"?`, {dangerous: true})) return;
         const types = KScenarioBuilder.getUnitTypes();
         delete types[key];
         _renderUnitTypes();
         try { _populateUnitTypeDropdown(); } catch(e) {}
     }
 
-    function _resetUnitTypes() {
-        if (!confirm('Reset all unit types to defaults from config file? Custom types will be lost.')) return;
+    async function _resetUnitTypes() {
+        if (!await KDialogs.confirm('Reset all unit types to defaults from config file? Custom types will be lost.', {dangerous: true})) return;
         try {
             KScenarioBuilder.resetUnitTypes();
             _renderUnitTypes();
             try { _populateUnitTypeDropdown(); } catch(e) {}
         } catch(e) {
-            alert('Reset failed. Please reload the page.');
+            await KDialogs.alert('Reset failed. Please reload the page.');
         }
     }
 
@@ -3957,7 +3988,7 @@ const KAdmin = (() => {
 
     async function _analyzeTerrain(force = false) {
         const sid = _getAdminSessionId();
-        if (!sid) return alert('No session selected');
+        if (!sid) { await KDialogs.alert('No session selected'); return; };
 
         const depth = parseInt(document.getElementById('terrain-analyze-depth')?.value || '3');
         let skipElev = document.getElementById('terrain-skip-elevation')?.checked || false;
@@ -3968,7 +3999,7 @@ const KAdmin = (() => {
 
         // Auto-skip elevation for extremely high depths only if no rasterio
         if (depth >= 4 && !skipElev) {
-            if (!confirm(`Depth ${depth} generates many cells. This may take a few minutes.\n\nContinue?`)) {
+            if (!await KDialogs.confirm(`Depth ${depth} generates many cells. This may take a few minutes.\n\nContinue?`, {title: 'Terrain Analysis'})) {
                 return;
             }
         }
@@ -4027,7 +4058,7 @@ const KAdmin = (() => {
     }
 
     async function _clearTerrain() {
-        if (!confirm('Clear all auto-analyzed terrain? Manual cells will be preserved.')) return;
+        if (!await KDialogs.confirm('Clear all auto-analyzed terrain? Manual cells will be preserved.', {dangerous: true})) return;
         await KTerrain.clearTerrain(true);
         const statusEl = document.getElementById('terrain-analyze-status');
         if (statusEl) { statusEl.textContent = '🗑 Terrain cleared (manual cells preserved)'; statusEl.className = 'admin-info'; }
@@ -4191,7 +4222,7 @@ const KAdmin = (() => {
         _bind('admin-objects-clear-all', 'click', async () => {
             const sid = _getAdminSessionId();
             if (!sid) return;
-            if (!confirm('Delete ALL map objects for this session?')) return;
+            if (!await KDialogs.confirm('Delete ALL map objects for this session?', {dangerous: true})) return;
             const token = _getToken();
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -4283,10 +4314,178 @@ const KAdmin = (() => {
         }
     }
 
+    // ══════════════════════════════════════════════════
+    // ── Red AI Management ─────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    function _initRedAI() {
+        _bind('redai-create-btn', 'click', _createRedAgent);
+        _bind('redai-refresh-btn', 'click', _loadRedAgents);
+    }
+
+    function _redEscHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    async function _createRedAgent() {
+        const sid = _getAdminSessionId();
+        const token = _getToken();
+        if (!sid || !token) return;
+
+        const name = (document.getElementById('redai-name')?.value || 'Red Commander').trim();
+        const posture = document.getElementById('redai-posture')?.value || 'balanced';
+        const missionType = document.getElementById('redai-mission')?.value || 'hold';
+
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/red-agents`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                    name,
+                    risk_posture: posture,
+                    mission_intent: { type: missionType },
+                }),
+            });
+            if (resp.ok) {
+                KGameLog.addEntry(`🤖 Red AI agent '${name}' created (${posture})`, 'info');
+                _loadRedAgents();
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                await KDialogs.alert(d.detail || 'Failed to create Red AI agent');
+            }
+        } catch (e) {
+            console.error('Create Red agent failed:', e);
+        }
+    }
+
+    async function _loadRedAgents() {
+        const sid = _getAdminSessionId();
+        const token = _getToken();
+        const listEl = document.getElementById('redai-agents-list');
+        if (!sid || !token || !listEl) return;
+
+        try {
+            const resp = await fetch(`/api/sessions/${sid}/red-agents`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!resp.ok) { listEl.innerHTML = '<div style="color:#ef5350;">Failed to load agents</div>'; return; }
+            const agents = await resp.json();
+
+            if (agents.length === 0) {
+                listEl.innerHTML = '<div style="color:#888;font-style:italic;">No Red AI agents configured. Create one above.</div>';
+                return;
+            }
+
+            listEl.innerHTML = agents.map(a => {
+                const postureIcons = { aggressive: '🔥', balanced: '⚖', cautious: '🛡', defensive: '🏰' };
+                const icon = postureIcons[a.risk_posture] || '⚖';
+                const missionType = a.mission_intent?.type || 'hold';
+                const unitCount = a.controlled_unit_ids ? a.controlled_unit_ids.length : '?';
+                const lastTick = a.last_decision_tick || 0;
+                const decisions = a.decision_state?.decisions_count || 0;
+                const contacts = a.decision_state?.contacts_known || 0;
+
+                return `<div style="border:1px solid #333;border-radius:4px;padding:8px;margin-bottom:6px;background:#1a1a2e;">
+                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                        <span style="font-weight:600;">${icon} ${_redEscHtml(a.name)}</span>
+                        <span style="color:#888;font-size:10px;">${a.risk_posture}</span>
+                        <span style="color:#888;font-size:10px;">| mission: ${missionType}</span>
+                    </div>
+                    <div style="font-size:10px;color:#aaa;">
+                        Units: ${unitCount} | Last decision: tick ${lastTick} | Orders: ${decisions} | Contacts: ${contacts}
+                    </div>
+                    <div style="margin-top:6px;display:flex;gap:4px;">
+                        <select class="redai-posture-edit" data-id="${a.id}" style="padding:2px 4px;background:#0d1117;border:1px solid #333;color:#e0e0e0;border-radius:3px;font-size:10px;">
+                            <option value="aggressive" ${a.risk_posture==='aggressive'?'selected':''}>🔥 Aggressive</option>
+                            <option value="balanced" ${a.risk_posture==='balanced'?'selected':''}>⚖ Balanced</option>
+                            <option value="cautious" ${a.risk_posture==='cautious'?'selected':''}>🛡 Cautious</option>
+                            <option value="defensive" ${a.risk_posture==='defensive'?'selected':''}>🏰 Defensive</option>
+                        </select>
+                        <select class="redai-mission-edit" data-id="${a.id}" style="padding:2px 4px;background:#0d1117;border:1px solid #333;color:#e0e0e0;border-radius:3px;font-size:10px;">
+                            <option value="hold" ${missionType==='hold'?'selected':''}>Hold</option>
+                            <option value="patrol" ${missionType==='patrol'?'selected':''}>Patrol</option>
+                            <option value="attack" ${missionType==='attack'?'selected':''}>Attack</option>
+                            <option value="defend" ${missionType==='defend'?'selected':''}>Defend</option>
+                            <option value="withdraw" ${missionType==='withdraw'?'selected':''}>Withdraw</option>
+                        </select>
+                        <button class="admin-btn redai-update" data-id="${a.id}" style="font-size:10px;padding:2px 8px;">💾 Save</button>
+                        <button class="admin-btn redai-force" data-id="${a.id}" style="font-size:10px;padding:2px 8px;">⚡ Force Decide</button>
+                        <button class="admin-btn redai-delete" data-id="${a.id}" style="font-size:10px;padding:2px 8px;background:#c62828;">🗑</button>
+                    </div>
+                </div>`;
+            }).join('');
+
+            // Bind buttons
+            listEl.querySelectorAll('.redai-update').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const agentId = btn.dataset.id;
+                    const posture = listEl.querySelector(`.redai-posture-edit[data-id="${agentId}"]`)?.value;
+                    const mission = listEl.querySelector(`.redai-mission-edit[data-id="${agentId}"]`)?.value;
+                    try {
+                        await fetch(`/api/sessions/${sid}/red-agents/${agentId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({
+                                risk_posture: posture,
+                                mission_intent: { type: mission },
+                            }),
+                        });
+                        KGameLog.addEntry(`🤖 Red AI agent updated`, 'info');
+                        _loadRedAgents();
+                    } catch (e) { console.error('Update Red agent failed:', e); }
+                });
+            });
+
+            listEl.querySelectorAll('.redai-force').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const agentId = btn.dataset.id;
+                    btn.disabled = true;
+                    btn.textContent = '⏳...';
+                    try {
+                        const resp = await fetch(`/api/sessions/${sid}/red-agents/${agentId}/force-decide`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}` },
+                        });
+                        if (resp.ok) {
+                            const result = await resp.json();
+                            KGameLog.addEntry(`🤖 Red AI forced: ${result.orders_created} orders created`, 'info');
+                            _loadRedAgents();
+                        } else {
+                            const d = await resp.json().catch(() => ({}));
+                            await KDialogs.alert(d.detail || 'Force decision failed');
+                        }
+                    } catch (e) { console.error('Force Red decision failed:', e); }
+                    finally { btn.disabled = false; btn.textContent = '⚡ Force Decide'; }
+                });
+            });
+
+            listEl.querySelectorAll('.redai-delete').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!await KDialogs.confirm('Delete this Red AI agent?', {dangerous: true})) return;
+                    const agentId = btn.dataset.id;
+                    try {
+                        await fetch(`/api/sessions/${sid}/red-agents/${agentId}`, {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${token}` },
+                        });
+                        KGameLog.addEntry(`🤖 Red AI agent deleted`, 'info');
+                        _loadRedAgents();
+                    } catch (e) { console.error('Delete Red agent failed:', e); }
+                });
+            });
+
+        } catch (e) {
+            console.error('Load Red agents failed:', e);
+            listEl.innerHTML = '<div style="color:#ef5350;">Error loading agents</div>';
+        }
+    }
+
     return {
         init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
         getAdminSessionId: _getAdminSessionId,
-        onStateUpdate, resetOnLogout,
+        onStateUpdate, refreshMapUnits, resetOnLogout,
         editScenario, deleteScenario, deleteSession, createSessionFromScenario,
         renameSession, enterSession,
         kickParticipant,

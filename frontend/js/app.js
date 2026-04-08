@@ -84,8 +84,14 @@
             console.warn('Failed to fetch session for clock:', err);
         }
 
-        // Load units
-        try { await KUnits.load(sessionId, token); } catch (err) { console.warn('Units load error:', err); }
+        // Load units — use god-view-aware refresh if admin god view is active
+        try {
+            if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                await KAdmin.refreshMapUnits();
+            } else {
+                await KUnits.load(sessionId, token);
+            }
+        } catch (err) { console.warn('Units load error:', err); }
 
         // Load contacts
         try { await KContacts.load(sessionId, token); } catch (err) { console.warn('Contacts load error:', err); }
@@ -188,8 +194,12 @@
             KGameLog.addEntry(`Turn ${data.tick}`, 'info');
             // Update game clock on turn
             KMap.setGameTime(data.tick, data.game_time || null);
+            // Clear pending orders — they've been executed by the tick
+            try { KUnits.clearPendingOrders(); } catch(e) {}
             // Refresh command panel datetime
             try { KOrders.refreshMeta(); } catch(e) {}
+            // Update turn button badge
+            try { KSessionUI.updateTurnBadge(); } catch(e) {}
         });
 
         KGameLog.addEntry('Connected to session', 'info');

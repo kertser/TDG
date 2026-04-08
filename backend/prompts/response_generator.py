@@ -1,0 +1,162 @@
+"""
+Templates for generating unit radio responses.
+
+Two modes:
+1. Template-based (instant, no LLM) — for standard ack/nack/unable
+2. LLM-enhanced (optional) — for richer status reports and clarifications
+"""
+
+from __future__ import annotations
+
+import random
+
+# ── Template-based responses (keyed by response_type × language) ──
+
+TEMPLATES_RU = {
+    "ack": [
+        "Здесь {unit}. Так точно, принял. Выполняю. {status_text}",
+        "Здесь {unit}, приём. Понял, выполняю. {status_text}",
+        "{unit}, приказ принят. Начинаю выполнение. {status_text}",
+        "Здесь {unit}. Вас понял, приступаю. {status_text}",
+    ],
+    "wilco": [
+        "Здесь {unit}. Так точно, выдвигаемся. {status_text}",
+        "{unit} принял. Начали движение. {status_text}",
+        "Здесь {unit}, выполняем. {status_text}",
+    ],
+    "unable": [
+        "Здесь {unit}. Не могу выполнить! {reason}",
+        "{unit}, приём. Выполнение невозможно. {reason}",
+        "Здесь {unit}. Отказ. {reason}",
+    ],
+    "clarify": [
+        "Здесь {unit}. Не понял приказ. Уточните!",
+        "{unit}, приём. Повторите приказ, не понял.",
+        "Здесь {unit}. Уточните задачу, приём!",
+    ],
+    "status": [
+        "Здесь {unit}, приём. {status_text}",
+        "{unit} докладывает: {status_text}",
+    ],
+    "no_response": [],  # silence
+    "morale_broken": [
+        "Здесь {unit}... У нас тяжёлые потери... Отступаем!",
+        "{unit}... Не можем... Выходим из боя!",
+        "Здесь {unit}. Мы разбиты. Отходим!",
+    ],
+    "comms_degraded": [
+        "Здесь {unit}... *помехи*... при...нял... *помехи*... выполн...",
+        "{unit}... *шум*... понял... *треск*...",
+    ],
+}
+
+TEMPLATES_EN = {
+    "ack": [
+        "This is {unit}. Roger, copy. Executing. {status_text}",
+        "{unit} here. Acknowledged, moving to execute. {status_text}",
+        "{unit}, roger. Wilco. {status_text}",
+        "This is {unit}. Copy that, commencing. {status_text}",
+    ],
+    "wilco": [
+        "This is {unit}. Roger, moving out. {status_text}",
+        "{unit}, copy. Beginning movement. {status_text}",
+        "This is {unit}. Wilco, executing now. {status_text}",
+    ],
+    "unable": [
+        "This is {unit}. Unable to comply! {reason}",
+        "{unit} here. Cannot execute. {reason}",
+        "This is {unit}. Negative. {reason}",
+    ],
+    "clarify": [
+        "This is {unit}. Say again? Did not copy.",
+        "{unit} here. Requesting clarification, over.",
+        "This is {unit}. Unclear order. Please repeat.",
+    ],
+    "status": [
+        "This is {unit}, over. {status_text}",
+        "{unit} reports: {status_text}",
+    ],
+    "no_response": [],
+    "morale_broken": [
+        "This is {unit}... Heavy casualties... We're pulling back!",
+        "{unit}... Can't hold... Breaking contact!",
+        "This is {unit}. We're done. Falling back!",
+    ],
+    "comms_degraded": [
+        "This is {unit}... *static*... rog... *static*... exec...",
+        "{unit}... *noise*... copy... *break*...",
+    ],
+}
+
+# Reasons for inability (keyed by cause)
+UNABLE_REASONS_RU = {
+    "destroyed": "Подразделение уничтожено.",
+    "morale_broken": "Потеряли боеспособность, отступаем!",
+    "no_ammo": "Боеприпасы на нуле!",
+    "heavy_casualties": "Тяжёлые потери, не в состоянии выполнить.",
+}
+
+UNABLE_REASONS_EN = {
+    "destroyed": "Unit destroyed.",
+    "morale_broken": "Lost combat capability, falling back!",
+    "no_ammo": "Ammunition depleted!",
+    "heavy_casualties": "Heavy casualties, unable to comply.",
+}
+
+
+def get_template_response(
+    unit_name: str,
+    response_type: str,
+    language: str = "en",
+    reason_key: str | None = None,
+    status_text: str = "",
+) -> str | None:
+    """
+    Pick a random template response.
+
+    Returns None for no_response type (comms offline / destroyed).
+    """
+    templates = TEMPLATES_RU if language == "ru" else TEMPLATES_EN
+
+    if response_type == "no_response":
+        return None
+
+    # Special cases
+    if response_type == "morale_broken":
+        pool = templates.get("morale_broken", [])
+    elif response_type == "comms_degraded":
+        pool = templates.get("comms_degraded", [])
+    else:
+        pool = templates.get(response_type, templates.get("ack", []))
+
+    if not pool:
+        return None
+
+    template = random.choice(pool)
+
+    # Fill in placeholders
+    reasons = UNABLE_REASONS_RU if language == "ru" else UNABLE_REASONS_EN
+    reason = reasons.get(reason_key, "") if reason_key else ""
+
+    return template.format(
+        unit=unit_name,
+        reason=reason,
+        status_text=status_text,
+    ).strip()
+
+
+# ── LLM prompt for richer responses (optional, Phase 2 enhancement) ──
+
+LLM_RESPONSE_SYSTEM_PROMPT = """You are a military unit radio operator responding to commands in a tactical exercise.
+You respond in character, using military radio protocol.
+
+Your unit: {unit_name} ({unit_type})
+Unit status: strength {strength}%, morale {morale}%, suppression {suppression}%, comms: {comms_status}
+Current task: {current_task}
+Language: {language}
+
+Respond to the message with a brief, realistic military radio response (1-2 sentences).
+Use proper radio protocol for the language (Russian or English).
+If Russian, use authentic military radio style.
+"""
+

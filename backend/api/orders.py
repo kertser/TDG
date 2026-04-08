@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database import get_db
+from backend.database import get_db, async_session_factory
 from backend.api.deps import get_session_participant
 from backend.models.order import Order, OrderStatus
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class OrderSubmit(BaseModel):
@@ -20,6 +23,138 @@ class OrderSubmit(BaseModel):
     original_text: str = ""
     order_type: str | None = None
     parsed_order: dict | None = None  # Structured order for direct task assignment
+
+
+async def _run_order_pipeline(
+    order_id: uuid.UUID,
+    session_id: uuid.UUID,
+    issuer_side: str,
+):
+    """Background task: run LLM order pipeline and broadcast results."""
+    from backend.services.order_service import order_service
+    from backend.services.ws_manager import ws_manager
+    from backend.models.chat_message import ChatMessage
+    from datetime import datetime, timezone
+
+    logger.info("Order pipeline STARTING for order=%s", order_id)
+
+    try:
+        async with async_session_factory() as db:
+            try:
+                result = await db.execute(
+                    select(Order).where(Order.id == order_id)
+                )
+                order = result.scalar_one_or_none()
+                if order is None:
+                    logger.error("Order pipeline: order %s not found", order_id)
+                    return
+
+                # Run the full pipeline
+                parse_result = await order_service.process(
+                    order=order,
+                    session_id=session_id,
+                    db=db,
+                    issuer_side=issuer_side,
+                )
+
+                await db.flush()
+
+                logger.info(
+                    "Order pipeline: classification=%s status=%s",
+                    parse_result.parsed.classification.value,
+                    order.status.value,
+                )
+
+                # Build order_status broadcast payload
+                order_data = {
+                    "id": str(order.id),
+                    "status": order.status.value,
+                    "original_text": order.original_text,
+                    "order_type": order.order_type or (
+                        parse_result.parsed.order_type.value
+                        if parse_result.parsed.order_type else None
+                    ),
+                    "parsed_order": order.parsed_order,
+                    "parsed_intent": order.parsed_intent,
+                    "classification": parse_result.parsed.classification.value,
+                    "language": parse_result.parsed.language.value,
+                    "confidence": parse_result.parsed.confidence,
+                    "matched_unit_ids": parse_result.matched_unit_ids,
+                    "resolved_locations": [
+                        loc.model_dump(mode="json", exclude_none=True)
+                        for loc in parse_result.resolved_locations
+                    ],
+                }
+
+                # Broadcast order status update
+                await ws_manager.broadcast(
+                    session_id,
+                    {"type": "order_status", "data": order_data},
+                    only_side=issuer_side,
+                )
+
+                # Send unit radio responses as chat messages
+                for resp in parse_result.responses:
+                    now = datetime.now(timezone.utc)
+
+                    # Persist the unit response as a chat message
+                    try:
+                        chat_msg = ChatMessage(
+                            session_id=session_id,
+                            sender_id=None,  # Unit, not a user
+                            sender_name=f"📻 {resp.from_unit_name}",
+                            side=issuer_side,
+                            recipient="all",
+                            text=resp.text,
+                            created_at=now,
+                        )
+                        db.add(chat_msg)
+                    except Exception:
+                        pass  # Chat persistence is best-effort
+
+                    # Broadcast the unit response
+                    chat_data = {
+                        "sender_id": resp.from_unit_id or "",
+                        "sender_name": f"📻 {resp.from_unit_name}",
+                        "text": resp.text,
+                        "recipient": "all",
+                        "side": issuer_side,
+                        "timestamp": now.isoformat(),
+                        "is_unit_response": True,
+                        "response_type": resp.response_type.value,
+                    }
+                    await ws_manager.broadcast(
+                        session_id,
+                        {"type": "chat_message", "data": chat_data},
+                        only_side=issuer_side,
+                    )
+
+                await db.commit()
+                logger.info(
+                    "Order pipeline completed: order=%s status=%s classification=%s",
+                    order_id, order.status.value,
+                    parse_result.parsed.classification.value,
+                )
+
+            except Exception as e:
+                await db.rollback()
+                logger.error("Order pipeline failed for order=%s: %s", order_id, e, exc_info=True)
+                # Try to mark order as failed
+                try:
+                    async with async_session_factory() as db2:
+                        result = await db2.execute(
+                            select(Order).where(Order.id == order_id)
+                        )
+                        order = result.scalar_one_or_none()
+                        if order and order.status == OrderStatus.pending:
+                            order.status = OrderStatus.failed
+                            order.parsed_order = {"error": str(e)}
+                            await db2.commit()
+                except Exception:
+                    pass
+
+    except Exception as e:
+        logger.error("Order pipeline CRASHED for order=%s: %s", order_id, e, exc_info=True)
 
 
 @router.post("/{session_id}/orders")
@@ -31,8 +166,9 @@ async def submit_order(
 ):
     """Submit an order for parsing and execution.
 
-    Can include a structured parsed_order for direct task assignment:
-      {"type": "move", "target_location": {"lat": 48.85, "lon": 2.35}}
+    Two modes:
+    1. If parsed_order is provided → direct task assignment (fast path, no LLM).
+    2. If only original_text → runs LLM pipeline in background (OrderParser → IntentInterpreter → LocationResolver).
     """
     # Observers cannot submit orders (check both side and role)
     if participant.side.value == "observer" or participant.role == "observer":
@@ -76,6 +212,21 @@ async def submit_order(
     )
     db.add(order)
     await db.flush()
+
+    order_id = order.id
+    has_direct_task = body.parsed_order and body.parsed_order.get("type")
+    has_text = bool(body.original_text and body.original_text.strip())
+
+    # If no direct parsed_order but has text → run LLM pipeline in background
+    if not has_direct_task and has_text:
+        order.status = OrderStatus.pending  # Will be updated by pipeline
+        # Commit NOW so the background task can find this order in DB
+        await db.commit()
+        asyncio.create_task(_run_order_pipeline(order_id, session_id, side_val))
+        status_note = "processing"
+    else:
+        status_note = None
+
     return {
         "id": str(order.id),
         "status": order.status.value,
@@ -83,6 +234,7 @@ async def submit_order(
         "issued_at": order.issued_at.isoformat() if order.issued_at else None,
         "issued_by_side": side_val,
         "target_unit_ids": [str(uid) for uid in order.target_unit_ids] if order.target_unit_ids else [],
+        "processing": status_note == "processing",
     }
 
 
@@ -121,6 +273,9 @@ async def list_orders(
             "issued_by_side": o.issued_by_side.value if hasattr(o.issued_by_side, 'value') else o.issued_by_side,
             "issuer_name": issuer_names.get(o.issued_by_user_id, "AI") if o.issued_by_user_id else "AI",
             "target_unit_ids": [str(uid) for uid in o.target_unit_ids] if o.target_unit_ids else [],
+            "classification": o.parsed_order.get("classification") if o.parsed_order else None,
+            "language": o.parsed_order.get("language") if o.parsed_order else None,
+            "confidence": o.parsed_order.get("confidence") if o.parsed_order else None,
         }
         for o in orders
     ]

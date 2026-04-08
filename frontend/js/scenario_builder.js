@@ -29,8 +29,10 @@ const KScenarioBuilder = (() => {
             const resp = await fetch('/config/unit_types.json?v=' + Date.now());
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();
-            // Strip the _comment key if present
-            delete data._comment;
+            // Strip metadata keys (prefixed with _)
+            for (const k of Object.keys(data)) {
+                if (k.startsWith('_')) delete data[k];
+            }
             UNIT_TYPES = data;
             _defaultUnitTypes = JSON.parse(JSON.stringify(data));
             console.log(`[UnitTypes] Loaded ${Object.keys(UNIT_TYPES).length} types from config`);
@@ -249,7 +251,7 @@ const KScenarioBuilder = (() => {
         }
     }
 
-    function _confirmUnit() {
+    async function _confirmUnit() {
         const lat = parseFloat(document.getElementById('sb-unit-lat').value);
         const lon = parseFloat(document.getElementById('sb-unit-lon').value);
         const name = document.getElementById('sb-unit-name').value.trim();
@@ -263,8 +265,8 @@ const KScenarioBuilder = (() => {
         const ammo = Math.max(0, Math.min(1, ammoPct / 100));
         const morale = Math.max(0, Math.min(1, moralePct / 100));
 
-        if (!name) { alert('Unit name required'); return; }
-        if (isNaN(lat) || isNaN(lon)) { alert('Invalid coordinates'); return; }
+        if (!name) { await KDialogs.alert('Unit name required'); return; }
+        if (isNaN(lat) || isNaN(lon)) { await KDialogs.alert('Invalid coordinates'); return; }
 
         const info = UNIT_TYPES[unit_type] || {};
         const sidc = side === 'red' ? (info.sidc_red || '') : (info.sidc_blue || '');
@@ -464,7 +466,7 @@ const KScenarioBuilder = (() => {
 
     async function saveScenario() {
         const title = document.getElementById('sb-scenario-title').value.trim();
-        if (!title) { alert('Scenario title required'); return; }
+        if (!title) { await KDialogs.alert('Scenario title required'); return; }
 
         const description = document.getElementById('sb-scenario-desc').value.trim();
         const center = _map.getCenter();
@@ -540,7 +542,12 @@ const KScenarioBuilder = (() => {
                             try {
                                 const map = KMap.getMap();
                                 await KGrid.load(map, currentSessionId);
-                                await KUnits.load(currentSessionId, token);
+                                // Use god-view-aware refresh to avoid overwriting all-units with fog-of-war data
+                                if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                                    await KAdmin.refreshMapUnits();
+                                } else {
+                                    await KUnits.load(currentSessionId, token);
+                                }
                                 await KContacts.load(currentSessionId, token);
                             } catch (e) {
                                 console.warn('Map reload after resync:', e);
@@ -554,13 +561,13 @@ const KScenarioBuilder = (() => {
                     }
                 }
 
-                alert(`Scenario "${data.title}" saved!`);
+                await KDialogs.alert(`Scenario "${data.title}" saved!`);
             } else {
                 const err = await resp.json().catch(() => ({}));
-                alert('Save failed: ' + (err.detail || resp.status));
+                await KDialogs.alert('Save failed: ' + (err.detail || resp.status));
             }
         } catch (err) {
-            alert('Save error: ' + err.message);
+            await KDialogs.alert('Save error: ' + err.message);
         }
     }
 

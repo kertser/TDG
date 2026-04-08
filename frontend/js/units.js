@@ -36,6 +36,10 @@ const KUnits = (() => {
     let _viewshedPending = {};     // unit_id → true (fetch in-flight)
     let _viewshedTick = -1;        // invalidate cache when tick changes
 
+    // ── Pending orders (queued for next tick) ─────────
+    // unit_id → {type, target_location, target_snail, speed, order_id}
+    let _pendingOrders = {};
+
     // ── Rubber-band selection state ──────────────────
     let _selectRect = null;
     let _selectStartPt = null;
@@ -1143,7 +1147,7 @@ const KUnits = (() => {
     }
 
     async function _renameUnit(u) {
-        const newName = prompt('Rename unit:', u.name);
+        const newName = await KDialogs.prompt('Rename unit:', u.name);
         if (!newName || newName.trim() === u.name) return;
         const token = KSessionUI.getToken();
         const sessionId = KSessionUI.getSessionId();
@@ -1161,9 +1165,9 @@ const KUnits = (() => {
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Rename failed');
+                await KDialogs.alert(d.detail || 'Rename failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     // ══════════════════════════════════════════════════
@@ -1210,9 +1214,9 @@ const KUnits = (() => {
                         KGameLog.addEntry(`${u.name} formation → ${formation}`, 'info');
                     } else {
                         const d = await resp.json().catch(() => ({}));
-                        alert(d.detail || 'Set formation failed');
+                        await KDialogs.alert(d.detail || 'Set formation failed');
                     }
-                } catch (err) { alert(err.message); }
+                } catch (err) { await KDialogs.alert(err.message); }
             });
         });
     }
@@ -1296,9 +1300,9 @@ const KUnits = (() => {
                     KGameLog.addEntry(`${unitName} moving ${speed} → ${destStr}`, 'info');
                 } else {
                     const d = await resp.json().catch(() => ({}));
-                    alert(d.detail || 'Move command failed');
+                    await KDialogs.alert(d.detail || 'Move command failed');
                 }
-            } catch (err) { alert(err.message); }
+            } catch (err) { await KDialogs.alert(err.message); }
         };
 
         const _onMovePickKey = (e) => {
@@ -1324,18 +1328,27 @@ const KUnits = (() => {
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             if (resp.ok) {
-                u.current_task = null;
+                const updated = await resp.json();
+                // Track pending halt — unit still has current_task until tick
+                if (updated.pending_order) {
+                    _pendingOrders[u.id] = { type: 'halt', order_id: updated.pending_order.id };
+                    // Remove any pending move for this unit
+                    if (_pendingOrders[u.id] && _pendingOrders[u.id].type === 'move') {
+                        delete _pendingOrders[u.id];
+                    }
+                    _pendingOrders[u.id] = { type: 'halt' };
+                }
                 render(allUnitsData);
-                KGameLog.addEntry(`${u.name} stopped`, 'info');
+                KGameLog.addEntry(`📋 ${u.name} ordered: halt (next turn)`, 'order');
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Stop failed');
+                await KDialogs.alert(d.detail || 'Stop failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function _deleteUnit(u) {
-        if (!confirm(`Delete unit "${u.name}"? This cannot be undone.`)) return;
+        if (!await KDialogs.confirm(`Delete unit "${u.name}"? This cannot be undone.`, {dangerous: true})) return;
         const token = KSessionUI.getToken();
         const sessionId = KSessionUI.getSessionId();
         if (!token || !sessionId) return;
@@ -1348,13 +1361,18 @@ const KUnits = (() => {
             if (resp.ok || resp.status === 204) {
                 selectedUnitIds.delete(u.id);
                 KGameLog.addEntry(`Unit "${u.name}" deleted`, 'info');
-                await load(sessionId, token);
+                // Use god-view-aware refresh to avoid losing red units
+                if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                    await KAdmin.refreshMapUnits();
+                } else {
+                    await load(sessionId, token);
+                }
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Delete failed');
+                await KDialogs.alert(d.detail || 'Delete failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     // ══════════════════════════════════════════════════
@@ -1362,10 +1380,10 @@ const KUnits = (() => {
     // ══════════════════════════════════════════════════
 
     async function _splitUnit(u) {
-        const pctStr = prompt(`Split "${u.name}" — what % goes to new unit? (10–90):`, '50');
+        const pctStr = await KDialogs.prompt(`Split "${u.name}" — what % goes to new unit? (10–90):`, '50');
         if (!pctStr) return;
         const pct = parseInt(pctStr);
-        if (isNaN(pct) || pct < 10 || pct > 90) { alert('Enter a number between 10 and 90'); return; }
+        if (isNaN(pct) || pct < 10 || pct > 90) { await KDialogs.alert('Enter a number between 10 and 90'); return; }
         const ratio = pct / 100;
 
         const token = KSessionUI.getToken();
@@ -1385,9 +1403,9 @@ const KUnits = (() => {
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(d.detail || 'Split failed');
+                await KDialogs.alert(d.detail || 'Split failed');
             }
-        } catch (err) { alert(err.message); }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     // ══════════════════════════════════════════════════
@@ -1434,7 +1452,7 @@ const KUnits = (() => {
 
                 const mergeUnit = allUnitsData.find(ou => ou.id === mergeId);
                 if (!mergeUnit) return;
-                if (!confirm(`Merge "${mergeUnit.name}" into "${u.name}"?\nThe merged unit will be removed.`)) return;
+                if (!await KDialogs.confirm(`Merge "${mergeUnit.name}" into "${u.name}"?\nThe merged unit will be removed.`, {title: "Merge Units", dangerous: true})) return;
 
                 const token = KSessionUI.getToken();
                 const sessionId = KSessionUI.getSessionId();
@@ -1453,9 +1471,9 @@ const KUnits = (() => {
                         try { KAdmin.loadPublicCoC(); } catch(e) {}
                     } else {
                         const d = await resp.json().catch(() => ({}));
-                        alert(d.detail || 'Merge failed');
+                        await KDialogs.alert(d.detail || 'Merge failed');
                     }
-                } catch (err) { alert(err.message); }
+                } catch (err) { await KDialogs.alert(err.message); }
             });
         });
     }
@@ -1560,20 +1578,61 @@ const KUnits = (() => {
 
         allUnitsData.forEach(u => {
             if (u.lat == null || u.lon == null || u.is_destroyed) return;
+
+            // Check for active task arrow (solid)
             const target = _extractTarget(u);
-            if (!target) return;
+            if (target) {
+                const taskType = u.current_task && u.current_task.type;
+                const isMoving = taskType && ['move', 'attack', 'advance', 'retreat', 'withdraw'].includes(taskType);
+                if (isMoving) {
+                    const from = L.latLng(u.lat, u.lon);
+                    const to = L.latLng(target.lat, target.lon);
+                    const accent = _sideColor(u.side);
+                    _drawMovementArrow(from, to, accent);
+                }
+            }
 
-            // Check if unit has a movement-type task
-            const taskType = u.current_task && u.current_task.type;
-            const isMoving = taskType && ['move', 'attack', 'advance', 'retreat', 'withdraw'].includes(taskType);
-            if (!isMoving && !target) return;
-
-            const from = L.latLng(u.lat, u.lon);
-            const to = L.latLng(target.lat, target.lon);
-            const accent = _sideColor(u.side);
-
-            _drawMovementArrow(from, to, accent);
+            // Check for pending order arrow (dashed)
+            const pending = _pendingOrders[u.id];
+            if (pending && pending.type === 'move' && pending.target_location) {
+                const from = L.latLng(u.lat, u.lon);
+                const to = L.latLng(pending.target_location.lat, pending.target_location.lon);
+                const accent = _sideColor(u.side);
+                _drawPendingArrow(from, to, accent);
+            }
         });
+    }
+
+    /** Draw a dashed arrow for a pending (queued) move order. */
+    function _drawPendingArrow(from, to, accent) {
+        const dLat = to.lat - from.lat;
+        const dLon = to.lng - from.lng;
+        const geoLen = Math.sqrt(dLat * dLat + dLon * dLon);
+        if (geoLen < 0.00005) return;
+
+        _movementArrowsLayer.addLayer(L.polyline(
+            [from, to], {
+                color: accent,
+                weight: 2.5,
+                opacity: 0.5,
+                dashArray: '8, 6',
+                lineCap: 'round',
+                interactive: false,
+                pane: 'movementArrowsPane',
+            }
+        ));
+
+        // Small circle at target end
+        _movementArrowsLayer.addLayer(L.circleMarker(to, {
+            radius: 4,
+            color: accent,
+            fillColor: accent,
+            fillOpacity: 0.3,
+            weight: 1.5,
+            opacity: 0.5,
+            interactive: false,
+            pane: 'movementArrowsPane',
+        }));
     }
 
     /** Draw a single movement arrow: elegant tapered line (max 300m) with pointed arrowhead. */
@@ -1864,6 +1923,25 @@ const KUnits = (() => {
     function update(units, tick) {
         if (tick !== undefined) _invalidateViewshedCache(tick);
         _invalidateMovedUnitsViewshed(units);
+
+        // Clear pending orders that have been picked up by the tick engine
+        if (units) {
+            for (const u of units) {
+                if (_pendingOrders[u.id]) {
+                    const pending = _pendingOrders[u.id];
+                    if (pending.type === 'halt') {
+                        // Halt was executed — unit should no longer have a move task
+                        if (!u.current_task || u.current_task.type !== 'move') {
+                            delete _pendingOrders[u.id];
+                        }
+                    } else if (pending.type === 'move' && u.current_task && u.current_task.type === 'move') {
+                        // Move was picked up by tick engine
+                        delete _pendingOrders[u.id];
+                    }
+                }
+            }
+        }
+
         render(units);
     }
 
@@ -1908,6 +1986,8 @@ const KUnits = (() => {
         clearAll, setAdminDrag,
         invalidateViewshedCache: _invalidateViewshedCache,
         invalidateAllViewsheds: _invalidateAllViewsheds,
+        getPendingOrdersCount: () => Object.keys(_pendingOrders).length,
+        clearPendingOrders: () => { _pendingOrders = {}; },
         // Config accessors
         getConfig, getFireRange, getPersonnel, getEyeHeight,
         getStatusIcon, getStatusColor, getSpeedOptions, getFormations,

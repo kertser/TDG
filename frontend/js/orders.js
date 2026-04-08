@@ -327,6 +327,7 @@ const KOrders = (() => {
     /** Called from app.js when a chat_message arrives via WS */
     function onChatMessage(data) {
         const myId = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserId() : '';
+        const isUnitResponse = data.is_unit_response || false;
         _chatMessages.push({
             sender_id: data.sender_id,
             sender_name: data.sender_name || 'Unknown',
@@ -334,6 +335,8 @@ const KOrders = (() => {
             recipient: data.recipient || 'all',
             timestamp: data.timestamp || new Date().toISOString(),
             own: data.sender_id === myId,
+            is_unit_response: isUnitResponse,
+            response_type: data.response_type || null,
         });
         _renderRadioMessages();
 
@@ -347,7 +350,8 @@ const KOrders = (() => {
 
         // Also add to game log
         const recipientLabel = data.recipient === 'all' ? '(all)' : '(DM)';
-        KGameLog.addEntry(`📻 ${data.sender_name} ${recipientLabel}: ${data.text}`, 'info');
+        const prefix = isUnitResponse ? '' : '📻 ';
+        KGameLog.addEntry(`${prefix}${data.sender_name} ${recipientLabel}: ${data.text}`, 'info');
     }
 
     function _renderRadioMessages() {
@@ -360,7 +364,8 @@ const KOrders = (() => {
         }
 
         container.innerHTML = _chatMessages.map(msg => {
-            const cls = msg.own ? 'msg-own' : 'msg-other';
+            const isUnit = msg.is_unit_response || false;
+            const cls = isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
             const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
             const recipientTag = msg.recipient !== 'all' && !msg.own ? ' (DM)' : '';
             return `<div class="radio-msg ${cls}">
@@ -438,15 +443,46 @@ const KOrders = (() => {
                 pending: '⏳', validated: '✓', executing: '⚙', completed: '✅', failed: '✗', cancelled: '—'
             };
 
+            // Classification badge (from LLM)
+            const classIcons = {
+                command: '📋', status_request: '❓', acknowledgment: '✅',
+                status_report: '📊', unclear: '⚠️'
+            };
+            const classification = order.classification || (order.parsed_order && order.parsed_order.classification);
+            const classIcon = classification ? (classIcons[classification] || '') : '';
+            const classBadge = classification
+                ? `<span class="order-class-badge" title="Classification: ${classification}">${classIcon} ${classification}</span>`
+                : '';
+
+            // Confidence indicator
+            const confidence = order.confidence || (order.parsed_order && order.parsed_order.confidence);
+            const confBadge = confidence != null
+                ? `<span class="order-conf-badge" title="Confidence: ${Math.round(confidence * 100)}%">${Math.round(confidence * 100)}%</span>`
+                : '';
+
+            // Processing spinner
+            const isProcessing = order.processing && status === 'pending';
+            const processingHtml = isProcessing
+                ? '<span class="order-processing" title="AI analyzing...">⏳ analyzing...</span>'
+                : '';
+
+            // Language badge
+            const lang = order.language || (order.parsed_order && order.parsed_order.language);
+            const langBadge = lang ? `<span class="order-lang-badge">${lang.toUpperCase()}</span>` : '';
+
             return `<div class="order-radio-entry ${sideCls}">
                 <div class="order-radio-header">
                     <span class="order-radio-time">${timeStr}</span>
                     <span class="order-radio-callsign ${sideCls}">${_escHtml(senderName)}</span>
                     <span class="order-radio-arrow">→</span>
                     <span class="order-radio-target">${_escHtml(targetStr)}</span>
+                    ${langBadge}
                 </div>
                 <div class="order-radio-text">${_escHtml(order.original_text || '')}</div>
-                <span class="order-radio-status ${status}">${statusIcons[status] || ''} ${status}</span>
+                <div class="order-radio-footer">
+                    <span class="order-radio-status ${status}">${statusIcons[status] || ''} ${status}</span>
+                    ${classBadge}${confBadge}${processingHtml}
+                </div>
             </div>`;
         }).join('');
     }
@@ -475,13 +511,63 @@ const KOrders = (() => {
 
     /** Receive order status update from WebSocket. */
     function onOrderStatus(data) {
-        if (!data || !data.order_id) return;
-        const idx = _orders.findIndex(o => o.id === data.order_id);
+        if (!data || !data.id) return;
+        const orderId = data.id || data.order_id;
+        const idx = _orders.findIndex(o => o.id === orderId);
         if (idx >= 0) {
-            _orders[idx].status = data.status;
-            if (data.parsed_order) _orders[idx].parsed_order = data.parsed_order;
-            if (data.parsed_intent) _orders[idx].parsed_intent = data.parsed_intent;
+            // Merge all new fields into existing order
+            Object.assign(_orders[idx], data);
             _renderOrders();
+        } else {
+            // New order we haven't seen — add it
+            _orders.unshift(data);
+            _renderOrders();
+        }
+
+        // If the LLM finished processing, show a gamelog entry
+        if (data.classification && data.status !== 'pending') {
+            const classIcons = {
+                command: '📋', status_request: '❓', acknowledgment: '✅',
+                status_report: '📊', unclear: '⚠️'
+            };
+            const icon = classIcons[data.classification] || '📝';
+            const conf = data.confidence ? ` (${Math.round(data.confidence * 100)}%)` : '';
+            KGameLog.addEntry(
+                `${icon} Order ${data.status}: ${data.classification}${conf}`,
+                data.status === 'validated' ? 'order' : 'info'
+            );
+        }
+
+        // Highlight resolved locations on the map
+        if (data.resolved_locations && data.resolved_locations.length > 0) {
+            _highlightLocations(data.resolved_locations);
+        }
+    }
+
+    /** Temporarily highlight resolved locations on the map. */
+    function _highlightLocations(locations) {
+        if (typeof L === 'undefined' || typeof KMap === 'undefined') return;
+        const map = KMap.getMap();
+        if (!map) return;
+
+        for (const loc of locations) {
+            if (loc.lat == null || loc.lon == null) continue;
+            const marker = L.circleMarker([loc.lat, loc.lon], {
+                radius: 8, color: '#FF6600', fillColor: '#FF9933',
+                fillOpacity: 0.5, weight: 2,
+            }).addTo(map);
+
+            // Add label
+            if (loc.normalized_ref) {
+                marker.bindTooltip(loc.normalized_ref, {
+                    permanent: true, direction: 'top', className: 'location-tooltip'
+                });
+            }
+
+            // Remove after 10 seconds
+            setTimeout(() => {
+                map.removeLayer(marker);
+            }, 10000);
         }
     }
 

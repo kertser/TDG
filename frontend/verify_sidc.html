@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SIDC Verification — Unit Types</title>
+    <script src="https://unpkg.com/milsymbol@2.2.0/dist/milsymbol.js"></script>
+    <style>
+        body { background: #1a1a2e; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+        h1 { color: #4fc3f7; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+        .card { background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px; text-align: center; }
+        .card.error { border-color: #e53935; background: #2a1010; }
+        .card .key { font-size: 10px; color: #888; margin-bottom: 4px; }
+        .card .label { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+        .card .symbols { display: flex; gap: 10px; justify-content: center; margin: 8px 0; }
+        .card .symbols > div { text-align: center; }
+        .card .symbols img { width: 48px; height: 48px; }
+        .card .sidc { font-family: monospace; font-size: 9px; color: #666; word-break: break-all; }
+        .card .entity { font-size: 10px; color: #90caf9; }
+        .card .status { font-size: 11px; font-weight: 700; margin-top: 4px; }
+        .ok { color: #81c784; }
+        .warn { color: #ffb74d; }
+        .fail { color: #ef5350; }
+        .summary { margin: 20px 0; padding: 12px; background: #0f1b38; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <h1>🎖 SIDC Verification — milsymbol v2.2.0</h1>
+    <div class="summary" id="summary"></div>
+    <div class="grid" id="grid"></div>
+
+    <script>
+        async function run() {
+            const resp = await fetch('/config/unit_types.json?v=' + Date.now());
+            const data = await resp.json();
+            const grid = document.getElementById('grid');
+            let ok = 0, warn = 0, fail = 0;
+
+            for (const [key, info] of Object.entries(data)) {
+                if (key.startsWith('_')) continue;
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                const blueSymbol = new ms.Symbol(info.sidc_blue, { size: 40 });
+                const redSymbol = new ms.Symbol(info.sidc_red, { size: 40 });
+
+                const blueSvg = blueSymbol.asSVG();
+                const redSvg = redSymbol.asSVG();
+
+                // Check if symbol contains "?" fallback (unknown)
+                const blueOk = !blueSvg.includes('>?<') && !blueSvg.includes('UNKNOWN');
+                const redOk = !redSvg.includes('>?<') && !redSvg.includes('UNKNOWN');
+
+                // Check if symbol is valid by looking at bbox
+                const blueValid = blueSymbol.getAnchor() != null;
+                const redValid = redSymbol.getAnchor() != null;
+
+                const entity = info.sidc_blue.substring(10, 16);
+                const echelon = info.sidc_blue.substring(8, 10);
+
+                let status, statusClass;
+                if (blueOk && redOk) {
+                    status = '✓ OK';
+                    statusClass = 'ok';
+                    ok++;
+                } else {
+                    // Check if at least a basic icon renders (no ?)
+                    const hasBluePath = blueSvg.includes('<path') || blueSvg.includes('<rect') || blueSvg.includes('<circle');
+                    const hasRedPath = redSvg.includes('<path') || redSvg.includes('<rect') || redSvg.includes('<circle');
+                    if (hasBluePath && hasRedPath) {
+                        status = '⚠ Renders (may fallback)';
+                        statusClass = 'warn';
+                        warn++;
+                    } else {
+                        status = '✗ FAIL';
+                        statusClass = 'fail';
+                        fail++;
+                        card.className += ' error';
+                    }
+                }
+
+                const blueUrl = 'data:image/svg+xml,' + encodeURIComponent(blueSvg);
+                const redUrl = 'data:image/svg+xml,' + encodeURIComponent(redSvg);
+
+                card.innerHTML = `
+                    <div class="key">${key}</div>
+                    <div class="label">${info.label}</div>
+                    <div class="entity">Entity: ${entity} | Ech: ${echelon}</div>
+                    <div class="symbols">
+                        <div>
+                            <img src="${blueUrl}" title="Blue"><br>
+                            <span style="font-size:9px;color:#4fc3f7;">Blue</span>
+                        </div>
+                        <div>
+                            <img src="${redUrl}" title="Red"><br>
+                            <span style="font-size:9px;color:#ef5350;">Red</span>
+                        </div>
+                    </div>
+                    <div class="sidc">${info.sidc_blue}</div>
+                    <div class="status ${statusClass}">${status}</div>
+                `;
+
+                grid.appendChild(card);
+            }
+
+            document.getElementById('summary').innerHTML = `
+                <b>Total:</b> ${ok + warn + fail} unit types |
+                <span class="ok">✓ ${ok} OK</span> |
+                <span class="warn">⚠ ${warn} Fallback</span> |
+                <span class="fail">✗ ${fail} Failed</span>
+            `;
+        }
+        run();
+    </script>
+</body>
+</html>
+

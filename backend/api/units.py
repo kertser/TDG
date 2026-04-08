@@ -517,6 +517,14 @@ async def set_unit_move(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
+    """Queue a move order for the unit. The order is executed on the next tick.
+
+    Creates an Order record with status=validated. The tick engine picks it up
+    in _process_orders, assigns the task to the unit, and movement begins.
+    The unit acknowledges the order immediately but does NOT move until the tick.
+    """
+    from backend.models.order import Order, OrderStatus, OrderSide
+
     side = participant.side.value
     user_id = str(participant.user_id)
     result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
@@ -537,9 +545,6 @@ async def set_unit_move(
         speed_label = "slow"
     if speed_label not in VALID_SPEED_LABELS:
         raise HTTPException(status_code=400, detail="Invalid speed. Valid: slow, fast")
-    # Look up unit-type-specific speed
-    speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
-    unit.move_speed_mps = speeds[speed_label]
 
     # Resolve target coordinates to snail path for display
     target_snail = None
@@ -557,14 +562,46 @@ async def set_unit_move(
         import logging
         logging.getLogger(__name__).warning("Snail path resolution failed: %s", e)
 
-    unit.current_task = {
+    # Build the engine-ready task as parsed_order
+    task_data = {
         "type": "move",
         "target_location": {"lat": body.target_lat, "lon": body.target_lon},
         "target_snail": target_snail,
         "speed": speed_label,
+        "source": "ui_move",
     }
+
+    # Create an Order record — the tick engine will process it
+    unit_side_enum = OrderSide(unit.side.value if hasattr(unit.side, 'value') else unit.side)
+    order = Order(
+        session_id=session_id,
+        issued_by_user_id=participant.user_id,
+        issued_by_side=unit_side_enum,
+        target_unit_ids=[unit_id],
+        order_type="move",
+        original_text=f"Move to {target_snail or f'{body.target_lat:.4f},{body.target_lon:.4f}'} ({speed_label})",
+        parsed_order=task_data,
+        status=OrderStatus.validated,
+    )
+    db.add(order)
+
+    # Pre-set move_speed_mps so the engine has the correct speed when task is assigned
+    speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+    unit.move_speed_mps = speeds[speed_label]
+
     await db.flush()
-    return _serialize_unit(unit)
+
+    # Return unit data + pending order info so frontend can show dashed arrow
+    unit_data = _serialize_unit(unit)
+    unit_data["pending_order"] = {
+        "id": str(order.id),
+        "type": "move",
+        "target_location": {"lat": body.target_lat, "lon": body.target_lon},
+        "target_snail": target_snail,
+        "speed": speed_label,
+        "status": "validated",
+    }
+    return unit_data
 
 
 @router.put("/{session_id}/units/{unit_id}/stop")
@@ -574,6 +611,13 @@ async def stop_unit(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
+    """Queue a halt order for the unit. Executed on the next tick.
+
+    Creates an Order record with status=validated and type=halt.
+    The tick engine clears the unit's current_task when processing it.
+    """
+    from backend.models.order import Order, OrderStatus, OrderSide
+
     side = participant.side.value
     user_id = str(participant.user_id)
     result = await db.execute(select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id))
@@ -588,9 +632,29 @@ async def stop_unit(
             has_authority = await check_subordinate_authority(user_id, unit, session_id, db)
         if not has_authority:
             raise HTTPException(status_code=403, detail="No command authority over this unit")
-    unit.current_task = None
+
+    # Create halt order
+    unit_side_enum = OrderSide(unit.side.value if hasattr(unit.side, 'value') else unit.side)
+    order = Order(
+        session_id=session_id,
+        issued_by_user_id=participant.user_id,
+        issued_by_side=unit_side_enum,
+        target_unit_ids=[unit_id],
+        order_type="halt",
+        original_text="Halt / All stop",
+        parsed_order={"type": "halt", "source": "ui_stop"},
+        status=OrderStatus.validated,
+    )
+    db.add(order)
     await db.flush()
-    return _serialize_unit(unit)
+
+    unit_data = _serialize_unit(unit)
+    unit_data["pending_order"] = {
+        "id": str(order.id),
+        "type": "halt",
+        "status": "validated",
+    }
+    return unit_data
 
 
 # ══════════════════════════════════════════════════
@@ -971,6 +1035,37 @@ async def _compute_viewshed(
     geojson["properties"]["unit_name"] = unit.name
 
     return geojson
+
+
+@router.get("/{session_id}/pending-orders-count")
+async def get_pending_orders_count(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """Return count of validated (pending execution) orders for the requester's side."""
+    from backend.models.order import Order, OrderStatus
+    from sqlalchemy import func
+
+    side = participant.side.value
+    if side in ("admin", "observer"):
+        # Admin/observer sees all pending orders
+        result = await db.execute(
+            select(func.count(Order.id)).where(
+                Order.session_id == session_id,
+                Order.status.in_([OrderStatus.pending, OrderStatus.validated]),
+            )
+        )
+    else:
+        result = await db.execute(
+            select(func.count(Order.id)).where(
+                Order.session_id == session_id,
+                Order.status.in_([OrderStatus.pending, OrderStatus.validated]),
+                Order.issued_by_side == side,
+            )
+        )
+    count = result.scalar() or 0
+    return {"count": count}
 
 
 @router.get("/{session_id}/contacts")

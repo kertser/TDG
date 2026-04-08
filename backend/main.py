@@ -42,6 +42,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS target_unit_id UUID"
         ))
+        # Make sender_id nullable in chat_messages (for unit radio responses)
+        await conn.execute(text(
+            "ALTER TABLE chat_messages ALTER COLUMN sender_id DROP NOT NULL"
+        ))
 
     yield
     # ── Shutdown ──────────────────────────────────────
@@ -87,6 +91,10 @@ def create_app() -> FastAPI:
     # Map Objects endpoints (obstacles, structures)
     from backend.api import map_objects as map_objects_router
     app.include_router(map_objects_router.router, prefix="/api/sessions", tags=["map_objects"])
+
+    # Red AI endpoints
+    from backend.api import red_ai as red_ai_router
+    app.include_router(red_ai_router.router, prefix="/api/sessions", tags=["red_ai"])
 
     # Admin endpoints
     from backend.api import admin as admin_router

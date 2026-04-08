@@ -271,7 +271,8 @@ async def _handle_order_submit(
     data: dict,
     websocket: WebSocket,
 ):
-    """Handle order_submit WS message – creates an order."""
+    """Handle order_submit WS message – creates an order and runs LLM pipeline."""
+    import asyncio
     from backend.models.order import Order, OrderStatus
 
     original_text = data.get("original_text", "").strip()
@@ -282,6 +283,7 @@ async def _handle_order_submit(
         return
 
     target_unit_ids = data.get("target_unit_ids")
+    parsed_order = data.get("parsed_order")  # Direct task (click-to-move)
 
     async with async_session_factory() as db:
         try:
@@ -291,19 +293,22 @@ async def _handle_order_submit(
                 issued_by_side=side,
                 target_unit_ids=[uuid.UUID(uid) for uid in target_unit_ids] if target_unit_ids else None,
                 original_text=original_text,
+                parsed_order=parsed_order,
                 status=OrderStatus.pending,
             )
             db.add(order)
             await db.flush()
 
+            order_id = order.id
             order_data = {
                 "id": str(order.id),
                 "status": order.status.value,
                 "original_text": order.original_text,
+                "processing": not bool(parsed_order),
             }
             await db.commit()
 
-            # Send confirmation to sender
+            # Send immediate confirmation to sender
             await websocket.send_text(
                 json.dumps({"type": "order_status", "data": order_data})
             )
@@ -315,6 +320,13 @@ async def _handle_order_submit(
                 exclude_user=user_id,
                 only_side=side,
             )
+
+            # If no direct task, run LLM pipeline as background task
+            has_direct_task = parsed_order and parsed_order.get("type")
+            if not has_direct_task and original_text:
+                from backend.api.orders import _run_order_pipeline
+                asyncio.create_task(_run_order_pipeline(order_id, session_id, side))
+
         except Exception as e:
             await db.rollback()
             await websocket.send_text(

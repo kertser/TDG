@@ -1142,9 +1142,8 @@ if unit.ammo <= 0:
 | **Phase 3: Session & User Management** | ✅ Complete | Auth (JWT+bcrypt), session CRUD, join, start/pause/tick, participants |
 | **Phase 4: Map — Units, Fog of War** | ✅ Complete | milsymbol rendering, fog-of-war via PostGIS `ST_DWithin`, detection range filtering |
 | **Phase 5: Collaborative Overlays** | ✅ Complete | Drawing tools (arrow, polyline, rect, marker, ellipse, measure), WebSocket sync, overlay context menu (color/width/label/delete) |
-| **Phase 6: Order Entry** | ⚠ Partial | Text order submission, bottom command panel with radio chat, parsed_order for direct task (move), unit selection UI. LLM parsing/intent not yet wired. |
-| **Phase 7: Rules Engine** | ✅ Complete | Tick processing: movement, detection, combat, morale, comms, suppression, ammo, contacts, events |
-| **Phase 8: Red AI** | ❌ Not started | RedAgent model exists, but AI decision loop not implemented |
+| **Phase 6: Order Entry** | ✅ Complete | Text order submission, bottom command panel with radio chat, parsed_order for direct task (move), unit selection UI. **LLM pipeline**: OrderParser (GPT-4.1, bilingual EN/RU, 5 message classifications, few-shot examples), IntentInterpreter (GPT-4.1-mini, tactical action taxonomy), LocationResolver (deterministic: snail/grid/coordinate/relative direction resolution), ResponseGenerator (template-based unit radio responses in RU/EN, state-aware: morale/comms/ammo checks), OrderService orchestrator (full pipeline with background task, WS broadcast of order status + unit responses as chat messages). Keyword fallback when LLM unavailable (unit ref extraction, speed/engagement detection). **Map coordinates support**: units understand lat/lon decimal-degree coordinates in orders (e.g. "move to 48.8566, 24.0122"), LLM parser + keyword fallback both extract coordinate refs, coordinate locations auto-resolve to snail path for engine tasks. **Enriched situational awareness**: units report with full context including: (1) map coordinates + grid ref, (2) compass heading/facing, (3) terrain type + elevation + slope, (4) surrounding terrain analysis (adjacent cells), (5) weather/environment from scenario, (6) game time + time-of-day period, (7) combat status (nominal/under_fire/suppressed/broken), (8) contacts with bearing + coordinates + grid ref, (9) discovered map objects nearby (minefields, obstacles, structures), (10) parent unit + subordinate units with strength, (11) task target with both snail + coordinates, (12) recent events and orders. **Brief sitrep on ack/wilco**: units append position + terrain + threat summary when acknowledging commands. Context built per-unit from DB (terrain cells, elevation cells, contacts, events, orders, map objects, session/scenario environment). **Cost-optimized LLM pipeline**: (a) IntentInterpreter is now fully deterministic (25+ rules, no LLM call — saves 100% of intent API costs), (b) 3-tier model routing: keyword parser runs first; confidence ≥0.80 skips LLM entirely (~60% of messages: acks, reports, clear commands), 0.50-0.80 uses cheap nano model (gpt-4o-mini at $0.15/M), <0.50 uses full model (gpt-4.1); (c) unit roster filtered to issuer's side only (halves prompt tokens); (d) local model fallback via `LOCAL_MODEL_URL` for air-gapped deployments. **Additional context**: route ETA (distance + estimated ticks to target), ammo projection (level + estimated fire ticks remaining), supply chain proximity (nearest logistics/medical/command unit). |
+| **Phase 7: Rules Engine** | ✅ Complete | Tick processing: movement, detection, combat, morale, comms, suppression, ammo, contacts, events || **Phase 8: Red AI** | ✅ Complete | RedAgent model, 4 doctrine profiles (aggressive/balanced/cautious/defensive), knowledge builder (Red-side only, no Blue leaks), LLM decision engine (GPT-4.1 + rule-based fallback), tick-integrated runner (every 3 ticks, 6 when human Red), LLM prompt with terrain/grid/elevation context, Pydantic schemas (RedDecision/RedDecisionBatch), admin API (CRUD + force-decide), frontend Red AI panel (create/update/delete/force-decide). **Rule-based enhancements**: broken/offline units skipped, no-ammo check, critical-damage auto-withdraw, reasoning text in all orders. **Knowledge improvements**: grid references for units/contacts/objects, terrain at unit positions, elevation data, bearing to contacts, enhanced summary stats. **42 tests** covering doctrine, decisions, output validation, prompt safety, schemas. |
 | **Phase 9: Reports, Events, Log** | ⚠ Partial | Events endpoint + frontend panel. Reports endpoint exists. AI-generated reports not wired. |
 | **Phase 10: Polish & Deployment** | ⚠ Partial | Dev workflow works. Dockerfile/nginx not yet tested in production. |
 | **Phase 11: Terrain Intelligence** | ✅ Complete | TerrainCell/ElevationCell models, OSM Overpass analyzer, ESA WorldCover (optional rasterio), Open-Elevation API, terrain merger, 12-type taxonomy, admin painting, elevation slope/aspect, engine integration (tick loads cells), terrain API (12 endpoints inc. SSE streaming + cell-count), frontend overlay + legend + admin panel. **SSE progress bar** for real-time analysis feedback. **High-res support**: depth 1-4 (333m → 12m cells). **Performance**: O(n) spatial-hash neighbor map, STRtree OSM lookup, concurrent elevation batches, batched DB writes, fast enumerate_cells. |
@@ -1155,7 +1154,7 @@ if unit.ammo <= 0:
 |---|---|---|
 | **Admin Panel** | `admin.js`, `admin.py` | Floating admin window with password gate, sub-tabs (Session, Monitor, Builder, CoC, Users, Types). Session wizard (4-step: Setup → Participants → Terrain → Done) for guided setup. |
 | **Scenario Builder** | `scenario_builder.js`, `admin.js` | Interactive map-click unit placement, grid configuration, save/load scenarios. **Resync**: saving a scenario auto-resyncs units/grid in the current session via `POST /api/admin/sessions/{id}/resync-units`. |
-| **God View** | `admin.js`, `admin.py` | Admin toggle to see all units from both sides (bypasses fog-of-war). |
+| **God View** | `admin.js`, `admin.py` | Admin toggle to see all units from both sides (bypasses fog-of-war). **God-view-aware refresh**: `KAdmin.refreshMapUnits()` unified method ensures all unit reload code paths (turn advance, session start/reset, scenario resync/apply) respect god view state — prevents fog-of-war filtered data from overwriting all-units display. |
 | **Unit Dashboard** | `admin.js` | Admin table of all units with focus, edit, delete, split, merge buttons. |
 | **Chain of Command (Public CoC)** | `admin.js` (sidebar CoC tab) | Sidebar CoC tree visible to all players. Commanders can reassign subordinate units. **Drag-and-drop** hierarchy adjustment: drag units onto others to reparent, drag to header to detach. **Button hierarchy**: ⬆ move up (to grandparent), ⬇ move down (become child of sibling), assign to specific parent, ✕ detach. All permission-aware — buttons/drag only for units the user has authority over. |
 | **Chain of Command (Admin CoC)** | `admin.js` (admin CoC sub-tab) | Admin-only full hierarchy editor with parent picker and bulk assign/unassign. Same drag-and-drop + buttons as public CoC. |
@@ -1193,6 +1192,9 @@ if unit.ammo <= 0:
 | **Radio Chat** | `session_ui.js`, `style.css` | Tactical radio channel between session commanders. Select recipient (all or specific commander). Messages stored and delivered to recipients. Blinking LED indicator for unread messages. Military radio styling. |
 | **Editable Unit Types Config** | `frontend/config/unit_types.json` | Unit type definitions (SIDC codes, speeds, personnel, detection/fire ranges, eye heights, indirect fire flag) stored in editable JSON config file instead of hardcoded JavaScript. Extended with `speed_slow`/`speed_fast`, `eye_height`, `indirect_fire` fields. Loaded on startup. Admin Unit Type Editor reads/writes to this config. |
 | **Units Display Config** | `frontend/config/units_config.json` | All non-per-type constants extracted from `units.js` into editable JSON: status icons/colors, speed options, formations, side colors, selection params, merge distance, movement arrow drawing params, heading indicator, viewshed rendering params, size suffixes, default values. Loaded async at `KUnits.init()`. |
+| **Custom Themed Dialogs** | `dialogs.js`, `style.css` | `KDialogs` module replacing all 46+ native `confirm()`/`alert()`/`prompt()` calls across admin.js, units.js, session_ui.js, scenario_builder.js. Provides `KDialogs.confirm()`, `KDialogs.alert()`, `KDialogs.prompt()`, `KDialogs.select()` — all async/Promise-based. Dark military theme matching existing UI. Dangerous actions show red accent. Admin merge flow uses select dropdown instead of text prompt. |
+| **SIDC Code Audit** | `unit_types.json`, `AGENTS.MD` | Fixed 16 duplicate SIDC codes: at_team→120300 (anti-armor), sniper_team→120508 (infantry/sniper subtype), mine_layer→120403 (mine/countermine), obstacle_breacher→120404, engineer_recon→120405, AVLB→120406. All 36 unit types now have unique 20-char MIL-STD-2525D SIDCs. SIDC verification page at `frontend/verify_sidc.html`. |
+| **Overlay Marker Dragging Fix** | `overlays.js` | Fixed KWebSocket.send() call in marker dragend handler — was passing object instead of `(type, data)` args. Labels on all overlay types (arrow, polyline, polygon, marker). Markers draggable for non-observer users with permission check via `KSessionUI.getRole()`/`getSide()`. |
 
 ### Permission / Authority System
 
@@ -1309,6 +1311,11 @@ KShU/
 │   │   ├── ws_manager.py
 │   │   ├── tick_scheduler.py
 │   │   ├── los_service.py        ← LOS viewshed computation (ray casting, terrain-aware)
+│   │   ├── order_parser.py       ← OrderParser: 3-tier model routing (keyword→nano→full), bilingual EN/RU
+│   │   ├── intent_interpreter.py ← IntentInterpreter: fully deterministic (25+ rules, no LLM call)
+│   │   ├── location_resolver.py  ← LocationResolver: deterministic snail/grid/coord/relative resolution
+│   │   ├── response_generator.py ← ResponseGenerator: template-based unit radio responses
+│   │   ├── order_service.py      ← OrderService orchestrator: full pipeline, background task, WS broadcast
 │   │   └── terrain_analysis/      ← Terrain intelligence package
 │   │       ├── __init__.py
 │   │       ├── service.py         ← Orchestrator: analyze_grid()
@@ -1335,12 +1342,22 @@ KShU/
 │   │   ├── engineering.py         ← Engineering unit interactions with tactical objects
 │   │   ├── map_objects.py         ← Tactical object effects on units per tick
 │   │   └── structures.py
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   ├── order.py               ← Pydantic v2 schemas: ParsedOrderData, TacticalIntent, OrderParseResult, UnitRadioResponse, ResolvedLocation, enums
+│   │   └── red_agent.py           ← Pydantic v2 schemas: RedDecision, RedDecisionBatch, RedAgentCreate/Read/Update, enums
+│   ├── prompts/
+│   │   ├── __init__.py
+│   │   ├── order_parser.py        ← System prompt + few-shot examples for bilingual order parsing
+│   │   ├── intent_interpreter.py  ← Prompt for tactical intent extraction
+│   │   └── response_generator.py  ← Template-based + optional LLM unit radio response prompts
 │   └── tests/
 │       ├── __init__.py
 │       ├── test_grid_service.py
 │       ├── test_movement.py
 │       ├── test_detection.py
 │       ├── test_combat.py
+│       ├── test_red_ai.py         ← Red AI 42 tests: doctrine, decisions, validation, prompt safety, schemas
 │       └── test_los_service.py    ← LOS viewshed + has_los tests
 ├── frontend/
 │   ├── index.html
@@ -1367,9 +1384,11 @@ KShU/
 │       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu, radio chat
 │       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
 │       ├── admin.js              ← Admin panel (~4300 lines): dashboard, CoC (drag-and-drop), wizard, god view, users, types, terrain
+│       ├── dialogs.js            ← KDialogs: themed confirm/alert/prompt/select modals replacing native browser dialogs
 │       ├── terrain.js            ← Terrain overlay rendering, legend, elevation heatmap
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 ├── frontend/
+│   ├── verify_sidc.html          ← SIDC verification page: renders all unit types with milsymbol v2.2.0
 │   └── static/
 │       └── topbar-pattern.svg    ← Decorative SVG pattern for UI top bar
 └── scripts/
@@ -1407,22 +1426,22 @@ Example:   10   0    3    10   0    0    14    121100   0000
 
 Entity codes used (Symbol Set 10):
   110000 = Command & Control
-  121100 = Infantry
-  121102 = Mechanized Infantry
-  121104 = Anti-Tank
-  121106 = Sniper
-  121300 = Reconnaissance
-  121302 = Observation
-  120600 = Engineer (generic)
-  120601 = Engineer Reconnaissance
-  120602 = Combat Engineer
-  120603 = Mine/Countermine
-  120604 = Obstacle Breacher
-  120605 = Construction Engineer
-  120606 = Bridge/AVLB
-  130100 = Armor
-  130200 = Mortar
-  130300 = Field Artillery
+  120200 = Armor
+  120300 = Anti-Armor (Anti-Tank)
+  120400 = Engineer (generic)
+  120401 = Combat Engineer
+  120402 = Construction Engineer
+  120403 = Mine/Countermine
+  120404 = Obstacle Breacher
+  120405 = Engineer Reconnaissance
+  120406 = Bridge/AVLB
+  120500 = Infantry
+  120501 = Mechanized Infantry
+  120508 = Sniper
+  120600 = Observer/Surveillance
+  120700 = Reconnaissance
+  130200 = Field Artillery
+  130300 = Mortar
   160700 = Logistics/CSS
 ```
 

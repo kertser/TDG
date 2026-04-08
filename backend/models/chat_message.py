@@ -24,8 +24,8 @@ class ChatMessage(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
     )
-    sender_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    sender_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     sender_name: Mapped[str] = mapped_column(String(100), nullable=False)
     side: Mapped[str] = mapped_column(String(20), nullable=False, default="blue")
