@@ -354,7 +354,7 @@ const KMapObjects = (() => {
         return group;
     }
 
-    // ── Airfield (geographic overlay — real-world scale) ─────
+    // ── Airfield (geographic overlay — real-world scale, rotatable) ─────
 
     function _createAirfieldLayer(obj, color, inactive, opacity) {
         const coords = obj.geometry.coordinates;
@@ -362,23 +362,44 @@ const KMapObjects = (() => {
         const centerLon = coords[0];
         const label = obj.label || 'Airfield';
         const adminOpen = _isAdminOpen();
+        const rotationDeg = (obj.properties && obj.properties.rotation_deg) || 0;
 
         // Real-world dimensions in meters (runway ~700m + apron)
         const lengthM = 700;
         const widthM = 280;   // ratio 2.5:1 matching SVG viewBox 140:56
 
-        // Convert meters to geographic offset
+        // Bounding circle radius: any rotation must fit inside a square of this half-side
+        const diagM = Math.sqrt(lengthM * lengthM + widthM * widthM); // ~754m
+        const halfSide = diagM / 2 + 20; // small padding
+
+        // Square geographic bounds centered on airfield (accommodates any rotation)
         const mPerLon = METERS_PER_DEG * Math.cos(centerLat * Math.PI / 180);
-        const dLat = (widthM / 2) / METERS_PER_DEG;
-        const dLon = (lengthM / 2) / mPerLon;
+        const dLat = halfSide / METERS_PER_DEG;
+        const dLon = halfSide / mPerLon;
 
         const bounds = L.latLngBounds(
             [centerLat - dLat, centerLon - dLon],   // SW
             [centerLat + dLat, centerLon + dLon]     // NE
         );
 
-        // SVG as data URI for imageOverlay (scales with the map)
-        const svgString = STRUCTURE_SVGS.airfield(color);
+        // Build rotated SVG: square viewBox with airfield content centered and rotated
+        // Original SVG content: viewBox 0 0 140 56, center at (70, 28)
+        const svgSize = 160; // square canvas larger than diagonal
+        const cx = svgSize / 2;
+        const cy = svgSize / 2;
+        // Translation to center original content in new canvas
+        const tx = cx - 70;
+        const ty = cy - 28;
+
+        const innerSvg = STRUCTURE_SVGS.airfield(color)
+            .replace(/<svg[^>]*>/, '')  // strip opening svg tag
+            .replace(/<\/svg>/, '');    // strip closing svg tag
+
+        const svgString = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgSize} ${svgSize}" width="${svgSize}" height="${svgSize}">` +
+            `<g transform="translate(${tx},${ty}) rotate(${rotationDeg}, 70, 28)">` +
+            innerSvg +
+            `</g></svg>`;
+
         const dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
 
         const overlay = L.imageOverlay(dataUri, bounds, {
@@ -388,8 +409,8 @@ const KMapObjects = (() => {
 
         const group = L.featureGroup([overlay]);
 
-        // Add a transparent interactive rectangle on top of the airfield
-        // for reliable tooltip and context menu hits
+        // Add a transparent interactive hit area matching the rotated runway footprint
+        // Use a rotated polygon for more accurate click detection
         const hitArea = L.rectangle(bounds, {
             color: 'transparent',
             fillColor: 'transparent',
@@ -399,11 +420,12 @@ const KMapObjects = (() => {
         });
         group.addLayer(hitArea);
 
-        // Tooltip and context menu on the hit area rectangle (not the image)
+        // Tooltip and context menu on the hit area (not the image)
         _bindTooltipAndContext(hitArea, obj);
 
-        // Admin: draggable center handle (small visible grab point)
+        // Admin: drag handle (center) + rotation handle (runway end)
         if (adminOpen) {
+            // ── Center drag handle ──
             const dragMarker = L.marker([centerLat, centerLon], {
                 icon: L.divIcon({
                     className: 'map-obj-icon',
@@ -432,6 +454,65 @@ const KMapObjects = (() => {
             });
 
             group.addLayer(dragMarker);
+
+            // ── Rotation handle (at runway end) ──
+            const halfLen = lengthM / 2;
+            const rotRad = rotationDeg * Math.PI / 180;
+            // SVG X-axis = east, rotation CW. SVG Y-down = geographic south.
+            const handleLat = centerLat - (halfLen * Math.sin(rotRad)) / METERS_PER_DEG;
+            const handleLon = centerLon + (halfLen * Math.cos(rotRad)) / mPerLon;
+
+            const rotHandle = L.marker([handleLat, handleLon], {
+                icon: L.divIcon({
+                    className: 'map-obj-icon',
+                    html: '<div style="width:16px;height:16px;border:2px solid #ff9800;border-radius:50%;cursor:pointer;background:rgba(255,152,0,0.25);display:flex;align-items:center;justify-content:center;font-size:10px;" title="Drag to rotate">↻</div>',
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8],
+                }),
+                draggable: true,
+            });
+
+            rotHandle.on('drag', () => {
+                // Live preview: compute angle, rebuild SVG on-the-fly
+                const handleLL = rotHandle.getLatLng();
+                const dLatM = (handleLL.lat - centerLat) * METERS_PER_DEG;
+                const dLonM = (handleLL.lng - centerLon) * mPerLon;
+                // In SVG coords: X=east, Y=south (negative lat)
+                let newDeg = Math.atan2(-dLatM, dLonM) * 180 / Math.PI;
+                if (newDeg < 0) newDeg += 360;
+                // Rebuild SVG with preview rotation
+                const previewSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgSize} ${svgSize}" width="${svgSize}" height="${svgSize}">` +
+                    `<g transform="translate(${tx},${ty}) rotate(${newDeg.toFixed(1)}, 70, 28)">` +
+                    innerSvg +
+                    `</g></svg>`;
+                const previewUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg);
+                overlay.setUrl(previewUri);
+            });
+
+            rotHandle.on('dragend', async () => {
+                const handleLL = rotHandle.getLatLng();
+                const dLatM = (handleLL.lat - centerLat) * METERS_PER_DEG;
+                const dLonM = (handleLL.lng - centerLon) * mPerLon;
+                let newDeg = Math.atan2(-dLatM, dLonM) * 180 / Math.PI;
+                if (newDeg < 0) newDeg += 360;
+                newDeg = Math.round(newDeg);
+
+                const sid = _sessionId || KSessionUI?.getSessionId();
+                const token = KSessionUI?.getToken();
+                const headers = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const updatedProps = { ...(obj.properties || {}), rotation_deg: newDeg };
+                try {
+                    await fetch(`/api/sessions/${sid}/map-objects/${obj.id}`, {
+                        method: 'PUT', headers,
+                        body: JSON.stringify({ properties: updatedProps }),
+                    });
+                    obj.properties = updatedProps;
+                    render();
+                } catch (err) { console.warn('Rotate airfield failed:', err); }
+            });
+
+            group.addLayer(rotHandle);
         }
 
         // Effect radius circle
@@ -659,7 +740,8 @@ const KMapObjects = (() => {
         const label = obj.label || obj.object_type.replace(/_/g, ' ');
         const status = obj.is_active ? '✓ Active' : '✗ Inactive';
         const prot = obj.definition ? obj.definition.protection_bonus : 1.0;
-        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}</span>`;
+        const rotDeg = (obj.properties && obj.properties.rotation_deg) ? ` · ↻${obj.properties.rotation_deg}°` : '';
+        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}${rotDeg}</span>`;
         // Show discovery status in admin mode
         if (_isAdminOpen()) {
             const bIcon = obj.discovered_by_blue ? '👁' : '🚫';
