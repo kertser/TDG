@@ -12,6 +12,8 @@ const KSessionUI = (() => {
     let _canAdvanceTurn = false;   // whether user can advance turns
     let _scenarioTitle = null;
     let _scenarioDescription = null;
+    let _scenarioEnvironment = null;
+    let _scenarioObjectives = null;
 
     function getToken() { return currentToken; }
     function getUserId() { return currentUserId; }
@@ -188,7 +190,7 @@ const KSessionUI = (() => {
     }
 
     function _showScenarioDescription() {
-        if (!_scenarioDescription && !_scenarioTitle) return;
+        if (!_scenarioDescription && !_scenarioTitle && !_scenarioObjectives && !_scenarioEnvironment) return;
         const modal = document.getElementById('scenario-desc-modal');
         const titleEl = document.getElementById('scenario-desc-title');
         const contentEl = document.getElementById('scenario-desc-content');
@@ -196,9 +198,54 @@ const KSessionUI = (() => {
 
         if (titleEl) titleEl.textContent = `📋 ${_scenarioTitle || 'Scenario Briefing'}`;
         if (contentEl) {
-            contentEl.textContent = _scenarioDescription || 'No description available.';
+            // Build rich HTML briefing
+            let html = '';
+
+            // Description
+            const desc = _scenarioDescription || '';
+            if (desc) {
+                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#4fc3f7;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Situation</div><div style="color:#ccc;font-size:13px;line-height:1.6;white-space:pre-wrap;">${_escBriefing(desc)}</div></div>`;
+            }
+
+            // Task / Mission
+            const objectives = _scenarioObjectives || {};
+            const taskText = objectives.task_text || objectives.task || '';
+            if (taskText) {
+                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ff9800;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Mission / Task</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;white-space:pre-wrap;background:rgba(255,152,0,0.06);border-left:3px solid #ff9800;padding:8px 12px;border-radius:0 4px 4px 0;">${_escBriefing(taskText)}</div></div>`;
+            }
+
+            // Environment
+            const env = _scenarioEnvironment || {};
+            const envKeys = ['weather', 'visibility', 'wind', 'precipitation', 'light_level', 'temperature'];
+            const hasEnv = envKeys.some(k => env[k] != null);
+            if (hasEnv) {
+                const envLabels = { weather: '☁ Weather', visibility: '👁 Visibility', wind: '💨 Wind', precipitation: '🌧 Precipitation', light_level: '🔆 Light', temperature: '🌡 Temperature' };
+                let envHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;">';
+                envKeys.forEach(k => {
+                    if (env[k] != null) {
+                        let val = String(env[k]).replace(/_/g, ' ');
+                        if (k === 'temperature') val += '°C';
+                        envHtml += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="color:#78909c;font-size:11px;">${envLabels[k] || k}</span><span style="color:#e0e0e0;font-size:12px;font-weight:600;">${_escBriefing(val)}</span></div>`;
+                    }
+                });
+                envHtml += '</div>';
+                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#81c784;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Environment Conditions</div><div style="background:rgba(129,199,132,0.06);border:1px solid rgba(129,199,132,0.15);border-radius:6px;padding:10px 14px;">${envHtml}</div></div>`;
+            }
+
+            if (!html) {
+                html = '<div style="color:#888;font-style:italic;">No description available.</div>';
+            }
+
+            contentEl.innerHTML = html;
         }
         modal.style.display = 'flex';
+    }
+
+    function _escBriefing(s) {
+        if (!s) return '';
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
     }
 
     function _clearAuthError() {
@@ -295,6 +342,8 @@ const KSessionUI = (() => {
         _canAdvanceTurn = false;
         _scenarioTitle = null;
         _scenarioDescription = null;
+        _scenarioEnvironment = null;
+        _scenarioObjectives = null;
 
         // Reset UI
         document.getElementById('user-info').textContent = '';
@@ -451,6 +500,8 @@ const KSessionUI = (() => {
                 const sessData = await sessResp.json();
                 _scenarioTitle = sessData.scenario_title || sessData.name;
                 _scenarioDescription = sessData.scenario_description;
+                _scenarioEnvironment = sessData.scenario_environment || null;
+                _scenarioObjectives = sessData.scenario_objectives || null;
             }
         } catch {}
 
@@ -660,9 +711,18 @@ const KSessionUI = (() => {
         }
     }
 
+    /** Update cached scenario data (called when admin edits scenario details). */
+    function updateScenarioCache(title, description, objectives, environment) {
+        if (title) _scenarioTitle = title;
+        if (description !== undefined) _scenarioDescription = description;
+        if (objectives !== undefined) _scenarioObjectives = objectives;
+        if (environment !== undefined) _scenarioEnvironment = environment;
+    }
+
     return {
         init, getToken, getUserId, getUserName: () => currentUserName,
         getSessionId, getRole, getSide, canAdvanceTurn,
         loadSessions, joinAndEnter, getSetting, updateTurnBadge: _updateTurnBadge,
+        updateScenarioCache,
     };
 })();

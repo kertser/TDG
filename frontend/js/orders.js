@@ -45,13 +45,19 @@ const KOrders = (() => {
                 btn.classList.add('active');
                 const tabPanel = document.getElementById(btn.dataset.cmdTab);
                 if (tabPanel) tabPanel.classList.add('active');
-                // Clear unread when switching to radio tab
+                // Clear unread when switching to radio tab + scroll to bottom
                 if (btn.dataset.cmdTab === 'cmd-radio') {
                     _radioUnread = 0;
                     _setLastRead();
                     _updateRadioLed();
+                    _scrollRadioToBottom();
                 }
             });
+        });
+
+        // ── Auto-scroll radio messages when panel becomes visible (hover/expand) ──
+        panel.addEventListener('mouseenter', () => {
+            _scrollRadioToBottom();
         });
 
         // ── Pin / unpin toggle (auto-collapse vs stay-open) ──
@@ -74,7 +80,11 @@ const KOrders = (() => {
             maxBtn.addEventListener('click', () => {
                 const isMax = panel.classList.contains('maximized');
                 panel.classList.toggle('maximized', !isMax);
-                if (!isMax) panel.classList.add('expanded');
+                // Don't add .expanded — let hover/auto-collapse work naturally
+                // If restoring from maximized, also clear expanded
+                if (isMax) {
+                    panel.classList.remove('expanded');
+                }
                 maxBtn.innerHTML = isMax
                     ? '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="2" fill="none"/></svg>'
                     : '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="1" y="5" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5 5V3h8v8h-2" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
@@ -161,7 +171,48 @@ const KOrders = (() => {
 
     function _autoResize(ta) {
         ta.style.height = 'auto';
-        ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+        const panel = document.getElementById('command-panel');
+        const maxH = panel && panel.classList.contains('maximized') ? 400 : 120;
+        ta.style.height = Math.min(ta.scrollHeight, maxH) + 'px';
+    }
+
+    /** Scroll the radio messages container to the bottom, with retries for CSS transitions. */
+    function _scrollRadioToBottom() {
+        const container = document.getElementById('radio-messages');
+        if (!container) return;
+        // Immediate attempt
+        container.scrollTop = container.scrollHeight;
+        // Retry after animation frame (layout may not be ready)
+        requestAnimationFrame(() => {
+            container.scrollTop = container.scrollHeight;
+        });
+        // Retry after CSS transition completes (~300ms)
+        setTimeout(() => {
+            container.scrollTop = container.scrollHeight;
+        }, 320);
+    }
+
+    /** Switch to Radio tab → Units (operative) channel, and scroll to bottom. */
+    function _switchToRadioUnits() {
+        // Activate Radio tab
+        document.querySelectorAll('.cmd-tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.cmd-tab-panel').forEach(p => p.classList.remove('active'));
+        const radioTabBtn = document.querySelector('.cmd-tab-btn[data-cmd-tab="cmd-radio"]');
+        if (radioTabBtn) radioTabBtn.classList.add('active');
+        const radioPanel = document.getElementById('cmd-radio');
+        if (radioPanel) radioPanel.classList.add('active');
+
+        // Switch to operative (Units) channel
+        document.querySelectorAll('.radio-ch-btn').forEach(b => b.classList.remove('active'));
+        const unitsChBtn = document.querySelector('.radio-ch-btn[data-radio-ch="operative"]');
+        if (unitsChBtn) unitsChBtn.classList.add('active');
+        _radioChannel = 'operative';
+        _renderRadioMessages();
+
+        // Clear unread
+        _radioUnread = 0;
+        _setLastRead();
+        _updateRadioLed();
     }
 
     function _updateMeta() {
@@ -314,6 +365,9 @@ const KOrders = (() => {
                 _renderOrders();
                 KUnits.clearSelection();
                 updateSelectedDisplay([]);
+
+                // Auto-switch to Radio → Units channel to see the unit response
+                _switchToRadioUnits();
             } else {
                 const msg = result.detail || 'Order submission failed';
                 KGameLog.addEntry(`⚠ Order failed: ${msg}`, 'info');
@@ -427,7 +481,7 @@ const KOrders = (() => {
         }).join('');
 
         // Scroll to bottom
-        container.scrollTop = container.scrollHeight;
+        _scrollRadioToBottom();
     }
 
     // ── Orders History (sidebar tab) ──

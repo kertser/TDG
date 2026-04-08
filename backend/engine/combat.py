@@ -106,6 +106,34 @@ WEAPON_RANGE = {
 DAMAGE_SCALAR = 0.02  # ~2% strength loss per tick under sustained fire
 
 
+def _fire_intensity(damage: float) -> str:
+    """Map damage value to a natural language fire intensity description."""
+    if damage < 0.005:
+        return "ineffective fire"
+    elif damage < 0.015:
+        return "light fire"
+    elif damage < 0.035:
+        return "moderate fire"
+    elif damage < 0.06:
+        return "heavy fire"
+    else:
+        return "devastating fire"
+
+
+def _strength_category(strength: float) -> str:
+    """Map strength value to a natural language description."""
+    if strength > 0.85:
+        return "at full strength"
+    elif strength > 0.65:
+        return "lightly damaged"
+    elif strength > 0.45:
+        return "reduced to ~50%"
+    elif strength > 0.25:
+        return "heavily damaged"
+    else:
+        return "near destruction"
+
+
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlat = (lat2 - lat1) * METERS_PER_DEG_LAT
     dlon = (lon2 - lon1) * METERS_PER_DEG_LON_AT_48
@@ -326,17 +354,20 @@ def process_combat(
                 "event_type": "unit_destroyed",
                 "actor_unit_id": attacker.id,
                 "target_unit_id": target.id,
-                "text_summary": f"{target.name} destroyed by {attacker.name}",
+                "text_summary": f"{attacker.name} destroyed {target.name}",
                 "payload": {"attacker": str(attacker.id), "target": str(target.id)},
             })
         else:
+            # Natural language combat description
+            fire_desc = _fire_intensity(damage)
+            strength_desc = _strength_category(target.strength)
             events.append({
                 "event_type": "combat",
                 "actor_unit_id": attacker.id,
                 "target_unit_id": target.id,
                 "text_summary": (
-                    f"{attacker.name} engaging {target.name} "
-                    f"(dmg={damage:.3f}, supp={suppression_inflicted:.3f})"
+                    f"{attacker.name} engaging {target.name} — "
+                    f"{fire_desc}, target {strength_desc}"
                 ),
                 "payload": {
                     "attacker": str(attacker.id),

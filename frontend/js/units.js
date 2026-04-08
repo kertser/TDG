@@ -4,6 +4,7 @@
  *  Selection:
  *    Left-click        = select unit (replaces previous selection).
  *    Shift+left-click  = add/remove unit from selection.
+ *    Alt+left-click    = cycle through stacked/overlapping units.
  *    Right-click       = open detail popup.
  *    Left-drag on map  = rubber-band mass selection.
  *
@@ -460,6 +461,28 @@ const KUnits = (() => {
         }
     }
 
+    // ── Unit stack cycling state ──
+    let _lastStackCycleIdx = {};  // posKey → last selected index
+    const STACK_THRESHOLD_DEG = 0.0004; // ~40m
+
+    function _getStackKey(lat, lon) {
+        // Round to grid to detect nearby units
+        const rLat = Math.round(lat / STACK_THRESHOLD_DEG) * STACK_THRESHOLD_DEG;
+        const rLon = Math.round(lon / STACK_THRESHOLD_DEG) * STACK_THRESHOLD_DEG;
+        return `${rLat.toFixed(5)},${rLon.toFixed(5)}`;
+    }
+
+    function _findStackedUnits(unitId) {
+        const u = allUnitsData.find(x => x.id === unitId);
+        if (!u || u.lat == null) return [u];
+        const stacked = allUnitsData.filter(x =>
+            !x.is_destroyed && x.lat != null &&
+            Math.abs(x.lat - u.lat) < STACK_THRESHOLD_DEG &&
+            Math.abs(x.lon - u.lon) < STACK_THRESHOLD_DEG
+        );
+        return stacked.length > 1 ? stacked : [u];
+    }
+
     function render(units) {
         if (!unitsLayer) return;
         unitsLayer.clearLayers();
@@ -490,7 +513,14 @@ const KUnits = (() => {
             });
 
             const isDraggable = _adminDragEnabled;
-            const marker = L.marker([u.lat, u.lon], { icon, draggable: isDraggable });
+            // Own-side units render on top of enemy units
+            const mySide = KSessionUI.getSide();
+            const isOwnSide = u.side === mySide;
+            const marker = L.marker([u.lat, u.lon], {
+                icon,
+                draggable: isDraggable,
+                zIndexOffset: isOwnSide ? 1000 : 0,
+            });
 
             // Tooltip with unit name + range summary + size + status
             const detR = u.detection_range_m || defaultDetRange;
@@ -498,6 +528,10 @@ const KUnits = (() => {
             const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
             const status = u.unit_status || 'idle';
             const statusColor = STATUS_COLORS[status] || '#aaa';
+            // Stack count for overlapping units
+            const _stackCount = units.filter(x => !x.is_destroyed && x.lat != null
+                && Math.abs(x.lat - u.lat) < STACK_THRESHOLD_DEG
+                && Math.abs(x.lon - u.lon) < STACK_THRESHOLD_DEG).length;
             let ttStatus = status;
             let ttStatusIcon = STATUS_ICONS[status] || '•';
             const ttSpeed = u.current_task && u.current_task.speed;
@@ -507,7 +541,9 @@ const KUnits = (() => {
             }
             const tooltipEyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
             const tooltipEyeTag = tooltipEyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${tooltipEyeH}m)</span>` : '';
-            const tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span><br>`
+            const tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span>`
+                + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
+                + `<br>`
                 + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
                 + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}${tooltipEyeTag}</span> `
                 + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
@@ -531,12 +567,23 @@ const KUnits = (() => {
                 }
             });
 
-            // LEFT-CLICK: select/deselect
+            // LEFT-CLICK: select/deselect — with Alt+click stack cycling for overlapping units
             marker.on('click', (e) => {
                 L.DomEvent.stopPropagation(e);
                 _closeUnitContextMenu();
                 const shiftKey = e.originalEvent && e.originalEvent.shiftKey;
-                _selectUnit(u.id, shiftKey);
+                const altKey = e.originalEvent && e.originalEvent.altKey;
+                const stack = _findStackedUnits(u.id);
+                if (stack.length > 1 && altKey && !shiftKey) {
+                    // Alt+click: cycle through stacked units
+                    const posKey = _getStackKey(u.lat, u.lon);
+                    const lastIdx = _lastStackCycleIdx[posKey] || 0;
+                    const nextIdx = (lastIdx + 1) % stack.length;
+                    _lastStackCycleIdx[posKey] = nextIdx;
+                    _selectUnit(stack[nextIdx].id, false);
+                } else {
+                    _selectUnit(u.id, shiftKey);
+                }
             });
 
             // RIGHT-CLICK: context menu
@@ -1873,6 +1920,13 @@ const KUnits = (() => {
         }
         if (t.target_lat != null && t.target_lon != null) {
             return { lat: t.target_lat, lon: t.target_lon };
+        }
+        // Resolve target_unit_id to position from allUnitsData
+        if (t.target_unit_id) {
+            const tgt = allUnitsData.find(x => x.id === t.target_unit_id);
+            if (tgt && tgt.lat != null && tgt.lon != null) {
+                return { lat: tgt.lat, lon: tgt.lon };
+            }
         }
         return null;
     }

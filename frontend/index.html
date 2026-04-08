@@ -1055,13 +1055,13 @@
 
     <!-- ── Scenario Description Modal ──────────────── -->
     <div id="scenario-desc-modal" class="admin-modal-overlay" style="display:none;">
-        <div class="admin-modal" style="max-width:520px;">
+        <div class="admin-modal" style="max-width:560px;">
             <div class="admin-modal-header">
                 <span id="scenario-desc-title">📋 Scenario Briefing</span>
                 <button class="admin-modal-close" id="scenario-desc-close" title="Close">✕</button>
             </div>
-            <div class="admin-modal-body" style="max-height:60vh;overflow-y:auto;">
-                <div id="scenario-desc-content" style="white-space:pre-wrap;line-height:1.6;color:#ccc;font-size:13px;"></div>
+            <div class="admin-modal-body" style="max-height:65vh;overflow-y:auto;">
+                <div id="scenario-desc-content" style="line-height:1.6;color:#ccc;font-size:13px;"></div>
             </div>
             <div class="admin-modal-footer">
                 <button id="scenario-desc-ok" class="admin-btn" style="flex:1;">OK</button>
@@ -1220,11 +1220,11 @@
                 <div class="rules-section">
                     <div class="rules-section-title">Getting Started</div>
                     <ol>
-                        <li><b>Register / Login</b> — Enter a display name in the Session tab.</li>
-                        <li><b>Join a Session</b> — Select a session from the list and choose your side (Blue/Red) and role.</li>
-                        <li><b>Start</b> — Once joined, click <b>Start Session</b> to spawn units from the scenario.</li>
-                        <li><b>Issue Orders</b> — Select units on the map, then type orders in the <b>command bar</b> at the bottom of the map.</li>
-                        <li><b>Tactical Radio</b> — Switch to the <b>Radio</b> tab in the command bar to communicate with other commanders.</li>
+                        <li><b>Register / Login</b> — Enter a callsign and password. First time? Click <b>Register</b>. Returning? Click <b>Login</b>.</li>
+                        <li><b>Join a Session</b> — Select a session from the list. Your side and role are assigned by the admin.</li>
+                        <li><b>Start</b> — Once all players have joined, click <b>Start Session</b> to spawn units from the scenario.</li>
+                        <li><b>Issue Orders</b> — Select units on the map, then type orders in the <b>📡 Orders</b> tab of the command panel at the bottom of the map.</li>
+                        <li><b>Tactical Radio</b> — Switch to the <b>📻 Radio</b> tab to communicate with other commanders and monitor unit reports.</li>
                         <li><b>Advance Turns</b> — Click <b>Execute Orders</b> in the top bar to submit your orders and advance the simulation by one turn.</li>
                     </ol>
                 </div>
@@ -1235,8 +1235,10 @@
                         <li><b>Pan</b> — Middle-mouse-button drag (left-click is reserved for selection &amp; tools).</li>
                         <li><b>Zoom</b> — Scroll wheel, or use +/− controls.</li>
                         <li><b>Select units</b> — Left-click a unit marker. Shift+click or rubber-band drag to multi-select.</li>
+                        <li><b>Stacked units</b> — Alt+click cycles through overlapping units at the same position.</li>
                         <li><b>Unit context menu</b> — Right-click a unit for actions (move, formation, split, merge, etc.).</li>
                         <li><b>Drawing tools</b> — Use the top-right control panel to draw arrows, lines, rectangles, markers, ellipses, and measurements.</li>
+                        <li><b>Map toggles</b> — Bottom row of the control panel toggles visibility of grid, units, overlays, contacts, labels, and terrain.</li>
                     </ul>
                 </div>
 
@@ -1254,37 +1256,67 @@
                 </div>
 
                 <div class="rules-section">
-                    <div class="rules-section-title">Orders</div>
-                    <p>Select one or more units, then type a free-text order. The system parses your intent and assigns tasks. Supported order types include:</p>
+                    <div class="rules-section-title">Command Panel</div>
+                    <p>The bottom command panel has two tabs:</p>
                     <ul>
-                        <li><b>Move</b> — <code>1st Plt move to B4-3</code></li>
+                        <li><b>📡 Orders</b> — Select one or more units (or click <b>👥 All</b> to select all your units), then type a free-text order. Press <kbd>Ctrl+Enter</kbd> to send. The system parses your intent and assigns tasks to the selected units.</li>
+                        <li><b>📻 Radio</b> — Send tactical messages to other commanders. Choose a recipient from the dropdown, or broadcast to all. The radio has three channel filters:
+                            <ul style="margin-top:4px;">
+                                <li><b>All</b> — All messages (chat + unit reports + orders)</li>
+                                <li><b>💬 Chat</b> — Only messages between human commanders</li>
+                                <li><b>📡 Units</b> — Only unit radio responses, status reports, and outgoing orders</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <p style="margin-top:6px;">Use the <b>📌 pin</b> button to keep the panel open, or the <b>⬜ maximize</b> button for a larger view.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Orders</div>
+                    <p>Select units, then type a natural-language order. The system understands grid references, coordinates, and tactical intent. Examples:</p>
+                    <ul>
+                        <li><b>Move</b> — <code>1st Plt move to B4-3</code> or <code>Move to 48.856, 24.012</code></li>
                         <li><b>Attack</b> — <code>Attack enemy position at C6</code></li>
                         <li><b>Defend</b> — <code>Defend current position</code></li>
                         <li><b>Observe</b> — <code>Observe sector from D2 to E5</code></li>
                     </ul>
+                    <p style="margin-top:4px;">You can also set move targets via <b>right-click → Move (🐢 Slow / ⚡ Fast)</b> on a unit, then click a destination on the map. Units acknowledge orders via radio with a status report.</p>
                 </div>
 
                 <div class="rules-section">
-                    <div class="rules-section-title">Fog of War</div>
-                    <p>You can only see enemy units that are within <b>detection range</b> of your own units. Enemy contacts appear with limited information and may become <b>stale</b> if not re-detected. Your own units are always fully visible.</p>
+                    <div class="rules-section-title">Fog of War &amp; Detection</div>
+                    <p>You can only see enemy units within your units' <b>line of sight</b> (LOS). Detection uses ray-casting: terrain obstacles like forests, buildings, and hills block visibility. Enemy contacts appear with limited information (approximate type and strength estimate) and may become <b>stale</b> if not re-detected.</p>
+                    <p>Your own units are always fully visible with all stats. Enemy strength is shown as approximate categories (full / reduced / weakened / critical).</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Terrain &amp; Map Objects</div>
+                    <p>The map features <b>terrain intelligence</b> (12 terrain types: road, open, forest, urban, water, fields, marsh, desert, scrub, bridge, mountain, orchard) that affects movement speed, visibility, protection, and combat effectiveness.</p>
+                    <p><b>Tactical map objects</b> include barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, and more. Some objects are hidden until discovered by your units' LOS. Minefields damage and slow units; barbed wire slows movement; entrenchments provide protection.</p>
                 </div>
 
                 <div class="rules-section">
                     <div class="rules-section-title">Simulation Mechanics</div>
-                    <p>Each turn advances game time. The rules engine resolves:</p>
+                    <p>Each turn advances game time (default: 1 minute per turn). The rules engine resolves:</p>
                     <ul>
-                        <li><b>Movement</b> — Units advance toward targets; terrain and suppression affect speed.</li>
-                        <li><b>Detection</b> — Opposing units are detected based on range, terrain visibility, and posture.</li>
-                        <li><b>Combat</b> — Engaged units exchange fire. Damage reduces strength; fire causes suppression.</li>
-                        <li><b>Morale</b> — Casualties and suppression erode morale. Units may break and retreat.</li>
-                        <li><b>Communications</b> — Heavy suppression can degrade comms, delaying orders.</li>
+                        <li><b>Movement</b> — Units advance toward targets; terrain, slope, and suppression affect speed. Two speed modes: 🐢 Slow (tactical) and ⚡ Fast (rapid).</li>
+                        <li><b>Detection</b> — LOS-based visibility checks between opposing units. Height advantage improves detection range.</li>
+                        <li><b>Combat</b> — Engaged units exchange fire. Damage reduces strength; fire causes suppression. Elevation advantage boosts effectiveness (+15%). Artillery units auto-support attacking allies.</li>
+                        <li><b>Morale</b> — Casualties and suppression erode morale. Nearby friendlies provide mutual support. Units with morale below 15% break and retreat. Destroying enemies boosts nearby units' morale.</li>
+                        <li><b>Communications</b> — Heavy suppression can degrade comms, delaying orders. Offline units continue their last task.</li>
                         <li><b>Ammo</b> — Firing consumes ammunition. Units without ammo cannot engage.</li>
+                        <li><b>Return Fire</b> — Units under attack with no orders automatically engage their nearest attacker.</li>
                     </ul>
                 </div>
 
                 <div class="rules-section">
                     <div class="rules-section-title">Chain of Command</div>
-                    <p>Units are organized in a hierarchy. Commanders are assigned to units and have authority over their subordinates. The <b>CoC</b> tab shows the hierarchy for your side. If no units have assigned commanders, all players on a side can command any unit.</p>
+                    <p>Units are organized in a hierarchy visible in the <b>CoC</b> sidebar tab. Commanders have authority over their subordinates. If no units have assigned commanders, all players on a side can command any unit. You can <b>drag and drop</b> units in the CoC tree to reorganize the hierarchy.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Scenario Briefing</div>
+                    <p>Click the <b>📋 session name</b> in the top bar to view the scenario briefing, including the situation, mission/task, and environmental conditions (weather, visibility, wind, light level).</p>
                 </div>
 
                 <div class="rules-section">
@@ -1293,7 +1325,10 @@
                         <tr><td><kbd>Esc</kbd></td><td>Cancel current drawing / deselect units</td></tr>
                         <tr><td><kbd>Right-click</kbd></td><td>Finish drawing / open unit context menu</td></tr>
                         <tr><td><kbd>Shift+Click</kbd></td><td>Add/remove unit from selection</td></tr>
+                        <tr><td><kbd>Alt+Click</kbd></td><td>Cycle through stacked/overlapping units</td></tr>
                         <tr><td><kbd>Left drag</kbd></td><td>Rubber-band select multiple units</td></tr>
+                        <tr><td><kbd>Ctrl+Enter</kbd></td><td>Submit order (in command panel)</td></tr>
+                        <tr><td><kbd>Enter</kbd></td><td>Send radio message (in radio tab)</td></tr>
                     </table>
                 </div>
             </div>

@@ -7,6 +7,8 @@ AGENTS.MD Section 8.6:
   morale_delta -= 0.10 if strength < 0.25
   morale_delta += 0.01 if not_in_combat
   morale_delta += 0.02 if friendly_units_nearby
+  morale_delta += 0.05 if enemy destroyed nearby
+  morale_delta -= 0.01 if march_ticks > 10 (fatigue)
   if morale < 0.15: unit breaks
 """
 
@@ -41,6 +43,7 @@ def _get_position(unit):
 def process_morale(
     all_units: list,
     under_fire: set[uuid.UUID],
+    tick_events: list[dict] | None = None,
 ) -> list[dict]:
     """
     Update morale for all units.
@@ -48,6 +51,7 @@ def process_morale(
     Args:
         all_units: all unit ORM objects (mutated in-place)
         under_fire: set of unit IDs that took fire this tick
+        tick_events: events generated this tick (for enemy-destroyed morale boost)
 
     Returns:
         list of morale-related event dicts
@@ -64,6 +68,21 @@ def process_morale(
         if pos:
             positions[u.id] = pos
             sides[u.id] = u.side.value if hasattr(u.side, 'value') else str(u.side)
+
+    # Collect enemy-destroyed events for morale boost
+    destroyed_enemy_positions = []  # (lat, lon, destroyed_side)
+    if tick_events:
+        for evt in tick_events:
+            if evt.get("event_type") == "unit_destroyed":
+                tid = evt.get("target_unit_id")
+                if tid:
+                    for u in all_units:
+                        if u.id == tid:
+                            pos = _get_position(u)
+                            side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+                            if pos:
+                                destroyed_enemy_positions.append((pos[0], pos[1], side))
+                            break
 
     for unit in all_units:
         if unit.is_destroyed:
@@ -102,6 +121,28 @@ def process_morale(
                 if _distance_m(unit_pos[0], unit_pos[1], other_pos[0], other_pos[1]) <= SUPPORT_RADIUS_M:
                     delta += 0.02
                     break  # only one bonus
+
+        # ── Enemy destroyed nearby → morale boost ──
+        if unit_pos and destroyed_enemy_positions:
+            for d_lat, d_lon, d_side in destroyed_enemy_positions:
+                if d_side != unit_side:  # destroyed unit is enemy
+                    dist = _distance_m(unit_pos[0], unit_pos[1], d_lat, d_lon)
+                    if dist <= 2000:  # within 2km
+                        delta += 0.05  # significant morale boost
+                        break  # one bonus per tick
+
+        # ── Long march fatigue → morale erosion ──
+        task = unit.current_task
+        if task and task.get("type") in ("move", "advance"):
+            march_ticks = task.get("march_ticks", 0) + 1
+            task["march_ticks"] = march_ticks
+            unit.current_task = task  # mark dirty
+            if march_ticks > 10:
+                delta -= 0.01  # fatigue from sustained marching
+        elif task and "march_ticks" in task:
+            # Reset march counter when not moving
+            del task["march_ticks"]
+            unit.current_task = task
 
         # Apply delta
         new_morale = max(0.0, min(1.0, morale + delta))

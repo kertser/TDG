@@ -41,6 +41,8 @@ class SessionRead(BaseModel):
     name: str | None = None
     scenario_title: str | None = None
     scenario_description: str | None = None
+    scenario_environment: dict | None = None
+    scenario_objectives: dict | None = None
 
 
 class ParticipantRead(BaseModel):
@@ -173,6 +175,8 @@ async def get_session(session_id: uuid.UUID, db: DB):
         name=s.name or (s.scenario.title if s.scenario else None),
         scenario_title=s.scenario.title if s.scenario else None,
         scenario_description=s.scenario.description if s.scenario else None,
+        scenario_environment=s.scenario.environment if s.scenario else None,
+        scenario_objectives=s.scenario.objectives if s.scenario else None,
     )
 
 

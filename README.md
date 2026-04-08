@@ -14,9 +14,9 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Tactical Map Objects** — Static battlefield objects: barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, command posts, fuel depots, airfields (rotatable), etc. NATO-style markers with per-side discovery system
 - **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge
 - **Admin Panel** — Floating admin window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor
-- **Order System** — Text order submission with parsed task assignment (move with snail grid reference, attack, defend); LLM integration planned
+- **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with situational awareness
 - **Game Log** — Append-only event timeline, reports panel, unified game log
-- **Radio Chat** — Tactical radio channel between session commanders with recipient selection and unread indicator
+- **Radio Chat** — Tactical radio channel between session commanders with recipient selection, three channel filters (All / 💬 Chat / 📡 Units), and unread indicator. Auto-generated unit radio chatter: idle reports on task completion, peer support requests under fire
 - **Editable Config** — Unit type definitions and display constants stored in JSON config files (`unit_types.json`, `units_config.json`) instead of hardcoded JavaScript
 
 ## Quick Start
@@ -64,16 +64,16 @@ Navigate to `http://localhost:8000` in your browser.
 ## Usage
 
 1. Enter a callsign and password, then click **Register** (first time) or **Login**
-2. Click **Create Session** to create a new game session from a scenario
+2. Click a session from the list to join (sessions are created by the admin)
 3. Click **Start Session** to initialize units from the scenario
 4. Military unit symbols appear on the map (filtered by your side's fog of war)
 5. Use the **map control panel** (top-right) to toggle drawing tools, grid, units, overlays, contacts, labels, and terrain
 6. **Draw overlays**: select a tool (arrow, polyline, rectangle, marker, ellipse, measure) and draw on the map; overlays sync in real-time via WebSocket
-7. **Command units**: left-click to select, shift+click for multi-select, left-drag for rubber-band mass selection; right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign)
-8. **Submit orders** in the **Orders** tab of the bottom command panel
-9. **Radio chat** in the **Radio** tab — send tactical messages to specific commanders or broadcast to all
-10. **Advance simulation** via admin tick control — units move, detect, and engage per Rules Engine
-11. View events and reports in the **Log** tab on the sidebar
+7. **Command units**: left-click to select, shift+click for multi-select, left-drag for rubber-band mass selection, alt+click to cycle stacked units; right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign)
+8. **Submit orders** in the **📡 Orders** tab of the bottom command panel (select units first, or click **👥 All**)
+9. **Radio chat** in the **📻 Radio** tab — send tactical messages to specific commanders or broadcast to all; filter by channel (All / 💬 Chat / 📡 Units)
+10. **Advance simulation** by clicking **Execute Orders** — units move, detect, fight, and report back via radio
+11. View events and reports in the **Log** tab on the sidebar; click the **📋 session name** for scenario briefing
 
 ### Admin Panel
 Press the admin button (🔑) and enter the admin password to access:
@@ -110,12 +110,13 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 3. **Detection** → LOS-based visibility checks between opposing units; new contacts created/updated
 4. **Map Object Discovery** → units reveal hidden obstacles/structures within their LOS
 5. **Stale Contacts** → old contacts decay and eventually expire
-6. **Combat** → engaged units exchange fire; damage, suppression inflicted based on firepower, terrain, ammo
+6. **Combat** → engaged units exchange fire; damage, suppression inflicted based on firepower, terrain, ammo. Artillery auto-supports attacking allies. Units under fire auto-return fire
 7. **Suppression Recovery** → units not under fire gradually recover from suppression
-8. **Morale** → suppression and casualties erode morale; safety and nearby friendlies restore it; units break below 15%
+8. **Morale** → suppression and casualties erode morale; safety and nearby friendlies restore it; units break below 15%; destroying enemies boosts nearby morale; long marches cause fatigue
 9. **Communications** → heavy suppression can degrade comms; offline units continue last task but can't receive new orders
 10. **Events & Reports** → notable state changes logged as events
-11. **Broadcast** → updated state pushed to all connected clients via WebSocket
+11. **Radio Chatter** → idle units report task completion; units under fire request support from CoC siblings
+12. **Broadcast** → updated state pushed to all connected clients via WebSocket
 
 ### Movement
 - Each unit type has unique **slow** (tactical) and **fast** (rapid) movement speeds in m/s
@@ -167,6 +168,6 @@ See `AGENTS.MD` for full architecture, domain model, and implementation roadmap.
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, GeoAlchemy2 |
 | Database | PostgreSQL 16 + PostGIS 3.4 |
 | Cache/PubSub | Redis 7 |
-| AI | OpenAI GPT-4.1 (order parsing, reports — planned) |
+| AI | OpenAI GPT-4.1 (order parsing, Red AI decisions, unit responses) |
 | Geospatial | Shapely, pyproj, PostGIS spatial queries |
 | Terrain Data | OSM Overpass API, ESA WorldCover 2021, Open-Elevation API |

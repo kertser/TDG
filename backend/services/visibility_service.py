@@ -235,6 +235,21 @@ async def get_visible_units(
         serialized["comms_status"] = None
         serialized["current_task"] = None
         serialized["move_speed_mps"] = None
+        # Quantize strength to 25% buckets (approximate observation)
+        raw_strength = serialized.get("strength") or 1.0
+        if raw_strength > 0.75:
+            serialized["strength"] = 1.0
+            serialized["strength_estimate"] = "full"
+        elif raw_strength > 0.50:
+            serialized["strength"] = 0.75
+            serialized["strength_estimate"] = "reduced"
+        elif raw_strength > 0.25:
+            serialized["strength"] = 0.50
+            serialized["strength_estimate"] = "weakened"
+        else:
+            serialized["strength"] = 0.25
+            serialized["strength_estimate"] = "critical"
+        serialized["is_enemy"] = True
         all_visible.append(serialized)
 
     return all_visible

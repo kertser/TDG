@@ -619,6 +619,17 @@ const KAdmin = (() => {
             const taskText = objectives.task_text || objectives.task || '';
             const environment = scenario.environment || {};
 
+            // Environment field helpers
+            const weatherOpts = ['clear', 'cloudy', 'overcast', 'rain', 'heavy_rain', 'snow', 'fog', 'storm', 'hail'];
+            const visibilityOpts = ['excellent', 'good', 'moderate', 'poor', 'very_poor', 'zero'];
+            const windOpts = ['calm', 'light', 'moderate', 'strong', 'gale'];
+            const precipOpts = ['none', 'light_rain', 'rain', 'heavy_rain', 'drizzle', 'snow', 'sleet', 'hail'];
+            const lightOpts = ['daylight', 'dawn', 'dusk', 'twilight', 'night', 'moonlit_night', 'dark_night'];
+
+            function _optHtml(opts, selected) {
+                return opts.map(o => `<option value="${o}" ${o === selected ? 'selected' : ''}>${o.replace(/_/g, ' ')}</option>`).join('');
+            }
+
             let overlay = document.getElementById('scenario-details-overlay');
             if (!overlay) {
                 overlay = document.createElement('div');
@@ -628,7 +639,7 @@ const KAdmin = (() => {
             }
             overlay.style.display = 'flex';
             overlay.innerHTML = `
-                <div style="background:#0b1122;border:1px solid rgba(79,195,247,0.3);border-radius:10px;padding:20px;width:520px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+                <div style="background:#0b1122;border:1px solid rgba(79,195,247,0.3);border-radius:10px;padding:20px;width:560px;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
                         <h3 style="color:#4fc3f7;margin:0;font-size:14px;">📝 Scenario Details</h3>
                         <button id="sd-close" style="background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:2px 6px;">✕</button>
@@ -646,8 +657,48 @@ const KAdmin = (() => {
                         <textarea id="sd-task" rows="5" style="width:100%;padding:6px 10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:4px;font-size:11px;resize:vertical;line-height:1.5;box-sizing:border-box;">${_escHtml(taskText)}</textarea>
                     </div>
                     <div style="margin-bottom:10px;">
-                        <label style="display:block;font-size:10px;color:#90caf9;margin-bottom:3px;font-weight:600;">Environment (JSON)</label>
-                        <textarea id="sd-environment" rows="3" style="width:100%;padding:6px 10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:4px;font-size:10px;font-family:monospace;resize:vertical;box-sizing:border-box;">${_escHtml(JSON.stringify(environment, null, 2))}</textarea>
+                        <label style="display:block;font-size:10px;color:#90caf9;margin-bottom:6px;font-weight:600;">🌤 Environment Conditions</label>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;background:rgba(15,52,96,0.2);border:1px solid rgba(79,195,247,0.1);border-radius:6px;padding:10px;">
+                            <div>
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Weather</label>
+                                <select id="sd-env-weather" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;">
+                                    <option value="">(not set)</option>
+                                    ${_optHtml(weatherOpts, environment.weather)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Visibility</label>
+                                <select id="sd-env-visibility" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;">
+                                    <option value="">(not set)</option>
+                                    ${_optHtml(visibilityOpts, environment.visibility)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Wind</label>
+                                <select id="sd-env-wind" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;">
+                                    <option value="">(not set)</option>
+                                    ${_optHtml(windOpts, environment.wind)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Precipitation</label>
+                                <select id="sd-env-precipitation" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;">
+                                    <option value="">(not set)</option>
+                                    ${_optHtml(precipOpts, environment.precipitation)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Light Level</label>
+                                <select id="sd-env-light" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;">
+                                    <option value="">(not set)</option>
+                                    ${_optHtml(lightOpts, environment.light_level)}
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Temperature (°C)</label>
+                                <input type="number" id="sd-env-temp" value="${environment.temperature != null ? environment.temperature : ''}" min="-50" max="60" step="1" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;box-sizing:border-box;" placeholder="e.g. 18" />
+                            </div>
+                        </div>
                     </div>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
                         <button id="sd-cancel" class="admin-btn" style="padding:6px 16px;font-size:11px;">Cancel</button>
@@ -665,10 +716,21 @@ const KAdmin = (() => {
                 const newTitle = document.getElementById('sd-title').value.trim();
                 const newDesc = document.getElementById('sd-description').value.trim();
                 const newTask = document.getElementById('sd-task').value.trim();
-                const envText = document.getElementById('sd-environment').value.trim();
 
-                let newEnv = environment;
-                try { if (envText) newEnv = JSON.parse(envText); } catch { /* keep old */ }
+                // Build environment object from form fields
+                const newEnv = { ...(environment || {}) };
+                const envWeather = document.getElementById('sd-env-weather').value;
+                const envVisibility = document.getElementById('sd-env-visibility').value;
+                const envWind = document.getElementById('sd-env-wind').value;
+                const envPrecip = document.getElementById('sd-env-precipitation').value;
+                const envLight = document.getElementById('sd-env-light').value;
+                const envTempRaw = document.getElementById('sd-env-temp').value.trim();
+                if (envWeather) newEnv.weather = envWeather; else delete newEnv.weather;
+                if (envVisibility) newEnv.visibility = envVisibility; else delete newEnv.visibility;
+                if (envWind) newEnv.wind = envWind; else delete newEnv.wind;
+                if (envPrecip) newEnv.precipitation = envPrecip; else delete newEnv.precipitation;
+                if (envLight) newEnv.light_level = envLight; else delete newEnv.light_level;
+                if (envTempRaw !== '') newEnv.temperature = parseFloat(envTempRaw); else delete newEnv.temperature;
 
                 const newObjectives = { ...(scenario.objectives || {}), task_text: newTask };
 
@@ -683,13 +745,18 @@ const KAdmin = (() => {
                             title: newTitle || undefined,
                             description: newDesc,
                             objectives: newObjectives,
-                            environment: newEnv,
+                            environment: Object.keys(newEnv).length ? newEnv : null,
                         }),
                     });
                     if (!updateResp.ok) throw new Error('Save failed');
                     close();
                     refreshScenarioList();
                     _showInfo('admin-scenario-list', '✓ Scenario details saved', 'ok');
+
+                    // Also update the cached scenario description for the briefing modal
+                    if (typeof KSessionUI !== 'undefined' && KSessionUI.updateScenarioCache) {
+                        KSessionUI.updateScenarioCache(newTitle, newDesc, newObjectives, newEnv);
+                    }
                 } catch (err) {
                     await KDialogs.alert('Save failed: ' + err.message);
                 }

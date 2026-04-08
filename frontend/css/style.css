@@ -3448,8 +3448,8 @@ button:hover { background: #1a5276; }
 #command-panel {
     position: fixed;
     bottom: 0;
-    /* Center relative to the map area (viewport minus 340px sidebar) */
-    left: calc((100vw - 340px) / 2);
+    /* Center relative to the map area (viewport minus sidebar), offset slightly right */
+    left: calc((100vw - 260px) / 2);
     transform: translateX(-50%);
     width: clamp(580px, 55vw, 860px);
     z-index: 2000;
@@ -3491,12 +3491,23 @@ button:hover { background: #1a5276; }
     padding-bottom: 0 !important;
     overflow: hidden !important;
 }
+/* Prevent collapsed panel from blocking elements behind it */
+#command-panel:not(:hover):not(.expanded) {
+    pointer-events: none;
+}
+#command-panel:not(:hover):not(.expanded) #command-panel-header,
+#command-panel:not(:hover):not(.expanded) #command-panel-header * {
+    pointer-events: auto;
+}
 
 /* Maximized panel state */
 #command-panel.maximized {
     width: clamp(660px, 60vw, 960px) !important;
+    left: calc((100vw - 260px) / 2) !important;
 }
-#command-panel.maximized .cmd-tab-panel.active {
+/* Maximized + hover or pinned: show content at larger size */
+#command-panel.maximized:hover .cmd-tab-panel.active,
+#command-panel.maximized.expanded .cmd-tab-panel.active {
     max-height: 50vh !important;
     min-height: 200px;
     opacity: 1 !important;
@@ -3507,6 +3518,24 @@ button:hover { background: #1a5276; }
 #command-panel.maximized .cmd-radio-messages {
     max-height: calc(50vh - 100px);
     min-height: 140px;
+}
+/* Let textarea and panels fill space when maximized */
+#command-panel.maximized .cmd-tab-panel.active {
+    display: flex;
+    flex-direction: column;
+}
+#command-panel.maximized .cmd-input-row {
+    flex: 1;
+    align-items: stretch;
+}
+#command-panel.maximized .cmd-input-row .cmd-textarea {
+    max-height: 35vh;
+    min-height: 120px;
+    flex: 1;
+}
+#command-panel.maximized .cmd-input-row .cmd-send-btn {
+    align-self: flex-start;
+    margin-top: 9px;
 }
 
 /* ── Radio Channel Toggle ─────────────────────── */
@@ -3763,7 +3792,7 @@ button:hover { background: #1a5276; }
 .cmd-input-row {
     display: flex;
     gap: 6px;
-    align-items: flex-end;
+    align-items: flex-start;
 }
 .cmd-textarea {
     flex: 1;
@@ -3793,6 +3822,7 @@ button:hover { background: #1a5276; }
 .cmd-send-btn {
     width: 34px;
     height: 34px;
+    margin-top: 9px;
     padding: 0;
     background: linear-gradient(135deg, #1b5e20, #2e7d32);
     border: 1px solid rgba(76, 175, 80, 0.35);

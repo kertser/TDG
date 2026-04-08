@@ -1131,7 +1131,7 @@ if unit.ammo <= 0:
 
 ## Appendix A: Implementation Status
 
-> Last updated: 2026-04-08
+> Last updated: 2026-04-09
 
 ### Phases Completed / In Progress
 
@@ -1188,8 +1188,10 @@ if unit.ammo <= 0:
 | **Engineering Units** | `unit_types.json`, `units.py`, `engine/engineering.py` | 12 engineering unit types: engineer platoon/section, combat engineer platoon/section/team, mine layer section/team, obstacle breacher team/section, engineer recon team, construction engineer platoon/section, AVLB vehicle/section. Each has specific capabilities (mine clearance, mine laying, breach, bridge deploy). Interact with tactical objects (clear minefields, breach barbed wire, deploy bridges). |
 | **SIDC Code Audit & Fix** | `unit_types.json` | Corrected all 36 unit type SIDC codes to proper MIL-STD-2525D: fixed echelon indicators (team=11, squad=12, section=13), added mechanized infantry entity subtype (121102), proper mortar entity (130200), anti-tank subtype (121104), sniper subtype (121106), observation post subtype (121302), differentiated all engineer subtypes (01-06), HQ entity (110000), logistics entity (160700). |
 | **Commander Hierarchy Management** | `units.py`, `admin.js`, `style.css` | Public API endpoint `PUT /sessions/{id}/units/{unit_id}/parent` for commanders to reparent units with authority checks. Drag-and-drop in CoC tree: drag onto unit = become child, drag to top = become sibling, drag to empty = detach. Move-up/move-down buttons visible on hover. Permission-aware: buttons/drag only for authorized units. Cycle detection prevents circular hierarchies. |
-| **Bottom Command Panel** | `index.html`, `session_ui.js`, `style.css` | Map-centered bottom panel with two tabs: Orders (text input for unit commands) and Radio (tactical radio chat between commanders). Auto-collapses to save map space, expands on hover/focus. Game time + author badges. |
-| **Radio Chat** | `session_ui.js`, `style.css` | Tactical radio channel between session commanders. Select recipient (all or specific commander). Messages stored and delivered to recipients. Blinking LED indicator for unread messages. Military radio styling. |
+| **Bottom Command Panel** | `index.html`, `orders.js`, `style.css` | Map-centered bottom panel with two tabs: Orders (text input for unit commands) and Radio (tactical radio chat between commanders). Auto-collapses to save map space, expands on hover/focus. Pin button to keep open, maximize button for full-size view. Game time + author badges. |
+| **Radio Chat** | `orders.js`, `style.css` | Tactical radio channel between session commanders. Select recipient (all or specific commander). Three channel sub-tabs: All (everything), 💬 Chat (human messages only), 📡 Units (unit radio responses + outgoing orders). Blinking LED indicator for unread messages. Military radio styling. |
+| **Radio Chatter Engine** | `engine/radio_chatter.py`, `tick.py` | Auto-generated unit radio messages during tick processing. (1) Idle reports: units that complete their task broadcast "mission complete, awaiting orders" with grid reference. (2) Peer support requests: units under heavy fire (strength < 50% or suppression > 50%) call CoC siblings for help; eligible siblings auto-acknowledge. Cooldown (5 ticks) prevents spam. Bilingual RU/EN templates. Messages appear in Radio → Units channel. |
+| **Select All Units Button** | `orders.js`, `units.js` | "👥 All" button in the command panel's unit selection area. Selects all commandable units on the player's side with one click. `KUnits.selectAllCommandable()` method. |
 | **Editable Unit Types Config** | `frontend/config/unit_types.json` | Unit type definitions (SIDC codes, speeds, personnel, detection/fire ranges, eye heights, indirect fire flag) stored in editable JSON config file instead of hardcoded JavaScript. Extended with `speed_slow`/`speed_fast`, `eye_height`, `indirect_fire` fields. Loaded on startup. Admin Unit Type Editor reads/writes to this config. |
 | **Units Display Config** | `frontend/config/units_config.json` | All non-per-type constants extracted from `units.js` into editable JSON: status icons/colors, speed options, formations, side colors, selection params, merge distance, movement arrow drawing params, heading indicator, viewshed rendering params, size suffixes, default values. Loaded async at `KUnits.init()`. |
 | **Custom Themed Dialogs** | `dialogs.js`, `style.css` | `KDialogs` module replacing all 46+ native `confirm()`/`alert()`/`prompt()` calls across admin.js, units.js, session_ui.js, scenario_builder.js. Provides `KDialogs.confirm()`, `KDialogs.alert()`, `KDialogs.prompt()`, `KDialogs.select()` — all async/Promise-based. Dark military theme matching existing UI. Dangerous actions show red accent. Admin merge flow uses select dropdown instead of text prompt. |
@@ -1202,6 +1204,18 @@ if unit.ammo <= 0:
 | **Removed Radio Log Tab** | `index.html` | Removed duplicated "Radio Log" sidebar tab. All radio functionality consolidated in the bottom command panel. |
 | **Sitrep Language Consistency** | `response_generator.py` | Fixed mixed RU/EN in status reports. Added translation dictionaries for: task types (марш, атака, etc.), weather (ясно, дождь, etc.), unit types (пех. взвод, танк. рота, etc.), terrain, combat status. Reports now concise: only position, terrain, combat status, contacts, nearby obstacles (if close), and recent events. Removed verbose weather, time, surrounding terrain, parent/subordinate info from standard reports — kept only tactically relevant data. |
 | **Wider Command Panel** | `style.css` | Command panel wider: `clamp(520px, 50vw, 780px)`. Maximized state: `clamp(600px, 55vw, 900px)`. Maximize button now works even with empty content (added `min-height: 200px` to maximized tab panels). |
+| **Auto-Collapse Maximized Panel** | `style.css` | Maximized orders panel auto-collapses on mouse-out, same as regular panel. Textarea grows to 35vh in maximized state (from 120px). Auto-resize JS cap raised to 400px when maximized. |
+| **Command Panel Overlap Fix** | `style.css` | Minimized (non-hovered) command panel no longer blocks clicks on elements behind it via `pointer-events: none` on body, `auto` on interactive elements (tab bar, controls). |
+| **Unit Stack Cycling** | `units.js` | Overlapping units (within ~40m) detected as stacks. Alt+click cycles through stacked units one by one. Stack count badge (×N) in tooltip. Shift+click still additive-selects. Enables selecting specific unit when friendly/enemy overlap. |
+| **Engage Arrow Target Resolution** | `units.js` | Fixed engage/fire movement arrows not showing: `_extractTarget()` now resolves `target_unit_id` to position by looking up the target in `allUnitsData`. Previously only checked `target_location` which engage tasks may lack. |
+| **Automatic Return Fire** | `tick.py` | Units under attack that have no combat task automatically engage their nearest attacker. Prevents units from standing idle while being shot at. Auto-engaged task marked with `auto_return_fire: true`. |
+| **Natural Language Combat Events** | `combat.py` | Combat event summaries now use natural language instead of raw numbers. `(dmg=0.100, supp=0.150)` → `"moderate fire, target reduced to ~50%"`. Five fire intensity levels (ineffective/light/moderate/heavy/devastating) and five strength categories. |
+| **Fog-of-War Enemy Strength Approximation** | `visibility_service.py` | Enemy unit strength quantized to 25% buckets (full/reduced/weakened/critical) for fog-of-war realism. Blue cannot know exact Red strength/personnel count. `strength_estimate` field added. `is_enemy` flag marks detected enemies. |
+| **Morale: Victory Boost** | `morale.py` | Destroying an enemy unit boosts morale of friendly units within 2km by +0.05. |
+| **Morale: March Fatigue** | `morale.py` | Long marches (>10 consecutive ticks of movement) reduce morale by -0.01/tick. March tick counter tracked in `current_task.march_ticks`, resets when unit stops. |
+| **Overlay Context for AI** | `order_service.py` | Units now receive planning overlay information in their AI context (within 5km). Includes overlay type, label, distance, and grid reference. Enables AI to reference markers and phase lines in responses. |
+| **Scenario Environment GUI** | `admin.js`, `session_ui.js`, `sessions.py` | Replaced raw JSON textarea for scenario environment with a proper form: dropdowns for weather, visibility, wind, precipitation, light level, and temperature input. Saved values feed into AI context. Scenario description modal shows rich briefing: situation, mission/task, and environment conditions in a formatted layout. `updateScenarioCache()` refreshes briefing after admin edits. Backend `SessionRead` now includes `scenario_environment` and `scenario_objectives`. |
+| **Own-Side Units Z-Index** | `units.js` | Own-side unit markers render with `zIndexOffset: 1000`, ensuring they always draw on top of enemy units. Enables reading own unit stats even when overlapping with contacts. |
 
 ### Permission / Authority System
 
@@ -1348,6 +1362,7 @@ KShU/
 │   │   ├── terrain.py
 │   │   ├── engineering.py         ← Engineering unit interactions with tactical objects
 │   │   ├── map_objects.py         ← Tactical object effects on units per tick
+│   │   ├── radio_chatter.py      ← Auto-generated unit radio messages (idle requests, peer support)
 │   │   └── structures.py
 │   ├── schemas/
 │   │   ├── __init__.py
@@ -1384,11 +1399,11 @@ KShU/
 │       ├── overlays.js           ← Drawing tools (arrow, polyline, rect, marker, ellipse, measure)
 │       ├── map_objects.js        ← Tactical map objects rendering + admin placement UI
 │       ├── websocket.js          ← WebSocket client with reconnect
-│       ├── orders.js             ← Order submission panel
+│       ├── orders.js             ← Bottom command panel: order input + tactical radio chat (channels: All/Chat/Units)
 │       ├── events.js             ← Events timeline panel
 │       ├── reports.js            ← Reports panel
 │       ├── gamelog.js            ← Unified game log
-│       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu, radio chat
+│       ├── session_ui.js         ← Login/logout, session list/join, settings, user menu, scenario briefing
 │       ├── scenario_builder.js   ← Interactive scenario builder (map-click unit placement)
 │       ├── admin.js              ← Admin panel (~4300 lines): dashboard, CoC (drag-and-drop), wizard, god view, users, types, terrain
 │       ├── dialogs.js            ← KDialogs: themed confirm/alert/prompt/select modals replacing native browser dialogs
@@ -1402,12 +1417,14 @@ KShU/
     ├── __init__.py
     ├── seed_scenario.py
     ├── add_password_column.py
+    ├── apply_discovery_migration.py
     ├── set_passwords.py
     ├── set_user_passwords.py
     ├── verify_sidc.py            ← SIDC code verification tool
     ├── test_api_quick.py
     ├── test_flow.py
     ├── test_grid_quick.py
+    ├── test_order_pipeline.py
     ├── test_simulation.py
     ├── test_tick.py
     ├── test_viewport.py

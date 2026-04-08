@@ -271,6 +271,40 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     arty_events = process_artillery_support(all_units, terrain)
     all_events.extend(arty_events)
 
+    # ── 4c. Automatic return fire: units being attacked fire back ──
+    # Identify units with attack/engage/fire tasks targeting specific units
+    attacking_map = {}  # target_id → [attacker_ids]
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        task = u.current_task
+        if not task:
+            continue
+        task_type = task.get("type", "")
+        if task_type in ("attack", "engage", "fire"):
+            tid = task.get("target_unit_id")
+            if tid:
+                attacking_map.setdefault(str(tid), []).append(str(u.id))
+
+    # Units being attacked that don't have a combat task → auto-engage nearest attacker
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        uid_str = str(u.id)
+        if uid_str not in attacking_map:
+            continue
+        task = u.current_task
+        if task and task.get("type") in ("attack", "engage", "fire"):
+            continue  # already fighting
+        # Find the nearest attacker
+        attacker_ids = attacking_map[uid_str]
+        if attacker_ids:
+            u.current_task = {
+                "type": "engage",
+                "target_unit_id": attacker_ids[0],
+                "auto_return_fire": True,
+            }
+
     # ── 5. Execute combat ────────────────────────────────────────
     combat_events, under_fire = process_combat(all_units, terrain, map_objects_list)
     all_events.extend(combat_events)
@@ -289,7 +323,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     process_suppression_recovery(all_units, under_fire)
 
     # ── 7. Morale effects ────────────────────────────────────
-    morale_events = process_morale(all_units, under_fire)
+    morale_events = process_morale(all_units, under_fire, tick_events=all_events)
     all_events.extend(morale_events)
 
     # ── 8. Communications ────────────────────────────────────

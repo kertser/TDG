@@ -1163,6 +1163,57 @@ class OrderService:
             except Exception:
                 pass
 
+        # ── Nearby planning overlays (markers, arrows, labels) ───
+        if unit_lat and unit_lon:
+            try:
+                from backend.models.overlay import PlanningOverlay
+                from geoalchemy2.shape import to_shape as to_shape_ovl
+
+                ovl_result = await db.execute(
+                    select(PlanningOverlay).where(
+                        PlanningOverlay.session_id == session_id,
+                        PlanningOverlay.side == issuer_side,
+                    )
+                )
+                overlays = ovl_result.scalars().all()
+                nearby_overlays = []
+                for ovl in overlays:
+                    if not ovl.geometry:
+                        continue
+                    try:
+                        shape = to_shape_ovl(ovl.geometry)
+                        centroid = shape.centroid
+                        ovl_lat, ovl_lon = centroid.y, centroid.x
+                    except Exception:
+                        continue
+
+                    dlat = math.radians(ovl_lat - unit_lat)
+                    dlon = math.radians(ovl_lon - unit_lon)
+                    a = (math.sin(dlat / 2) ** 2 +
+                         math.cos(math.radians(unit_lat)) *
+                         math.cos(math.radians(ovl_lat)) *
+                         math.sin(dlon / 2) ** 2)
+                    dist_m = 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+                    if dist_m <= 5000:  # within 5km
+                        ovl_info = {
+                            "type": ovl.overlay_type.value if hasattr(ovl.overlay_type, 'value') else str(ovl.overlay_type),
+                            "label": ovl.label or "",
+                            "distance_m": round(dist_m),
+                        }
+                        if grid_service:
+                            try:
+                                ovl_info["grid_ref"] = grid_service.point_to_snail(ovl_lat, ovl_lon, depth=2)
+                            except Exception:
+                                pass
+                        nearby_overlays.append(ovl_info)
+
+                nearby_overlays.sort(key=lambda x: x["distance_m"])
+                if nearby_overlays:
+                    situation["nearby_overlays"] = nearby_overlays[:8]
+            except Exception:
+                pass
+
         return situation
 
 
