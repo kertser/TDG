@@ -15,7 +15,7 @@
     KAdmin.init();
 
     // Initialize map layers
-    KUnits.init(map);
+    await KUnits.init(map);  // async — loads units_config.json + builds type maps
     KContacts.init(map);
     KOverlays.init(map);
     KTerrain.init(map);

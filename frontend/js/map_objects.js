@@ -219,6 +219,21 @@ const KMapObjects = (() => {
             if (resp.ok) {
                 _objects = await resp.json();
                 render();
+
+                // Trigger immediate LOS-based discovery check (non-blocking).
+                // If any objects are newly discovered, reload to get updated flags.
+                fetch(`/api/sessions/${sessionId}/map-objects/discover`, {
+                    method: 'POST', headers,
+                }).then(r => r.json()).then(data => {
+                    if (data.discovered_count > 0) {
+                        // Re-fetch objects with updated discovery flags
+                        fetch(`/api/sessions/${sessionId}/map-objects`, { headers })
+                            .then(r => r.json()).then(objs => {
+                                _objects = objs;
+                                render();
+                            }).catch(() => {});
+                    }
+                }).catch(() => {});
             }
         } catch (e) { console.warn('Failed to load map objects:', e); }
     }
@@ -231,7 +246,14 @@ const KMapObjects = (() => {
         _layerGroup.clearLayers();
         _objectLayers = {};
         if (!_visible) return;
+        const adminOpen = _isAdminOpen();
+        const playerSide = typeof KSessionUI !== 'undefined' ? KSessionUI.getSide() : null;
         for (const obj of _objects) {
+            // Discovery filter: non-admin players only see objects discovered for their side
+            if (!adminOpen && playerSide && playerSide !== 'admin' && playerSide !== 'observer') {
+                if (playerSide === 'blue' && !obj.discovered_by_blue) continue;
+                if (playerSide === 'red' && !obj.discovered_by_red) continue;
+            }
             const layer = _createLayer(obj);
             if (layer) {
                 layer._mapObjId = obj.id;
@@ -250,7 +272,9 @@ const KMapObjects = (() => {
         const color = (obj.definition && obj.definition.color) || DEFAULT_COLORS[obj.object_type] || '#888';
         const gtype = obj.geometry.type;
         const inactive = !obj.is_active;
-        const opacity = inactive ? 0.35 : 0.85;
+        // When admin: objects hidden from both sides get extra low opacity to distinguish
+        const hiddenFromBoth = _isAdminOpen() && !obj.discovered_by_blue && !obj.discovered_by_red;
+        const opacity = inactive ? 0.35 : (hiddenFromBoth ? 0.45 : 0.85);
 
         if (gtype === 'Point') return _createPointLayer(obj, color, inactive, opacity);
         if (gtype === 'LineString' || gtype === 'MultiLineString') return _createLineLayer(obj, color, inactive, opacity);
@@ -359,13 +383,24 @@ const KMapObjects = (() => {
 
         const overlay = L.imageOverlay(dataUri, bounds, {
             opacity: opacity,
-            interactive: true,
+            interactive: false,  // image overlay click zone is unreliable
         });
 
         const group = L.featureGroup([overlay]);
 
-        // Tooltip and context menu on the image overlay
-        _bindTooltipAndContext(overlay, obj);
+        // Add a transparent interactive rectangle on top of the airfield
+        // for reliable tooltip and context menu hits
+        const hitArea = L.rectangle(bounds, {
+            color: 'transparent',
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            weight: 0,
+            interactive: true,
+        });
+        group.addLayer(hitArea);
+
+        // Tooltip and context menu on the hit area rectangle (not the image)
+        _bindTooltipAndContext(hitArea, obj);
 
         // Admin: draggable center handle (small visible grab point)
         if (adminOpen) {
@@ -446,6 +481,12 @@ const KMapObjects = (() => {
         }
 
         _bindTooltipAndContext(polyline, obj);
+
+        // Admin: add centroid drag handle to move entire line
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, rawCoords);
+        }
+
         return group;
     }
 
@@ -462,6 +503,12 @@ const KMapObjects = (() => {
         });
         const group = L.featureGroup([baseLine, zigzagLine]);
         _bindTooltipAndContext(zigzagLine, obj);
+
+        // Admin: add centroid drag handle
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, coords);
+        }
+
         return group;
     }
 
@@ -489,6 +536,12 @@ const KMapObjects = (() => {
             L.DomEvent.stopPropagation(e);
             _showObjectContextMenu(e, obj);
         });
+
+        // Admin: add centroid drag handle
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, coords);
+        }
+
         return group;
     }
 
@@ -516,7 +569,86 @@ const KMapObjects = (() => {
         }
 
         _bindTooltipAndContext(polygon, obj);
+
+        // Admin: add centroid drag handle to move entire polygon
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, rings[0]);
+        }
+
         return group;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ADMIN DRAG HANDLE (for lines & polygons)
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Add a draggable centroid marker to a featureGroup.
+     * On dragend, translate the entire geometry by the delta and save to server.
+     * @param {L.featureGroup} group - the layer group to add the handle to
+     * @param {Object} obj - the map object data
+     * @param {Array} latlngs - array of [lat, lng] coordinate pairs (for centroid calc)
+     */
+    function _addDragHandle(group, obj, latlngs) {
+        if (!latlngs || latlngs.length === 0) return;
+
+        // Compute centroid
+        let cLat = 0, cLng = 0;
+        latlngs.forEach(([lat, lng]) => { cLat += lat; cLng += lng; });
+        cLat /= latlngs.length;
+        cLng /= latlngs.length;
+
+        const dragMarker = L.marker([cLat, cLng], {
+            icon: L.divIcon({
+                className: 'map-obj-icon',
+                html: '<div style="width:18px;height:18px;border:2px dashed rgba(79,195,247,0.6);border-radius:50%;cursor:grab;background:rgba(79,195,247,0.15);"></div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
+            }),
+            draggable: true,
+        });
+
+        dragMarker.on('dragend', async () => {
+            const newLL = dragMarker.getLatLng();
+            const dLat = newLL.lat - cLat;
+            const dLng = newLL.lng - cLng;
+
+            // Translate geometry coordinates
+            const geom = JSON.parse(JSON.stringify(obj.geometry)); // deep clone
+            _translateGeometry(geom, dLat, dLng);
+
+            const sid = _sessionId || KSessionUI?.getSessionId();
+            const token = KSessionUI?.getToken();
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            try {
+                await fetch(`/api/sessions/${sid}/map-objects/${obj.id}`, {
+                    method: 'PUT', headers,
+                    body: JSON.stringify({ geometry: geom }),
+                });
+                obj.geometry = geom;
+                render();
+            } catch (err) { console.warn('Move map object failed:', err); }
+        });
+
+        group.addLayer(dragMarker);
+    }
+
+    /**
+     * Translate all coordinates in a GeoJSON geometry by (dLat, dLng).
+     * GeoJSON uses [lon, lat] order.
+     */
+    function _translateGeometry(geom, dLat, dLng) {
+        if (geom.type === 'Point') {
+            geom.coordinates[0] += dLng;
+            geom.coordinates[1] += dLat;
+        } else if (geom.type === 'LineString' || geom.type === 'MultiPoint') {
+            geom.coordinates.forEach(c => { c[0] += dLng; c[1] += dLat; });
+        } else if (geom.type === 'Polygon' || geom.type === 'MultiLineString') {
+            geom.coordinates.forEach(ring => ring.forEach(c => { c[0] += dLng; c[1] += dLat; }));
+        } else if (geom.type === 'MultiPolygon') {
+            geom.coordinates.forEach(poly => poly.forEach(ring => ring.forEach(c => { c[0] += dLng; c[1] += dLat; })));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -527,7 +659,13 @@ const KMapObjects = (() => {
         const label = obj.label || obj.object_type.replace(/_/g, ' ');
         const status = obj.is_active ? '✓ Active' : '✗ Inactive';
         const prot = obj.definition ? obj.definition.protection_bonus : 1.0;
-        const tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}</span>`;
+        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}</span>`;
+        // Show discovery status in admin mode
+        if (_isAdminOpen()) {
+            const bIcon = obj.discovered_by_blue ? '👁' : '🚫';
+            const rIcon = obj.discovered_by_red ? '👁' : '🚫';
+            tooltipHtml += `<br><span style="font-size:10px;">Blue ${bIcon} · Red ${rIcon}</span>`;
+        }
         layer.bindTooltip(tooltipHtml, { sticky: true, className: 'map-obj-tooltip' });
         layer.on('contextmenu', (e) => {
             L.DomEvent.stopPropagation(e);
@@ -545,13 +683,22 @@ const KMapObjects = (() => {
         const menu = document.createElement('div');
         menu.id = 'map-obj-ctx-menu';
         menu.className = 'ctx-menu';
-        menu.style.cssText = `display:block;position:fixed;left:${e.originalEvent.clientX}px;top:${e.originalEvent.clientY}px;z-index:10000;min-width:160px;`;
+        menu.style.cssText = `display:block;position:fixed;left:${e.originalEvent.clientX}px;top:${e.originalEvent.clientY}px;z-index:10000;min-width:180px;`;
 
         const label = obj.label || obj.object_type.replace(/_/g, ' ');
+        const blueDisc = obj.discovered_by_blue;
+        const redDisc = obj.discovered_by_red;
+        const blueIcon = blueDisc ? '👁' : '🚫';
+        const redIcon = redDisc ? '👁' : '🚫';
+
         menu.innerHTML = `
             <div class="ctx-menu-header" style="font-size:11px;padding:4px 8px;color:#4fc3f7;">${label}</div>
             <div class="ctx-menu-section">
                 <div class="ctx-item" data-action="toggle">${obj.is_active ? '🔴 Deactivate' : '🟢 Activate'}</div>
+                <div class="ctx-menu-divider" style="border-top:1px solid #333;margin:2px 0;"></div>
+                <div class="ctx-item" data-action="disc_blue" style="font-size:12px;">${blueIcon} Blue: ${blueDisc ? 'Revealed' : 'Hidden'} → ${blueDisc ? 'Hide' : 'Reveal'}</div>
+                <div class="ctx-item" data-action="disc_red" style="font-size:12px;">${redIcon} Red: ${redDisc ? 'Revealed' : 'Hidden'} → ${redDisc ? 'Hide' : 'Reveal'}</div>
+                <div class="ctx-menu-divider" style="border-top:1px solid #333;margin:2px 0;"></div>
                 <div class="ctx-item ctx-item-danger" data-action="delete">🗑 Delete</div>
             </div>`;
 
@@ -582,6 +729,26 @@ const KMapObjects = (() => {
                     obj.is_active = !obj.is_active;
                     render();
                 } catch (err) { console.warn('Toggle map object failed:', err); }
+            } else if (action === 'disc_blue') {
+                const newVal = !obj.discovered_by_blue;
+                try {
+                    await fetch(`/api/sessions/${sid}/map-objects/${obj.id}`, {
+                        method: 'PUT', headers,
+                        body: JSON.stringify({ discovered_by_blue: newVal }),
+                    });
+                    obj.discovered_by_blue = newVal;
+                    render();
+                } catch (err) { console.warn('Toggle Blue discovery failed:', err); }
+            } else if (action === 'disc_red') {
+                const newVal = !obj.discovered_by_red;
+                try {
+                    await fetch(`/api/sessions/${sid}/map-objects/${obj.id}`, {
+                        method: 'PUT', headers,
+                        body: JSON.stringify({ discovered_by_red: newVal }),
+                    });
+                    obj.discovered_by_red = newVal;
+                    render();
+                } catch (err) { console.warn('Toggle Red discovery failed:', err); }
             }
         });
 
@@ -855,12 +1022,14 @@ const KMapObjects = (() => {
 
     function onObjectCreated(data) {
         if (data && data.id) {
-            // Prevent duplicates: check if already exists (e.g. local POST already added it)
-            const exists = _objects.some(o => o.id === data.id);
-            if (!exists) {
+            const idx = _objects.findIndex(o => o.id === data.id);
+            if (idx >= 0) {
+                // Object already exists — update it (e.g. discovery flags changed)
+                _objects[idx] = data;
+            } else {
                 _objects.push(data);
-                render();
             }
+            render();
         }
     }
     function onObjectUpdated(data) {

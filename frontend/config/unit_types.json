@@ -1,14 +1,17 @@
 {
-    "_comment": "Unit type registry — editable config. Personnel numbers based on NATO/standard military TOE. SIDC codes follow MIL-STD-2525D (20-char).",
+    "_comment": "Unit type registry — editable config. Personnel numbers based on NATO/standard military TOE. SIDC codes follow MIL-STD-2525D (20-char). speed_slow/speed_fast in m/s, eye_height in meters, indirect_fire = true for mortar/artillery.",
 
     "headquarters": {
         "label": "Headquarters",
         "sidc_blue": "10031002151100000000",
         "sidc_red": "10061002151100000000",
         "speed": 3.0,
+        "speed_slow": 1.5,
+        "speed_fast": 5.0,
         "det": 2000,
         "fire": 200,
         "personnel": 25,
+        "eye_height": 3.0,
         "isHQ": true
     },
     "command_post": {
@@ -16,9 +19,12 @@
         "sidc_blue": "10031002141100000000",
         "sidc_red": "10061002141100000000",
         "speed": 2.0,
+        "speed_slow": 1.0,
+        "speed_fast": 3.0,
         "det": 1500,
         "fire": 100,
         "personnel": 12,
+        "eye_height": 3.0,
         "isHQ": true
     },
 
@@ -27,6 +33,8 @@
         "sidc_blue": "10031000111211000000",
         "sidc_red": "10061000111211000000",
         "speed": 3.5,
+        "speed_slow": 1.5,
+        "speed_fast": 3.5,
         "det": 1500,
         "fire": 300,
         "personnel": 4
@@ -36,6 +44,8 @@
         "sidc_blue": "10031000121211000000",
         "sidc_red": "10061000121211000000",
         "speed": 3.0,
+        "speed_slow": 1.2,
+        "speed_fast": 3.0,
         "det": 1500,
         "fire": 400,
         "personnel": 9
@@ -45,6 +55,8 @@
         "sidc_blue": "10031000131211000000",
         "sidc_red": "10061000131211000000",
         "speed": 3.0,
+        "speed_slow": 1.2,
+        "speed_fast": 3.0,
         "det": 1500,
         "fire": 400,
         "personnel": 8
@@ -54,6 +66,8 @@
         "sidc_blue": "10031000141211000000",
         "sidc_red": "10061000141211000000",
         "speed": 4.0,
+        "speed_slow": 1.2,
+        "speed_fast": 3.0,
         "det": 1500,
         "fire": 600,
         "personnel": 36
@@ -63,6 +77,8 @@
         "sidc_blue": "10031000151211000000",
         "sidc_red": "10061000151211000000",
         "speed": 3.5,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1500,
         "fire": 800,
         "personnel": 130
@@ -72,6 +88,8 @@
         "sidc_blue": "10031000161211000000",
         "sidc_red": "10061000161211000000",
         "speed": 2.0,
+        "speed_slow": 0.8,
+        "speed_fast": 2.0,
         "det": 1500,
         "fire": 1200,
         "personnel": 650
@@ -82,18 +100,24 @@
         "sidc_blue": "10031000141211020000",
         "sidc_red": "10061000141211020000",
         "speed": 10.0,
+        "speed_slow": 3.0,
+        "speed_fast": 10.0,
         "det": 1800,
         "fire": 1200,
-        "personnel": 35
+        "personnel": 35,
+        "eye_height": 2.8
     },
     "mech_company": {
         "label": "Mech Infantry Co",
         "sidc_blue": "10031000151211020000",
         "sidc_red": "10061000151211020000",
         "speed": 7.0,
+        "speed_slow": 2.5,
+        "speed_fast": 8.0,
         "det": 1800,
         "fire": 1500,
-        "personnel": 115
+        "personnel": 115,
+        "eye_height": 2.8
     },
 
     "tank_platoon": {
@@ -101,18 +125,24 @@
         "sidc_blue": "10031000141301000000",
         "sidc_red": "10061000141301000000",
         "speed": 12.0,
+        "speed_slow": 3.0,
+        "speed_fast": 12.0,
         "det": 2000,
         "fire": 2000,
-        "personnel": 16
+        "personnel": 16,
+        "eye_height": 3.0
     },
     "tank_company": {
         "label": "Tank Company",
         "sidc_blue": "10031000151301000000",
         "sidc_red": "10061000151301000000",
         "speed": 8.0,
+        "speed_slow": 2.5,
+        "speed_fast": 10.0,
         "det": 2000,
         "fire": 2500,
-        "personnel": 58
+        "personnel": 58,
+        "eye_height": 3.0
     },
 
     "artillery_battery": {
@@ -120,18 +150,26 @@
         "sidc_blue": "10031000151303000000",
         "sidc_red": "10061000151303000000",
         "speed": 3.0,
+        "speed_slow": 1.5,
+        "speed_fast": 5.0,
         "det": 1200,
         "fire": 5000,
-        "personnel": 90
+        "personnel": 90,
+        "eye_height": 2.5,
+        "indirect_fire": true
     },
     "artillery_platoon": {
         "label": "Artillery Platoon",
         "sidc_blue": "10031000141303000000",
         "sidc_red": "10061000141303000000",
         "speed": 3.0,
+        "speed_slow": 1.5,
+        "speed_fast": 5.0,
         "det": 1200,
         "fire": 5000,
-        "personnel": 30
+        "personnel": 30,
+        "eye_height": 2.5,
+        "indirect_fire": true
     },
 
     "mortar_section": {
@@ -139,18 +177,24 @@
         "sidc_blue": "10031000131302000000",
         "sidc_red": "10061000131302000000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1000,
         "fire": 3500,
-        "personnel": 8
+        "personnel": 8,
+        "indirect_fire": true
     },
     "mortar_team": {
         "label": "Mortar Team",
         "sidc_blue": "10031000111302000000",
         "sidc_red": "10061000111302000000",
         "speed": 3.0,
+        "speed_slow": 1.2,
+        "speed_fast": 3.0,
         "det": 1000,
         "fire": 3000,
-        "personnel": 4
+        "personnel": 4,
+        "indirect_fire": true
     },
 
     "at_team": {
@@ -158,6 +202,8 @@
         "sidc_blue": "10031000111211040000",
         "sidc_red": "10061000111211040000",
         "speed": 3.5,
+        "speed_slow": 1.2,
+        "speed_fast": 3.0,
         "det": 2000,
         "fire": 2000,
         "personnel": 4
@@ -168,18 +214,24 @@
         "sidc_blue": "10031000111213000000",
         "sidc_red": "10061000111213000000",
         "speed": 5.0,
+        "speed_slow": 2.0,
+        "speed_fast": 4.0,
         "det": 3000,
         "fire": 400,
-        "personnel": 4
+        "personnel": 4,
+        "eye_height": 3.0
     },
     "recon_section": {
         "label": "Recon Section",
         "sidc_blue": "10031000131213000000",
         "sidc_red": "10061000131213000000",
         "speed": 4.0,
+        "speed_slow": 2.0,
+        "speed_fast": 4.0,
         "det": 3000,
         "fire": 500,
-        "personnel": 10
+        "personnel": 10,
+        "eye_height": 3.0
     },
 
     "observation_post": {
@@ -187,18 +239,24 @@
         "sidc_blue": "10031000111213020000",
         "sidc_red": "10061000111213020000",
         "speed": 5.0,
+        "speed_slow": 0.5,
+        "speed_fast": 1.5,
         "det": 4000,
         "fire": 300,
-        "personnel": 3
+        "personnel": 3,
+        "eye_height": 8.0
     },
     "sniper_team": {
         "label": "Sniper Team",
         "sidc_blue": "10031000111211060000",
         "sidc_red": "10061000111211060000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 2500,
         "fire": 1000,
-        "personnel": 2
+        "personnel": 2,
+        "eye_height": 2.5
     },
 
     "engineer_platoon": {
@@ -206,6 +264,8 @@
         "sidc_blue": "10031000141206000000",
         "sidc_red": "10061000141206000000",
         "speed": 3.5,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
         "fire": 400,
         "personnel": 35
@@ -215,6 +275,8 @@
         "sidc_blue": "10031000131206000000",
         "sidc_red": "10061000131206000000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
         "fire": 300,
         "personnel": 10
@@ -224,8 +286,10 @@
         "sidc_blue": "10031000141206020000",
         "sidc_red": "10061000141206020000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
-        "fire": 500,
+        "fire": 600,
         "personnel": 34
     },
     "combat_engineer_section": {
@@ -233,8 +297,10 @@
         "sidc_blue": "10031000131206020000",
         "sidc_red": "10061000131206020000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
-        "fire": 400,
+        "fire": 600,
         "personnel": 10
     },
     "combat_engineer_team": {
@@ -242,8 +308,10 @@
         "sidc_blue": "10031000111206020000",
         "sidc_red": "10061000111206020000",
         "speed": 3.5,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
-        "fire": 300,
+        "fire": 400,
         "personnel": 5
     },
 
@@ -252,8 +320,10 @@
         "sidc_blue": "10031000131206030000",
         "sidc_red": "10061000131206030000",
         "speed": 2.5,
+        "speed_slow": 0.8,
+        "speed_fast": 2.0,
         "det": 1000,
-        "fire": 200,
+        "fire": 300,
         "personnel": 8
     },
     "mine_layer_team": {
@@ -261,8 +331,10 @@
         "sidc_blue": "10031000111206030000",
         "sidc_red": "10061000111206030000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1000,
-        "fire": 150,
+        "fire": 200,
         "personnel": 4
     },
 
@@ -271,8 +343,10 @@
         "sidc_blue": "10031000111206040000",
         "sidc_red": "10061000111206040000",
         "speed": 3.0,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
-        "fire": 300,
+        "fire": 400,
         "personnel": 5
     },
     "obstacle_breacher_section": {
@@ -280,8 +354,10 @@
         "sidc_blue": "10031000131206040000",
         "sidc_red": "10061000131206040000",
         "speed": 2.5,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
         "det": 1200,
-        "fire": 350,
+        "fire": 500,
         "personnel": 10
     },
 
@@ -290,8 +366,10 @@
         "sidc_blue": "10031000111206010000",
         "sidc_red": "10061000111206010000",
         "speed": 4.0,
+        "speed_slow": 1.5,
+        "speed_fast": 3.0,
         "det": 2500,
-        "fire": 300,
+        "fire": 400,
         "personnel": 4
     },
 
@@ -300,8 +378,10 @@
         "sidc_blue": "10031000141206050000",
         "sidc_red": "10061000141206050000",
         "speed": 2.0,
+        "speed_slow": 0.8,
+        "speed_fast": 2.0,
         "det": 800,
-        "fire": 100,
+        "fire": 300,
         "personnel": 30
     },
     "construction_engineer_section": {
@@ -309,8 +389,10 @@
         "sidc_blue": "10031000131206050000",
         "sidc_red": "10061000131206050000",
         "speed": 2.0,
+        "speed_slow": 0.8,
+        "speed_fast": 2.0,
         "det": 800,
-        "fire": 100,
+        "fire": 200,
         "personnel": 10
     },
 
@@ -319,8 +401,10 @@
         "sidc_blue": "10031000111206060000",
         "sidc_red": "10061000111206060000",
         "speed": 6.0,
+        "speed_slow": 2.0,
+        "speed_fast": 6.0,
         "det": 1000,
-        "fire": 100,
+        "fire": 200,
         "personnel": 3
     },
     "avlb_section": {
@@ -328,8 +412,10 @@
         "sidc_blue": "10031000131206060000",
         "sidc_red": "10061000131206060000",
         "speed": 6.0,
+        "speed_slow": 2.0,
+        "speed_fast": 6.0,
         "det": 1000,
-        "fire": 100,
+        "fire": 200,
         "personnel": 6
     },
 
@@ -338,6 +424,8 @@
         "sidc_blue": "10031000141607000000",
         "sidc_red": "10061000141607000000",
         "speed": 5.0,
+        "speed_slow": 2.0,
+        "speed_fast": 6.0,
         "det": 800,
         "fire": 100,
         "personnel": 20

@@ -21,7 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from geoalchemy2.shape import from_shape
+from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import Point
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -182,6 +182,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     # Upsert contacts
     contact_events = await _upsert_contacts(session_id, tick, game_time, new_contacts_data, db)
     all_events.extend(contact_events)
+
+    # ── 3b. Map object discovery (LOS-based) ──────────────────
+    discovery_events = _process_object_discovery(
+        blue_units, red_units, map_objects_list, terrain, los_service,
+    )
+    all_events.extend(discovery_events)
 
     # ── 4. Decay stale contacts ──────────────────────────────────
     result = await db.execute(
@@ -434,8 +440,115 @@ def _determine_visibility(event_dict: dict) -> str:
     if etype in ("contact_new", "contact_lost"):
         side = event_dict.get("payload", {}).get("observing_side")
         return side if side else "all"
+    # Object discovery visible to the discovering side
+    if etype == "object_discovered":
+        side = event_dict.get("payload", {}).get("side")
+        return side if side else "all"
     # Order events visible to the issuing side
     if etype in ("order_issued", "order_completed"):
         return "all"  # MVP: visible to all
     return "all"
+
+
+def _process_object_discovery(
+    blue_units: list,
+    red_units: list,
+    map_objects: list,
+    terrain: TerrainService,
+    los_service,
+) -> list[dict]:
+    """
+    Check if any units have LOS to undiscovered map objects.
+    When a unit can see an object, mark it discovered for that side.
+    This is a one-way flip: once discovered, stays discovered.
+    """
+    import math
+    from backend.engine.detection import UNIT_EYE_HEIGHTS, DEFAULT_EYE_HEIGHT
+
+    events = []
+    if not map_objects:
+        return events
+
+    METERS_PER_DEG_LAT = 111_320.0
+    METERS_PER_DEG_LON_AT_48 = 74_000.0
+
+    # Build list of objects needing discovery check per side
+    blue_undiscovered = [o for o in map_objects if not o.discovered_by_blue and o.is_active]
+    red_undiscovered = [o for o in map_objects if not o.discovered_by_red and o.is_active]
+
+    if not blue_undiscovered and not red_undiscovered:
+        return events
+
+    def _get_object_position(obj):
+        """Extract centroid lat/lon from a map object's geometry."""
+        if obj.geometry is None:
+            return None
+        try:
+            shape = to_shape(obj.geometry)
+            centroid = shape.centroid
+            return centroid.y, centroid.x  # lat, lon
+        except Exception:
+            return None
+
+    def _check_discovery(units, undiscovered_objects, side_attr):
+        """Check if any unit from a side can see undiscovered objects."""
+        side_events = []
+        # Pre-extract unit positions
+        unit_positions = []
+        for u in units:
+            if u.is_destroyed or u.position is None:
+                continue
+            try:
+                pt = to_shape(u.position)
+                eye_h = UNIT_EYE_HEIGHTS.get(u.unit_type, DEFAULT_EYE_HEIGHT)
+                det_range = u.detection_range_m or 1500.0
+                unit_positions.append((pt.x, pt.y, det_range, eye_h))
+            except Exception:
+                continue
+
+        if not unit_positions:
+            return side_events
+
+        for obj in undiscovered_objects:
+            pos = _get_object_position(obj)
+            if pos is None:
+                continue
+            obj_lat, obj_lon = pos
+
+            for obs_lon, obs_lat, det_range, eye_h in unit_positions:
+                # Distance check
+                dlat = (obj_lat - obs_lat) * METERS_PER_DEG_LAT
+                dlon = (obj_lon - obs_lon) * METERS_PER_DEG_LON_AT_48
+                dist = math.sqrt(dlat * dlat + dlon * dlon)
+                if dist > det_range:
+                    continue
+
+                # LOS check
+                if los_service is not None:
+                    if not los_service.has_los(obs_lon, obs_lat, obj_lon, obj_lat,
+                                               eye_height=eye_h):
+                        continue
+
+                # Object discovered!
+                setattr(obj, side_attr, True)
+                side_name = "blue" if side_attr == "discovered_by_blue" else "red"
+                label = obj.label or obj.object_type.replace('_', ' ')
+                side_events.append({
+                    "event_type": "object_discovered",
+                    "text_summary": f"{side_name.title()} forces discovered: {label}",
+                    "payload": {
+                        "side": side_name,
+                        "object_id": str(obj.id),
+                        "object_type": obj.object_type,
+                    },
+                })
+                break  # One unit seeing it is enough
+
+        return side_events
+
+    events.extend(_check_discovery(blue_units, blue_undiscovered, "discovered_by_blue"))
+    events.extend(_check_discovery(red_units, red_undiscovered, "discovered_by_red"))
+
+    return events
+
 

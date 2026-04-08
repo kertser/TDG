@@ -369,6 +369,52 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
         except Exception:
             pass  # Don't fail tick on broadcast error
 
+    # Broadcast newly discovered map objects to the relevant side
+    # Check events table for object_discovered events from this tick
+    from backend.models.event import Event
+    from backend.models.map_object import MapObject
+    from backend.api.map_objects import _serialize_map_object
+    try:
+        disc_result = await db.execute(
+            select(Event).where(
+                Event.session_id == session_id,
+                Event.tick == result["tick"] - 1,  # events created at old tick
+                Event.event_type == "object_discovered",
+            )
+        )
+        disc_events = disc_result.scalars().all()
+        if disc_events:
+            # Collect unique object IDs and their discovering side
+            discovered_ids = {}
+            for evt in disc_events:
+                payload = evt.payload or {}
+                oid = payload.get("object_id")
+                side = payload.get("side")
+                if oid and side:
+                    discovered_ids.setdefault(oid, set()).add(side)
+
+            if discovered_ids:
+                from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+                mo_result = await db.execute(
+                    select(MapObject).where(
+                        MapObject.session_id == session_id,
+                        MapObject.id.in_([uuid.UUID(oid) for oid in discovered_ids]),
+                    )
+                )
+                disc_objects = mo_result.scalars().all()
+                for obj in disc_objects:
+                    serialized = _serialize_map_object(obj)
+                    oid_str = str(obj.id)
+                    sides = discovered_ids.get(oid_str, set())
+                    for side in sides:
+                        await ws_manager.broadcast(
+                            session_id,
+                            {"type": "map_object_updated", "data": serialized},
+                            only_side=side,
+                        )
+    except Exception:
+        pass
+
     # Also broadcast tick_update to all
     await ws_manager.broadcast(
         session_id,

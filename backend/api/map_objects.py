@@ -31,6 +31,8 @@ class MapObjectCreate(BaseModel):
     label: str | None = None
     properties: dict | None = None
     style_json: dict | None = None
+    discovered_by_blue: bool | None = None  # None = use default for category
+    discovered_by_red: bool | None = None
 
 
 class MapObjectUpdate(BaseModel):
@@ -41,6 +43,8 @@ class MapObjectUpdate(BaseModel):
     is_active: bool | None = None
     health: float | None = None
     side: str | None = None
+    discovered_by_blue: bool | None = None
+    discovered_by_red: bool | None = None
 
 
 class EngineerActionRequest(BaseModel):
@@ -76,6 +80,8 @@ def _serialize_map_object(obj: MapObject) -> dict:
         "style_json": obj.style_json,
         "is_active": obj.is_active,
         "health": obj.health,
+        "discovered_by_blue": obj.discovered_by_blue,
+        "discovered_by_red": obj.discovered_by_red,
         "created_at": obj.created_at.isoformat() if obj.created_at else None,
         "updated_at": obj.updated_at.isoformat() if obj.updated_at else None,
         # Include definition info for frontend
@@ -126,12 +132,104 @@ async def get_map_objects(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Return all map objects for a session."""
+    """Return all map objects for a session.
+
+    All objects are returned with their discovery flags (discovered_by_blue,
+    discovered_by_red).  The *frontend* is responsible for filtering visibility
+    based on the player's side — the render() function already does this.
+    Admin / observer clients see everything.
+    """
     result = await db.execute(
         select(MapObject).where(MapObject.session_id == session_id)
     )
     objects = result.scalars().all()
     return [_serialize_map_object(obj) for obj in objects]
+
+
+@router.post("/{session_id}/map-objects/discover")
+async def discover_map_objects(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """Run an immediate LOS-based discovery check for map objects.
+
+    Checks if any units have line-of-sight to undiscovered objects and
+    marks them as discovered. This supplements the per-tick discovery
+    that runs in the rules engine.
+
+    Returns a list of newly discovered object IDs.
+    """
+    from backend.models.unit import Unit
+    from backend.models.terrain_cell import TerrainCell
+    from backend.models.elevation_cell import ElevationCell
+    from backend.models.grid import GridDefinition
+    from backend.engine.terrain import TerrainService
+    from backend.services.los_service import LOSService
+
+    # Load units
+    unit_result = await db.execute(
+        select(Unit).where(Unit.session_id == session_id, Unit.is_destroyed == False)
+    )
+    all_units = list(unit_result.scalars().all())
+    blue_units = [u for u in all_units if u.side.value == "blue"]
+    red_units = [u for u in all_units if u.side.value == "red"]
+
+    # Load map objects
+    mo_result = await db.execute(
+        select(MapObject).where(MapObject.session_id == session_id)
+    )
+    map_objects_list = list(mo_result.scalars().all())
+
+    # Build terrain + LOS service
+    terrain_cells_dict = None
+    elevation_cells_dict = None
+
+    tc_result = await db.execute(
+        select(TerrainCell.snail_path, TerrainCell.terrain_type)
+        .where(TerrainCell.session_id == session_id)
+    )
+    tc_rows = tc_result.all()
+    if tc_rows:
+        terrain_cells_dict = {row[0]: row[1] for row in tc_rows}
+
+    ec_result = await db.execute(
+        select(ElevationCell.snail_path, ElevationCell.elevation_m,
+               ElevationCell.slope_deg, ElevationCell.aspect_deg)
+        .where(ElevationCell.session_id == session_id)
+    )
+    ec_rows = ec_result.all()
+    if ec_rows:
+        elevation_cells_dict = {
+            row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+            for row in ec_rows
+        }
+
+    grid_service = None
+    gd_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = gd_result.scalar_one_or_none()
+    if gd:
+        from backend.services.grid_service import GridService
+        grid_service = GridService(gd)
+
+    terrain = TerrainService(
+        terrain_cells=terrain_cells_dict,
+        elevation_cells=elevation_cells_dict,
+        grid_service=grid_service,
+    )
+    los_service = LOSService(terrain) if (terrain_cells_dict or elevation_cells_dict) else None
+
+    # Run discovery check
+    from backend.engine.tick import _process_object_discovery
+    events = _process_object_discovery(blue_units, red_units, map_objects_list, terrain, los_service)
+
+    await db.flush()
+    await db.commit()
+
+    newly_discovered = [e["payload"]["object_id"] for e in events]
+    return {"discovered_count": len(newly_discovered), "discovered_ids": newly_discovered}
 
 
 @router.post("/{session_id}/map-objects")
@@ -162,6 +260,11 @@ async def create_map_object(
     except ValueError:
         side_enum = ObjectSide.neutral
 
+    # Default discovery: structures revealed, obstacles hidden
+    is_structure = (category == "structure")
+    disc_blue = body.discovered_by_blue if body.discovered_by_blue is not None else is_structure
+    disc_red = body.discovered_by_red if body.discovered_by_red is not None else is_structure
+
     obj = MapObject(
         session_id=session_id,
         side=side_enum,
@@ -173,6 +276,8 @@ async def create_map_object(
         style_json=body.style_json,
         is_active=True,
         health=1.0,
+        discovered_by_blue=disc_blue,
+        discovered_by_red=disc_red,
         placed_by_user_id=participant.user_id,
     )
     db.add(obj)
@@ -182,13 +287,29 @@ async def create_map_object(
 
     serialized = _serialize_map_object(obj)
 
-    # Broadcast to all clients in the session
-    await ws_manager.broadcast(session_id, {
-        "type": "map_object_created",
-        "data": serialized,
-    })
+    # Broadcast to clients — filtered by discovery status
+    # Admin/observer always receive via only_side=None fallback
+    await _broadcast_map_object(session_id, "map_object_created", serialized, obj)
 
     return serialized
+
+
+async def _broadcast_map_object(session_id, msg_type, serialized, obj):
+    """Broadcast a map object event, filtering by discovery status per side."""
+    # Always send to admin/observer
+    # Send to blue only if discovered_by_blue, to red only if discovered_by_red
+    if obj.discovered_by_blue and obj.discovered_by_red:
+        # Visible to both — broadcast to all
+        await ws_manager.broadcast(session_id, {"type": msg_type, "data": serialized})
+    elif obj.discovered_by_blue:
+        await ws_manager.broadcast(session_id, {"type": msg_type, "data": serialized}, only_side="blue")
+        # Also send to admin/observer (only_side="blue" already includes admin/observer)
+    elif obj.discovered_by_red:
+        await ws_manager.broadcast(session_id, {"type": msg_type, "data": serialized}, only_side="red")
+    else:
+        # Hidden from both — only admin/observer should see
+        # Send to admin side only
+        await ws_manager.broadcast(session_id, {"type": msg_type, "data": serialized}, only_side="admin")
 
 
 @router.put("/{session_id}/map-objects/{object_id}")
@@ -230,12 +351,21 @@ async def update_map_object(
         except ValueError:
             pass
 
+    if body.discovered_by_blue is not None:
+        obj.discovered_by_blue = body.discovered_by_blue
+    if body.discovered_by_red is not None:
+        obj.discovered_by_red = body.discovered_by_red
+
     await db.flush()
     await db.commit()
 
     serialized = _serialize_map_object(obj)
 
-    # Broadcast to all clients in the session
+    # Broadcast the updated object.
+    # Discovery toggle is an admin action — broadcast to all so every client
+    # (including the admin's own connection, which is registered as "blue")
+    # gets the updated flags.  The frontend render() already filters objects
+    # by the viewer's side + discovery status, so non-discoverers won't see it.
     await ws_manager.broadcast(session_id, {
         "type": "map_object_updated",
         "data": serialized,

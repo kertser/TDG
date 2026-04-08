@@ -55,6 +55,13 @@ class MapObject(Base):
     label: Mapped[str | None] = mapped_column(String(200), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     health: Mapped[float] = mapped_column(Float, default=1.0)  # 0.0–1.0
+
+    # Discovery / fog-of-war for map objects.
+    # Obstacles default to hidden (False); structures default to revealed (True).
+    # Once a side's unit has LOS to the object, it becomes discovered for that side permanently.
+    discovered_by_blue: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    discovered_by_red: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     placed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )

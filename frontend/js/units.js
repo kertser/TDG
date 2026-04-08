@@ -42,108 +42,90 @@ const KUnits = (() => {
     let _selectStartLL = null;
     let _isSelecting = false;
     let _shiftHeld = false;
-    const SELECT_THRESHOLD = 6;
 
-    // ── Personnel/unit size by type ─────────────────────
-    const PERSONNEL = {
-        'tank_company':      60,
-        'mech_company':      100,
-        'infantry_company':  120,
-        'infantry_platoon':  30,
-        'mortar_section':    12,
-        'at_team':           6,
-        'recon_team':        6,
-        'observation_post':  4,
-        'sniper_team':       2,
-    };
-    const DEFAULT_PERSONNEL = 20;
+    // ══════════════════════════════════════════════════
+    // ── Config (loaded from /config/units_config.json + unit_types.json) ──
+    // ══════════════════════════════════════════════════
 
-    // ── Fire range by unit type (meters) ─────────────
-    const FIRE_RANGE = {
-        'tank_company':      2500,
-        'mech_company':      1500,
-        'infantry_company':  800,
-        'infantry_platoon':  600,
-        'mortar_section':    3500,
-        'at_team':           2000,
-        'recon_team':        400,
-        'observation_post':  300,
-        'sniper_team':       1000,
-        'artillery_battery': 8000,
-        'artillery_platoon': 6000,
-        'mortar_team':       2500,
-    };
-    const DEFAULT_FIRE_RANGE = 500;
+    /** Display/behavior config loaded from units_config.json */
+    let CFG = null;
 
-    // ── Indirect fire unit types (fire NOT affected by LOS) ──
-    const INDIRECT_FIRE_TYPES = new Set([
-        'mortar_section', 'mortar_team',
-        'artillery_battery', 'artillery_platoon',
-    ]);
+    // Per-unit-type lookup maps (derived from unit_types.json at init time)
+    let PERSONNEL = {};
+    let FIRE_RANGE = {};
+    let INDIRECT_FIRE_TYPES = new Set();
+    let UNIT_EYE_HEIGHTS = {};
+    let UNIT_TYPE_SPEEDS = {};
+    let STATUS_ICONS = {};
+    let STATUS_COLORS = {};
+    let SPEED_OPTIONS = {};
+    let FORMATIONS = [];
+    let SIZE_SUFFIXES = [];
 
-    // ── Unit-type-specific eye heights (meters) for LOS context ──
-    const UNIT_EYE_HEIGHTS = {
-        'observation_post':   8.0,    // elevated optics / mast
-        'tank_company':       3.0,
-        'tank_platoon':       3.0,
-        'mech_company':       2.8,
-        'mech_platoon':       2.8,
-        'recon_team':         3.0,
-        'recon_section':      3.0,
-        'sniper_team':        2.5,
-        'headquarters':       3.0,
-        'command_post':       3.0,
-        'artillery_battery':  2.5,
-        'artillery_platoon':  2.5,
-    };
-    const DEFAULT_UNIT_EYE_HEIGHT = 2.0;
+    // Defaults (overridden by config once loaded)
+    let DEFAULT_PERSONNEL = 20;
+    let DEFAULT_FIRE_RANGE = 400;
+    let DEFAULT_UNIT_EYE_HEIGHT = 2.0;
+    let DEFAULT_UNIT_SPEEDS = { slow: 1.2, fast: 3.0 };
+    let SELECT_THRESHOLD = 6;
 
-    // ── Status icons ────────────────────────────────────
-    const STATUS_ICONS = {
-        idle: '⏸', moving: '🚶', engaging: '⚔', defending: '🛡',
-        retreating: '↩', observing: '👁', suppressed: '💥',
-        broken: '💔', destroyed: '☠', supporting: '🤝',
-    };
-    const STATUS_COLORS = {
-        idle: '#aaa', moving: '#4fc3f7', engaging: '#f44336', defending: '#66bb6a',
-        retreating: '#ff9800', observing: '#90caf9', suppressed: '#e91e63',
-        broken: '#9c27b0', destroyed: '#666', supporting: '#4caf50',
-    };
+    /** Load display config from /config/units_config.json */
+    async function _loadConfig() {
+        try {
+            const resp = await fetch('/config/units_config.json?v=' + Date.now());
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            CFG = await resp.json();
+            delete CFG._comment;
+        } catch (err) {
+            console.warn('[KUnits] Failed to load units_config.json, using built-in defaults:', err);
+            CFG = {};
+        }
 
-    // ── Movement speed options ───────────────────────
-    const SPEED_OPTIONS = {
-        slow: { label: 'Slow', icon: '🐢', color: '#81c784' },
-        fast: { label: 'Fast', icon: '⚡', color: '#ff9800' },
-    };
+        // Apply defaults from config
+        const defs = CFG.defaults || {};
+        DEFAULT_PERSONNEL = defs.personnel ?? 20;
+        DEFAULT_FIRE_RANGE = defs.fire_range ?? 400;
+        DEFAULT_UNIT_EYE_HEIGHT = defs.eye_height ?? 2.0;
+        DEFAULT_UNIT_SPEEDS = {
+            slow: defs.speed_slow ?? 1.2,
+            fast: defs.speed_fast ?? 3.0,
+        };
+        SELECT_THRESHOLD = (CFG.selection && CFG.selection.threshold_px) ?? 6;
 
-    // ── Unit-type-specific base speeds (m/s), matching backend ──
-    const UNIT_TYPE_SPEEDS = {
-        'infantry_platoon':   { slow: 1.2, fast: 3.0 },
-        'infantry_company':   { slow: 1.0, fast: 2.5 },
-        'infantry_section':   { slow: 1.2, fast: 3.0 },
-        'infantry_team':      { slow: 1.5, fast: 3.5 },
-        'infantry_squad':     { slow: 1.2, fast: 3.0 },
-        'infantry_battalion': { slow: 0.8, fast: 2.0 },
-        'mech_platoon':       { slow: 3.0, fast: 10.0 },
-        'mech_company':       { slow: 2.5, fast: 8.0 },
-        'tank_platoon':       { slow: 3.0, fast: 12.0 },
-        'tank_company':       { slow: 2.5, fast: 10.0 },
-        'artillery_battery':  { slow: 1.5, fast: 5.0 },
-        'artillery_platoon':  { slow: 1.5, fast: 5.0 },
-        'mortar_section':     { slow: 1.0, fast: 2.5 },
-        'mortar_team':        { slow: 1.2, fast: 3.0 },
-        'at_team':            { slow: 1.2, fast: 3.0 },
-        'recon_team':         { slow: 2.0, fast: 4.0 },
-        'recon_section':      { slow: 2.0, fast: 4.0 },
-        'sniper_team':        { slow: 1.0, fast: 2.5 },
-        'observation_post':   { slow: 0.5, fast: 1.5 },
-        'engineer_platoon':   { slow: 1.0, fast: 2.5 },
-        'engineer_section':   { slow: 1.0, fast: 2.5 },
-        'logistics_unit':     { slow: 2.0, fast: 6.0 },
-        'headquarters':       { slow: 1.5, fast: 5.0 },
-        'command_post':       { slow: 1.0, fast: 3.0 },
-    };
-    const DEFAULT_UNIT_SPEEDS = { slow: 1.2, fast: 3.0 };
+        // Display constants from config
+        STATUS_ICONS = CFG.status_icons || {};
+        STATUS_COLORS = CFG.status_colors || {};
+        SPEED_OPTIONS = CFG.speed_options || {};
+        FORMATIONS = CFG.formations || [];
+        SIZE_SUFFIXES = CFG.size_suffixes || [];
+    }
+
+    /**
+     * Build per-unit-type lookup maps from KScenarioBuilder.getUnitTypes().
+     * Called after both configs are loaded.
+     */
+    function _buildTypeMaps() {
+        const types = (typeof KScenarioBuilder !== 'undefined') ? KScenarioBuilder.getUnitTypes() : {};
+
+        PERSONNEL = {};
+        FIRE_RANGE = {};
+        INDIRECT_FIRE_TYPES = new Set();
+        UNIT_EYE_HEIGHTS = {};
+        UNIT_TYPE_SPEEDS = {};
+
+        for (const [key, info] of Object.entries(types)) {
+            if (info.personnel != null) PERSONNEL[key] = info.personnel;
+            if (info.fire != null) FIRE_RANGE[key] = info.fire;
+            if (info.indirect_fire) INDIRECT_FIRE_TYPES.add(key);
+            if (info.eye_height != null) UNIT_EYE_HEIGHTS[key] = info.eye_height;
+            if (info.speed_slow != null || info.speed_fast != null) {
+                UNIT_TYPE_SPEEDS[key] = {
+                    slow: info.speed_slow ?? DEFAULT_UNIT_SPEEDS.slow,
+                    fast: info.speed_fast ?? DEFAULT_UNIT_SPEEDS.fast,
+                };
+            }
+        }
+    }
 
     /** Get the base speed (m/s) for a unit type and speed label. */
     function _getUnitSpeed(unitType, speedLabel) {
@@ -156,29 +138,22 @@ const KUnits = (() => {
         return (mps * 3.6).toFixed(0);
     }
 
-    // ── Formation options ─────────────────────────────
-    const FORMATIONS = [
-        { key: 'column', label: 'Column', icon: '║' },
-        { key: 'line', label: 'Line', icon: '═' },
-        { key: 'wedge', label: 'Wedge', icon: '▽' },
-        { key: 'vee', label: 'Vee', icon: '△' },
-        { key: 'echelon_left', label: 'Echelon L', icon: '╲' },
-        { key: 'echelon_right', label: 'Echelon R', icon: '╱' },
-        { key: 'staggered', label: 'Staggered', icon: '⋮' },
-        { key: 'box', label: 'Box', icon: '▢' },
-        { key: 'diamond', label: 'Diamond', icon: '◇' },
-        { key: 'dispersed', label: 'Dispersed', icon: '·:·' },
-    ];
-
     // ── Set-move state ──────────────────────────────
     let _setMovePending = null; // {unitId, speed} while waiting for map click
 
-    function init(map) {
+    async function init(map) {
         _map = map;
 
+        // Load display config
+        await _loadConfig();
+
+        // Build per-type maps from unit_types.json (already loaded by KScenarioBuilder)
+        _buildTypeMaps();
+
         // Create a custom pane for movement arrows below the default marker pane (z=600)
+        const arrowPaneZ = (CFG && CFG.movement_arrow_pane_z) || 350;
         map.createPane('movementArrowsPane');
-        map.getPane('movementArrowsPane').style.zIndex = 350;
+        map.getPane('movementArrowsPane').style.zIndex = arrowPaneZ;
 
         unitsLayer = L.layerGroup().addTo(map);
         _selectionLayer = L.layerGroup().addTo(map);
@@ -209,20 +184,14 @@ const KUnits = (() => {
         if (!userId) return false;
         const mySide = KSessionUI.getSide();
         const myRole = KSessionUI.getRole();
-        // Observers cannot select/command units (check both side and role)
         if (mySide === 'observer' || myRole === 'observer') return false;
-        // Admin-unlocked bypass: can select any unit regardless of side
         const adminUnlocked = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
         if (adminUnlocked) return true;
-        // Side check: only own-side units are selectable (admin bypass)
         if (mySide && mySide !== 'admin' && unit.side !== mySide) {
             return false;
         }
-        // If unit has no assignments, anyone on the same side can select
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
-        // If assigned to this user
         if (unit.assigned_user_ids.includes(userId)) return true;
-        // Check if user has command authority via parent chain
         return _hasCommandAuthority(unit, userId);
     }
 
@@ -232,18 +201,14 @@ const KUnits = (() => {
         if (!userId) return false;
         const mySide = KSessionUI.getSide();
         const myRole = KSessionUI.getRole();
-        // Observers cannot assign units (check both side and role)
         if (mySide === 'observer' || myRole === 'observer') return false;
-        // Admin-unlocked bypass: can assign any unit regardless of side
         const adminUnlocked = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
         if (adminUnlocked) return true;
-        // Side check: only own-side units can be assigned (admin bypass)
         if (mySide && mySide !== 'admin' && unit.side !== mySide) {
             return false;
         }
         if (!unit.assigned_user_ids || unit.assigned_user_ids.length === 0) return true;
         if (unit.assigned_user_ids.includes(userId)) return true;
-        // Check command authority via parent chain and subordinate user authority
         return _hasCommandAuthority(unit, userId);
     }
 
@@ -266,8 +231,6 @@ const KUnits = (() => {
         }
 
         // Check 2: Subordinate user authority
-        // If the unit is assigned to user B, and B is subordinate to userId
-        // (B's unit has an ancestor assigned to userId), then userId has authority.
         if (unit.assigned_user_ids && unit.assigned_user_ids.length > 0) {
             for (const assignedUid of unit.assigned_user_ids) {
                 if (assignedUid === userId) continue;
@@ -371,12 +334,19 @@ const KUnits = (() => {
                 L.point(e.clientX - rect.left, e.clientY - rect.top)
             );
 
+            const rbCfg = (CFG && CFG.selection) || {};
             if (_selectRect) {
                 _selectRect.setBounds(L.latLngBounds(_selectStartLL, currentLL));
             } else {
                 _selectRect = L.rectangle(
                     L.latLngBounds(_selectStartLL, currentLL),
-                    { color: '#4fc3f7', weight: 1, fillOpacity: 0.12, dashArray: '5,4', interactive: false }
+                    {
+                        color: rbCfg.rubber_band_color || '#4fc3f7',
+                        weight: rbCfg.rubber_band_weight || 1,
+                        fillOpacity: rbCfg.rubber_band_fill_opacity || 0.12,
+                        dashArray: rbCfg.rubber_band_dash || '5,4',
+                        interactive: false,
+                    }
                 ).addTo(_map);
             }
         });
@@ -402,7 +372,6 @@ const KUnits = (() => {
                 _map.removeLayer(_selectRect);
                 _selectRect = null;
             } else if (_selectStartPt && !_isSelecting && selectedUnitIds.size > 0) {
-                // Simple click on empty map space (no drag) → deselect all
                 const dx = e.clientX - _selectStartPt.x;
                 const dy = e.clientY - _selectStartPt.y;
                 if (Math.abs(dx) < SELECT_THRESHOLD && Math.abs(dy) < SELECT_THRESHOLD) {
@@ -445,11 +414,16 @@ const KUnits = (() => {
             });
             if (!resp.ok) return;
             const units = await resp.json();
-            // Invalidate viewshed for units whose position changed
             _invalidateMovedUnitsViewshed(units);
             allUnitsData = units;
             render(units);
             _updateSelectionUI();
+
+            if (selectedUnitIds.size > 0) {
+                const ids = Array.from(selectedUnitIds);
+                Promise.all(ids.map(id => _fetchViewshed(id)))
+                    .then(() => _drawSelectionOverlays());
+            }
         } catch (err) {
             console.warn('Units load failed:', err);
         }
@@ -458,15 +432,11 @@ const KUnits = (() => {
     // ── Snail path resolution cache (coord key → snail string) ──
     const _snailCache = {};
 
-    /**
-     * Resolve missing target_snail for units with move tasks.
-     * Uses KGrid.getSnailAtPoint and caches results.
-     */
     async function _enrichSnailPaths(units) {
         for (const u of units) {
             const task = u.current_task;
             if (!task || !task.target_location) continue;
-            if (task.target_snail) continue; // already resolved
+            if (task.target_snail) continue;
             const lat = task.target_location.lat;
             const lon = task.target_location.lon;
             if (lat == null || lon == null) continue;
@@ -492,11 +462,16 @@ const KUnits = (() => {
         unitMarkers = {};
         allUnitsData = units;
 
+        // Rebuild type maps in case unit_types.json was reloaded (e.g. admin edit)
+        _buildTypeMaps();
+
         // Eagerly resolve missing snail paths in background
         _enrichSnailPaths(units);
 
-        // Compute zoom scale factor for current zoom level
         const zoomScale = _map ? KSymbols.getZoomScale(_map.getZoom()) : 1.0;
+        const sideColors = (CFG && CFG.side_colors) || {};
+        const defaultDetRange = (CFG && CFG.defaults && CFG.defaults.detection_range) || 2000;
+        const tooltipOff = (CFG && CFG.tooltip_offset) || [0, -18];
 
         units.forEach(u => {
             if (u.lat == null || u.lon == null) return;
@@ -510,17 +485,15 @@ const KUnits = (() => {
                 callsign: u.name || '',
             });
 
-            // Admin drag-and-drop: make markers draggable when admin is unlocked
             const isDraggable = _adminDragEnabled;
             const marker = L.marker([u.lat, u.lon], { icon, draggable: isDraggable });
 
             // Tooltip with unit name + range summary + size + status
-            const detR = u.detection_range_m || 2000;
+            const detR = u.detection_range_m || defaultDetRange;
             const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
             const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
             const status = u.unit_status || 'idle';
             const statusColor = STATUS_COLORS[status] || '#aaa';
-            // Show speed label in tooltip when moving
             let ttStatus = status;
             let ttStatusIcon = STATUS_ICONS[status] || '•';
             const ttSpeed = u.current_task && u.current_task.speed;
@@ -537,13 +510,13 @@ const KUnits = (() => {
             marker.bindTooltip(tooltipHtml, {
                 permanent: false,
                 direction: 'top',
-                offset: [0, -18],
+                offset: tooltipOff,
                 className: 'unit-tooltip',
             });
 
             // HOVER: show range circles
             marker.on('mouseover', () => {
-                if (selectedUnitIds.has(u.id)) return; // already shown via selection
+                if (selectedUnitIds.has(u.id)) return;
                 _hoveredUnitId = u.id;
                 _drawHoverRanges(u);
             });
@@ -554,7 +527,7 @@ const KUnits = (() => {
                 }
             });
 
-            // LEFT-CLICK: select/deselect only (no popup)
+            // LEFT-CLICK: select/deselect
             marker.on('click', (e) => {
                 L.DomEvent.stopPropagation(e);
                 _closeUnitContextMenu();
@@ -562,17 +535,16 @@ const KUnits = (() => {
                 _selectUnit(u.id, shiftKey);
             });
 
-            // RIGHT-CLICK: context menu with info, rename, etc.
+            // RIGHT-CLICK: context menu
             marker.on('contextmenu', (e) => {
                 L.DomEvent.stopPropagation(e);
                 L.DomEvent.preventDefault(e);
                 _showUnitContextMenu(u, e.originalEvent);
             });
 
-            // DRAG: admin drag-and-drop to reposition (supports group move)
+            // DRAG: admin drag-and-drop
             if (isDraggable) {
                 marker.on('dragstart', () => {
-                    // If this unit is part of a multi-selection, enable group drag
                     if (selectedUnitIds.has(u.id) && selectedUnitIds.size > 1) {
                         marker._groupDrag = true;
                         marker._groupDragStart = marker.getLatLng();
@@ -592,7 +564,6 @@ const KUnits = (() => {
                 });
 
                 marker.on('drag', () => {
-                    // Move all selected peers in real-time
                     if (!marker._groupDrag || !marker._groupPeers) return;
                     const newPos = marker.getLatLng();
                     const dLat = newPos.lat - marker._groupDragStart.lat;
@@ -605,16 +576,14 @@ const KUnits = (() => {
                     });
                 });
 
-                marker.on('dragend', () => {
+                marker.on('dragend', async () => {
                     const pos = marker.getLatLng();
-                    _saveUnitPosition(u.id, pos.lat, pos.lng);
                     u.lat = pos.lat;
                     u.lon = pos.lng;
-
-                    // Invalidate viewshed cache for moved unit (position changed)
                     delete _viewshedCache[u.id];
 
-                    // Save all peer positions if group drag
+                    const savePromises = [_saveUnitPosition(u.id, pos.lat, pos.lng)];
+
                     if (marker._groupDrag && marker._groupPeers) {
                         const dLat = pos.lat - marker._groupDragStart.lat;
                         const dLng = pos.lng - marker._groupDragStart.lng;
@@ -626,13 +595,11 @@ const KUnits = (() => {
                                 peerUnit.lat = newLat;
                                 peerUnit.lon = newLng;
                             }
-                            // Invalidate viewshed cache for each moved peer
                             delete _viewshedCache[p.id];
-                            _saveUnitPosition(p.id, newLat, newLng);
+                            savePromises.push(_saveUnitPosition(p.id, newLat, newLng));
                         });
                     }
 
-                    // Collect all moved unit IDs for viewshed refresh
                     const movedIds = [u.id];
                     if (marker._groupDrag && marker._groupPeers) {
                         marker._groupPeers.forEach(p => movedIds.push(p.id));
@@ -643,7 +610,8 @@ const KUnits = (() => {
                     marker._groupDragStart = null;
                     _drawMovementArrows();
 
-                    // Re-fetch viewshed for moved units, then redraw overlays
+                    await Promise.all(savePromises);
+
                     Promise.all(movedIds.map(id => _fetchViewshed(id)))
                         .then(() => _drawSelectionOverlays());
                 });
@@ -653,9 +621,7 @@ const KUnits = (() => {
             unitMarkers[u.id] = marker;
         });
 
-        // Draw movement arrows for ALL moving units (on lower pane)
         _drawMovementArrows();
-        // Redraw selection overlays (ranges, heading)
         _drawSelectionOverlays();
     }
 
@@ -663,19 +629,10 @@ const KUnits = (() => {
     // ── Viewshed (LOS polygon) Fetch & Cache ─────────
     // ══════════════════════════════════════════════════
 
-    /**
-     * Fetch the viewshed (line-of-sight) polygon for a unit.
-     * Returns a promise that resolves when the data is cached.
-     * Uses an in-memory cache keyed by unit_id, invalidated on tick change.
-     * Failed fetches are cached as `false` to prevent infinite retry loops.
-     */
     function _fetchViewshed(unitId) {
-        // Already cached (success or failure sentinel) — resolve immediately
         if (_viewshedCache[unitId] !== undefined) return Promise.resolve();
-        // Already fetching — return the existing promise so callers wait
         if (_viewshedPending[unitId]) return _viewshedPending[unitId];
 
-        // When god view is active, use admin endpoint (no participant check)
         const godView = typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled();
         const sessionId = (godView && typeof KAdmin !== 'undefined' && KAdmin.getAdminSessionId)
             ? (KAdmin.getAdminSessionId() || KSessionUI.getSessionId())
@@ -683,10 +640,10 @@ const KUnits = (() => {
         const token = KSessionUI.getToken();
         if (!sessionId || !token) return Promise.resolve();
 
-        // Use admin viewshed endpoint when god view is active to bypass participant check
+        const rays = (CFG && CFG.viewshed && CFG.viewshed.rays) || 72;
         const apiBase = godView
-            ? `/api/admin/sessions/${sessionId}/units/${unitId}/viewshed?rays=72`
-            : `/api/sessions/${sessionId}/units/${unitId}/viewshed?rays=72`;
+            ? `/api/admin/sessions/${sessionId}/units/${unitId}/viewshed?rays=${rays}`
+            : `/api/sessions/${sessionId}/units/${unitId}/viewshed?rays=${rays}`;
 
         const promise = fetch(
             apiBase,
@@ -699,7 +656,6 @@ const KUnits = (() => {
             if (geojson) {
                 _viewshedCache[unitId] = geojson;
             } else {
-                // Cache failure sentinel to prevent infinite retries
                 _viewshedCache[unitId] = false;
             }
         }).catch(err => {
@@ -713,9 +669,6 @@ const KUnits = (() => {
         return promise;
     }
 
-    /**
-     * Invalidate the viewshed cache (called on tick update or unit state change).
-     */
     function _invalidateViewshedCache(newTick) {
         if (newTick !== undefined && newTick !== _viewshedTick) {
             _viewshedTick = newTick;
@@ -724,17 +677,10 @@ const KUnits = (() => {
         }
     }
 
-    /**
-     * Chaikin's corner-cutting algorithm to smooth a polygon.
-     * @param {Array<[number,number]>} latlngs  Array of [lat, lng] (Leaflet order).
-     * @param {number} iterations  Number of smoothing passes (default 2).
-     * @returns {Array<[number,number]>}
-     */
     function _smoothPolygon(latlngs, iterations) {
         if (!latlngs || latlngs.length < 4) return latlngs;
-        iterations = iterations || 2;
+        iterations = iterations || ((CFG && CFG.viewshed && CFG.viewshed.smooth_iterations) || 2);
         let pts = latlngs;
-        // Remove closing duplicate if present
         const last = pts[pts.length - 1];
         const first = pts[0];
         if (last[0] === first[0] && last[1] === first[1]) pts = pts.slice(0, -1);
@@ -756,20 +702,10 @@ const KUnits = (() => {
             }
             pts = newPts;
         }
-        // Close
         pts.push(pts[0]);
         return pts;
     }
 
-    /**
-     * Clip a viewshed polygon to a maximum range (for direct fire range overlay).
-     * For each vertex, if its distance from center > maxRange, scale it toward center.
-     * @param {Array<[number,number]>} geojsonCoords  [lon, lat] pairs from GeoJSON.
-     * @param {number} centerLat
-     * @param {number} centerLon
-     * @param {number} maxRangeM  Fire range in meters.
-     * @returns {Array<[number,number]>}  [lat, lng] pairs (Leaflet order).
-     */
     function _clipViewshedToRange(geojsonCoords, centerLat, centerLon, maxRangeM) {
         const result = [];
         for (const coord of geojsonCoords) {
@@ -790,72 +726,76 @@ const KUnits = (() => {
         return result;
     }
 
-    /** Draw hover range overlays for a unit (transient, cleared on mouseout). */
+    /** Helper: get side accent color from config */
+    function _sideColor(side) {
+        const sc = (CFG && CFG.side_colors) || {};
+        return side === 'blue' ? (sc.blue || '#4fc3f7') : (sc.red || '#ef5350');
+    }
+
+    /** Draw hover range overlays for a unit. */
     function _drawHoverRanges(u) {
         _hoverLayer.clearLayers();
         const pos = L.latLng(u.lat, u.lon);
-        const isBlue = u.side === 'blue';
-        const accent = isBlue ? '#4fc3f7' : '#ef5350';
-        const detRange = u.detection_range_m || 2000;
+        const accent = _sideColor(u.side);
+        const defaultDetRange = (CFG && CFG.defaults && CFG.defaults.detection_range) || 2000;
+        const detRange = u.detection_range_m || defaultDetRange;
         const fireRange = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
         const isIndirect = INDIRECT_FIRE_TYPES.has(u.unit_type);
+        const vsCfg = (CFG && CFG.viewshed) || {};
+        const fireColor = vsCfg.fire_range_color || '#ff9800';
+        const fbDash = vsCfg.fallback_dash || '6,4';
 
-        // Use viewshed polygon (no fallback circles — fetch silently)
         const cached = _viewshedCache[u.id];
         if (cached && cached.geometry && cached.geometry.coordinates) {
             const coords = cached.geometry.coordinates[0];
             const latlngs = coords.map(c => [c[1], c[0]]);
-            const smoothed = _smoothPolygon(latlngs, 2);
+            const smoothed = _smoothPolygon(latlngs);
             _hoverLayer.addLayer(L.polygon(smoothed, {
                 color: accent,
-                weight: 1.5,
-                opacity: 0.6,
+                weight: vsCfg.detection_line_weight || 1.5,
+                opacity: vsCfg.detection_line_opacity || 0.6,
                 fillColor: accent,
-                fillOpacity: 0.10,
+                fillOpacity: vsCfg.detection_fill_opacity_hover || 0.10,
                 interactive: false,
             }));
 
-            // Direct fire range: clip viewshed polygon to fire range
             if (!isIndirect && fireRange < detRange * 0.95) {
                 const clipped = _clipViewshedToRange(coords, u.lat, u.lon, fireRange);
-                const smoothedFire = _smoothPolygon(clipped, 2);
+                const smoothedFire = _smoothPolygon(clipped);
                 _hoverLayer.addLayer(L.polygon(smoothedFire, {
-                    color: '#ff9800',
-                    weight: 1.5,
-                    opacity: 0.6,
-                    fillColor: '#ff9800',
-                    fillOpacity: 0.10,
+                    color: fireColor,
+                    weight: vsCfg.detection_line_weight || 1.5,
+                    opacity: vsCfg.detection_line_opacity || 0.6,
+                    fillColor: fireColor,
+                    fillOpacity: vsCfg.detection_fill_opacity_hover || 0.10,
                     interactive: false,
                 }));
             }
         } else if (cached === false) {
-            // Viewshed fetch failed — show a fallback dashed circle
             _hoverLayer.addLayer(L.circle(pos, {
                 radius: detRange,
                 color: accent,
                 weight: 1,
                 opacity: 0.4,
-                dashArray: '6,4',
+                dashArray: fbDash,
                 fillColor: accent,
                 fillOpacity: 0.05,
                 interactive: false,
             }));
         } else {
-            // No viewshed cached yet — fetch in background, redraw when ready
             _fetchViewshed(u.id).then(() => {
                 if (_hoveredUnitId === u.id) _drawHoverRanges(u);
             });
         }
 
-        // Indirect fire range: always a circle (not affected by LOS)
         if (isIndirect) {
             _hoverLayer.addLayer(L.circle(pos, {
                 radius: fireRange,
-                color: '#ff9800',
-                weight: 1.5,
-                opacity: 0.6,
-                dashArray: '6,4',
-                fillColor: '#ff9800',
+                color: fireColor,
+                weight: vsCfg.detection_line_weight || 1.5,
+                opacity: vsCfg.detection_line_opacity || 0.6,
+                dashArray: fbDash,
+                fillColor: fireColor,
                 fillOpacity: 0.08,
                 interactive: false,
             }));
@@ -890,15 +830,14 @@ const KUnits = (() => {
         if (u.comms_status && u.comms_status !== 'operational')
             html += `Comms: <span style="color:#ff9800">${u.comms_status}</span><br>`;
 
-        // Detection / fire range info
-        const detR = u.detection_range_m || 2000;
+        const defaultDetRange = (CFG && CFG.defaults && CFG.defaults.detection_range) || 2000;
+        const detR = u.detection_range_m || defaultDetRange;
         const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
         const eyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
         const eyeTag = eyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${eyeH}m)</span>` : '';
         html += `<span style="font-size:10px;color:#64b5f6">👁 ${_fmtDist(detR)}${eyeTag}</span>`;
         html += ` <span style="font-size:10px;color:#ff9800">🎯 ${_fmtDist(fireR)}</span><br>`;
 
-        // Current task info
         if (u.current_task && u.current_task.type) {
             let taskStr = u.current_task.type;
             const tSpeed = u.current_task.speed;
@@ -913,7 +852,6 @@ const KUnits = (() => {
             html += `<span style="font-size:10px;color:#ffd740;">📋 Task: ${taskStr}</span><br>`;
         }
 
-        // ── Chain of Command info ────────────────────────
         if (u.commanding_user_name) {
             const isSelfCO = u.assigned_user_names && u.assigned_user_names.length > 0
                 && u.assigned_user_names.includes(u.commanding_user_name);
@@ -938,7 +876,6 @@ const KUnits = (() => {
         return html;
     }
 
-    /** Save unit position via admin API after drag. */
     async function _saveUnitPosition(unitId, lat, lon) {
         const token = KSessionUI.getToken();
         const sessionId = KSessionUI.getSessionId();
@@ -957,10 +894,8 @@ const KUnits = (() => {
         }
     }
 
-    /** Enable/disable admin drag-and-drop mode. */
     function setAdminDrag(enabled) {
         _adminDragEnabled = enabled;
-        // Re-render to apply draggable state to markers
         if (allUnitsData.length > 0) {
             render(allUnitsData);
         }
@@ -981,7 +916,6 @@ const KUnits = (() => {
         document.body.appendChild(div);
         _unitCtxMenuEl = div;
 
-        // Close on click outside
         document.addEventListener('click', (e) => {
             if (!div.contains(e.target)) _closeUnitContextMenu();
         });
@@ -1009,10 +943,11 @@ const KUnits = (() => {
         const isAssignedToMe = u.assigned_user_ids && u.assigned_user_ids.includes(userId);
 
         const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
-        const detR = u.detection_range_m || 2000;
+        const defaultDetRange = (CFG && CFG.defaults && CFG.defaults.detection_range) || 2000;
+        const detR = u.detection_range_m || defaultDetRange;
         const fireR = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
 
-        const sideColor = u.side === 'blue' ? '#4fc3f7' : '#ef5350';
+        const sideColor = _sideColor(u.side);
         const strPct = u.strength != null ? Math.round(u.strength * 100) : 100;
         const morPct = u.morale != null ? Math.round(u.morale * 100) : 90;
         const ammPct = u.ammo != null ? Math.round(u.ammo * 100) : 100;
@@ -1025,7 +960,6 @@ const KUnits = (() => {
 
         const statusBg = statusColor + '22';
 
-        // Derive display status: if moving, include speed label
         let displayStatus = status;
         let displayStatusIcon = statusIcon;
         const taskSpeed = u.current_task && u.current_task.speed;
@@ -1034,7 +968,6 @@ const KUnits = (() => {
             displayStatus = `${taskSpeed}`;
         }
 
-        // Build elegant card with stat bars
         let html = `<div class="unit-info-card">`;
         html += `<div class="unit-info-header">`;
         html += `<div class="unit-info-side-bar" style="background:${sideColor};"></div>`;
@@ -1045,7 +978,6 @@ const KUnits = (() => {
         html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${displayStatusIcon} ${displayStatus}</span></div>`;
         html += `</div>`;
 
-        // ── Stat bars (visual & compact) ──
         html += `<div class="unit-info-stats">`;
         html += _buildStatBar('STR', strPct, strClr);
         html += _buildStatBar('MOR', morPct, morClr);
@@ -1055,7 +987,6 @@ const KUnits = (() => {
         }
         html += `</div>`;
 
-        // ── Ranges and capabilities ──
         html += `<div class="unit-info-ranges">`;
         html += `<span title="Detection range" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
         html += `<span title="Fire range" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
@@ -1067,7 +998,6 @@ const KUnits = (() => {
         }
         html += `</div>`;
 
-        // ── Current task ──
         if (u.current_task && u.current_task.type) {
             const taskType = u.current_task.type;
             const tSpeed = u.current_task.speed;
@@ -1088,13 +1018,11 @@ const KUnits = (() => {
             html += `</div>`;
         }
 
-        // ── Communications status ──
         if (u.comms_status && u.comms_status !== 'operational') {
             const commsClr = u.comms_status === 'degraded' ? '#ff9800' : '#f44336';
             html += `<div style="padding:1px 12px 3px;font-size:10px;color:${commsClr};">📡 Comms: ${u.comms_status}</div>`;
         }
 
-        // ── Formation info ──
         const formation = u.formation || (u.capabilities && u.capabilities.formation);
         if (formation) {
             const fObj = FORMATIONS.find(f => f.key === formation);
@@ -1102,12 +1030,10 @@ const KUnits = (() => {
             html += `<div style="padding:1px 12px 3px;font-size:10px;color:#b39ddb;">🔲 Formation: ${fLabel}</div>`;
         }
 
-        // ── Heading info ──
         if (u.heading_deg != null && u.heading_deg !== 0) {
             html += `<div style="padding:1px 12px 3px;font-size:10px;color:#90caf9;">🧭 Heading: ${Math.round(u.heading_deg)}°</div>`;
         }
 
-        // ── Command & assignment info ──
         const hasCmdInfo = u.commanding_user_name || (u.assigned_user_names && u.assigned_user_names.length > 0);
         if (hasCmdInfo) {
             html += `<div class="unit-info-command">`;
@@ -1125,7 +1051,6 @@ const KUnits = (() => {
             html += `<div style="padding:2px 12px 4px;font-size:10px;color:#555;">Unassigned</div>`;
         }
 
-        // ── Parent unit info ──
         if (u.parent_unit_id) {
             const parent = allUnitsData.find(p => p.id === u.parent_unit_id);
             if (parent) {
@@ -1133,9 +1058,8 @@ const KUnits = (() => {
             }
         }
 
-        html += `</div>`; // end unit-info-card
+        html += `</div>`;
 
-        // ── Action items ──
         const _isAdminMode = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
         if (canSel) {
             const selLabel = isSel ? '✓ Deselect' : '☐ Select';
@@ -1144,7 +1068,6 @@ const KUnits = (() => {
         if (canSel) {
             html += `<div class="ctx-item" data-action="rename">✏ Rename</div>`;
         }
-        // Formation, Move, Stop — admin-only (direct manipulation bypasses orders)
         if (canSel && _isAdminMode) {
             html += `<div class="ctx-item" data-action="formation">🔲 Formation ▸</div>`;
             html += `<div class="ctx-item" data-action="move">🚶 Set Move ▸</div>`;
@@ -1152,21 +1075,19 @@ const KUnits = (() => {
         }
         if (canSel) {
             html += `<div class="ctx-item" data-action="split">✂ Split Unit</div>`;
-            // Merge: show if there are nearby units (<50m) of the same principal type
             const principalType = _getPrincipalType(u.unit_type);
+            const mergeDistM = (CFG && CFG.merge_distance_m) || 50;
             const nearbyMergeable = allUnitsData.filter(ou => {
                 if (ou.id === u.id || ou.side !== u.side || ou.is_destroyed) return false;
                 if (_getPrincipalType(ou.unit_type) !== principalType) return false;
-                // Distance check: only show units within 50m
                 if (u.lat == null || u.lon == null || ou.lat == null || ou.lon == null) return false;
                 const dist = _haversineDist(u.lat, u.lon, ou.lat, ou.lon);
-                return dist <= 50;
+                return dist <= mergeDistM;
             });
             if (nearbyMergeable.length > 0) {
                 html += `<div class="ctx-item" data-action="merge">🔗 Merge Unit ▸</div>`;
             }
         }
-        // Delete unit — admin only
         if (_isAdminMode) {
             html += `<div class="ctx-item ctx-item-danger" data-action="delete">🗑 Delete Unit</div>`;
         }
@@ -1177,20 +1098,17 @@ const KUnits = (() => {
 
         menu.innerHTML = html;
 
-        // Position the menu
         menu.style.left = e.clientX + 'px';
         menu.style.top = e.clientY + 'px';
         menu.style.display = 'block';
 
-        // Ensure menu stays within viewport
         const rect = menu.getBoundingClientRect();
         if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 5) + 'px';
         if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 5) + 'px';
 
-        // Bind actions
         menu.querySelectorAll('.ctx-item').forEach(item => {
             item.addEventListener('click', (evt) => {
-                evt.stopPropagation(); // Prevent document handler from closing sub-menus
+                evt.stopPropagation();
                 const action = item.dataset.action;
                 _closeUnitContextMenu();
                 if (action === 'select') {
@@ -1216,7 +1134,6 @@ const KUnits = (() => {
         });
     }
 
-    /** Build an HTML stat bar row for the unit info card. */
     function _buildStatBar(label, pct, color) {
         return `<div class="unit-stat-row">
             <span class="unit-stat-label">${label}</span>
@@ -1225,7 +1142,6 @@ const KUnits = (() => {
         </div>`;
     }
 
-    /** Rename a unit via API. */
     async function _renameUnit(u) {
         const newName = prompt('Rename unit:', u.name);
         if (!newName || newName.trim() === u.name) return;
@@ -1240,10 +1156,8 @@ const KUnits = (() => {
                 body: JSON.stringify({ name: newName.trim() }),
             });
             if (resp.ok) {
-                // Update local data and re-render
                 u.name = newName.trim();
                 render(allUnitsData);
-                // Refresh CoC tree
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
@@ -1371,7 +1285,6 @@ const KUnits = (() => {
                 });
                 if (resp.ok) {
                     const updated = await resp.json();
-                    // Update local data
                     const idx = allUnitsData.findIndex(au => au.id === unitId);
                     if (idx >= 0) {
                         Object.assign(allUnitsData[idx], updated);
@@ -1421,7 +1334,6 @@ const KUnits = (() => {
         } catch (err) { alert(err.message); }
     }
 
-    /** Delete unit via admin API. */
     async function _deleteUnit(u) {
         if (!confirm(`Delete unit "${u.name}"? This cannot be undone.`)) return;
         const token = KSessionUI.getToken();
@@ -1456,7 +1368,6 @@ const KUnits = (() => {
         if (isNaN(pct) || pct < 10 || pct > 90) { alert('Enter a number between 10 and 90'); return; }
         const ratio = pct / 100;
 
-        // Auto-naming: backend handles it
         const token = KSessionUI.getToken();
         const sessionId = KSessionUI.getSessionId();
         if (!token || !sessionId) return;
@@ -1470,7 +1381,6 @@ const KUnits = (() => {
             if (resp.ok) {
                 const data = await resp.json();
                 KGameLog.addEntry(`${u.name} split → ${data.original.name} + ${data.new_unit.name}`, 'info');
-                // Reload units
                 await load(sessionId, token);
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
@@ -1487,16 +1397,17 @@ const KUnits = (() => {
     function _showMergePicker(u, origEvent) {
         const menu = _createUnitContextMenu();
         const principalType = _getPrincipalType(u.unit_type);
+        const mergeDistM = (CFG && CFG.merge_distance_m) || 50;
         const nearby = allUnitsData.filter(ou => {
             if (ou.id === u.id || ou.side !== u.side || ou.is_destroyed) return false;
             if (_getPrincipalType(ou.unit_type) !== principalType) return false;
             if (u.lat == null || u.lon == null || ou.lat == null || ou.lon == null) return false;
-            return _haversineDist(u.lat, u.lon, ou.lat, ou.lon) <= 50;
+            return _haversineDist(u.lat, u.lon, ou.lat, ou.lon) <= mergeDistM;
         });
 
         let html = '<div class="ctx-menu-header">Merge Into ' + u.name + '</div>';
         if (nearby.length === 0) {
-            html += '<div style="padding:6px 12px;font-size:11px;color:#888;">No compatible units within 50m</div>';
+            html += `<div style="padding:6px 12px;font-size:11px;color:#888;">No compatible units within ${mergeDistM}m</div>`;
         } else {
             nearby.forEach(ou => {
                 const strPct = ou.strength != null ? Math.round(ou.strength * 100) + '%' : '?';
@@ -1554,8 +1465,6 @@ const KUnits = (() => {
     }
 
     // ── Principal type extraction ─────────────────
-    const SIZE_SUFFIXES = ['_battalion', '_company', '_battery', '_platoon', '_section', '_squad', '_team', '_post', '_unit'];
-
     function _getPrincipalType(unitType) {
         if (!unitType) return '';
         for (const suffix of SIZE_SUFFIXES) {
@@ -1631,10 +1540,8 @@ const KUnits = (() => {
             body: JSON.stringify({ assigned_user_ids: currentIds }),
         }).then(async resp => {
             if (resp.ok) {
-                // Reload units from server to get updated assigned_user_names
                 await load(sessionId, token);
                 if (_map) _map.closePopup();
-                // Refresh CoC tree
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 resp.json().then(d => console.warn('Assign rejected:', d.detail || d)).catch(() => {});
@@ -1663,8 +1570,7 @@ const KUnits = (() => {
 
             const from = L.latLng(u.lat, u.lon);
             const to = L.latLng(target.lat, target.lon);
-            const isBlue = u.side === 'blue';
-            const accent = isBlue ? '#4fc3f7' : '#ef5350';
+            const accent = _sideColor(u.side);
 
             _drawMovementArrow(from, to, accent);
         });
@@ -1673,15 +1579,16 @@ const KUnits = (() => {
     /** Draw a single movement arrow: elegant tapered line (max 300m) with pointed arrowhead. */
     function _drawMovementArrow(from, target, accent) {
         const to = target;
+        const aCfg = (CFG && CFG.movement_arrows) || {};
 
         const dLat = to.lat - from.lat;
         const dLon = to.lng - from.lng;
         const geoLen = Math.sqrt(dLat * dLat + dLon * dLon);
 
-        if (geoLen < 0.00005) return;
+        const minGeoLen = aCfg.min_geo_len || 0.00005;
+        if (geoLen < minGeoLen) return;
 
-        // Cap line at ~300m in geographic degrees (approx 0.0027° at mid-latitudes)
-        const MAX_LEN = 0.0027;
+        const MAX_LEN = aCfg.max_length_deg || 0.0027;
         let endLat, endLon, arrowLen;
         if (geoLen > MAX_LEN) {
             const ratio = MAX_LEN / geoLen;
@@ -1694,12 +1601,11 @@ const KUnits = (() => {
             arrowLen = geoLen;
         }
 
-        // Draw tapered line: multiple segments from thick to thin
-        const SEGMENTS = 5;
-        const startWeight = 5;
-        const endWeight = 1.2;
-        // Shorten the line so arrowhead sits at the tip
-        const ahLen = arrowLen * 0.18;
+        const SEGMENTS = aCfg.segments || 5;
+        const startWeight = aCfg.start_weight || 5;
+        const endWeight = aCfg.end_weight || 1.2;
+        const ahRatio = aCfg.arrowhead_ratio || 0.18;
+        const ahLen = arrowLen * ahRatio;
         const lineLen = arrowLen - ahLen;
 
         for (let i = 0; i < SEGMENTS; i++) {
@@ -1710,7 +1616,7 @@ const KUnits = (() => {
             const lat1 = from.lat + (endLat - from.lat) * (t1 * lineLen / arrowLen);
             const lon1 = from.lng + (endLon - from.lng) * (t1 * lineLen / arrowLen);
             const w = startWeight + (endWeight - startWeight) * ((t0 + t1) / 2);
-            const op = 0.7 - 0.15 * t0; // slight fade
+            const op = 0.7 - 0.15 * t0;
 
             _movementArrowsLayer.addLayer(L.polyline(
                 [[lat0, lon0], [lat1, lon1]], {
@@ -1725,28 +1631,29 @@ const KUnits = (() => {
             ));
         }
 
-        // Arrowhead at the end
         _drawArrowheadOnPane(from.lat, from.lng, endLat, endLon, accent, ahLen);
     }
 
     /** Draw a sleek triangular arrowhead on the movement arrows pane. */
     function _drawArrowheadOnPane(fromLat, fromLon, toLat, toLon, color, size) {
         size = size || 0.0004;
+        const aCfg = (CFG && CFG.movement_arrows) || {};
         const dLat = toLat - fromLat;
         const dLon = toLon - fromLon;
         const angle = Math.atan2(dLon, dLat);
-        const spread = 0.35;
+        const spread = aCfg.arrowhead_spread || 0.35;
 
         const tip   = [toLat, toLon];
         const left  = [toLat - size * Math.cos(angle - spread), toLon - size * Math.sin(angle - spread)];
         const right = [toLat - size * Math.cos(angle + spread), toLon - size * Math.sin(angle + spread)];
-        const notch = size * 0.35;
+        const notchRatio = aCfg.arrowhead_notch_ratio || 0.35;
+        const notch = size * notchRatio;
         const back  = [toLat - notch * Math.cos(angle), toLon - notch * Math.sin(angle)];
 
         _movementArrowsLayer.addLayer(L.polygon([tip, left, back, right], {
             color: color,
             fillColor: color,
-            fillOpacity: 0.85,
+            fillOpacity: aCfg.fill_opacity || 0.85,
             weight: 0.5,
             interactive: false,
             pane: 'movementArrowsPane',
@@ -1761,20 +1668,26 @@ const KUnits = (() => {
         if (!_selectionLayer) return;
         _selectionLayer.clearLayers();
 
+        const defaultDetRange = (CFG && CFG.defaults && CFG.defaults.detection_range) || 2000;
+        const selCfg = (CFG && CFG.selection) || {};
+        const ringRadius = selCfg.ring_radius_px || 20;
+        const vsCfg = (CFG && CFG.viewshed) || {};
+        const fireColor = vsCfg.fire_range_color || '#ff9800';
+        const fbDash = vsCfg.fallback_dash || '6,4';
+
         selectedUnitIds.forEach(uid => {
             const u = allUnitsData.find(unit => unit.id === uid);
             if (!u || u.lat == null || u.lon == null) return;
 
             const pos = L.latLng(u.lat, u.lon);
-            const isBlue = u.side === 'blue';
-            const accent = isBlue ? '#4fc3f7' : '#ef5350';
-            const detRange = u.detection_range_m || 2000;
+            const accent = _sideColor(u.side);
+            const detRange = u.detection_range_m || defaultDetRange;
             const fireRange = FIRE_RANGE[u.unit_type] || DEFAULT_FIRE_RANGE;
             const isIndirect = INDIRECT_FIRE_TYPES.has(u.unit_type);
 
-            // ── Selection ring (fixed pixel size — does not zoom) ──
+            // Selection ring
             _selectionLayer.addLayer(L.circleMarker(pos, {
-                radius: 20,
+                radius: ringRadius,
                 color: accent,
                 weight: 2,
                 fillColor: accent,
@@ -1782,68 +1695,64 @@ const KUnits = (() => {
                 interactive: false,
             }));
 
-            // ── Detection / visibility range (viewshed polygon) ──
+            // Detection / visibility range (viewshed polygon)
             const cached = _viewshedCache[u.id];
             if (cached && cached.geometry && cached.geometry.coordinates) {
                 const coords = cached.geometry.coordinates[0];
                 const latlngs = coords.map(c => [c[1], c[0]]);
-                const smoothed = _smoothPolygon(latlngs, 2);
+                const smoothed = _smoothPolygon(latlngs);
                 _selectionLayer.addLayer(L.polygon(smoothed, {
                     color: accent,
-                    weight: 1.5,
-                    opacity: 0.6,
+                    weight: vsCfg.detection_line_weight || 1.5,
+                    opacity: vsCfg.detection_line_opacity || 0.6,
                     fillColor: accent,
-                    fillOpacity: 0.12,
+                    fillOpacity: vsCfg.detection_fill_opacity_selected || 0.12,
                     interactive: false,
                 }));
 
-                // Direct fire range: clip viewshed to fire range
                 if (!isIndirect && fireRange < detRange * 0.95) {
                     const clipped = _clipViewshedToRange(coords, u.lat, u.lon, fireRange);
-                    const smoothedFire = _smoothPolygon(clipped, 2);
+                    const smoothedFire = _smoothPolygon(clipped);
                     _selectionLayer.addLayer(L.polygon(smoothedFire, {
-                        color: '#ff9800',
-                        weight: 1.5,
-                        opacity: 0.6,
-                        fillColor: '#ff9800',
-                        fillOpacity: 0.12,
+                        color: fireColor,
+                        weight: vsCfg.detection_line_weight || 1.5,
+                        opacity: vsCfg.detection_line_opacity || 0.6,
+                        fillColor: fireColor,
+                        fillOpacity: vsCfg.detection_fill_opacity_selected || 0.12,
                         interactive: false,
                     }));
                 }
             } else if (cached === false) {
-                // Viewshed fetch failed — show fallback dashed circle
                 _selectionLayer.addLayer(L.circle(pos, {
                     radius: detRange,
                     color: accent,
                     weight: 1,
                     opacity: 0.4,
-                    dashArray: '6,4',
+                    dashArray: fbDash,
                     fillColor: accent,
                     fillOpacity: 0.06,
                     interactive: false,
                 }));
             } else {
-                // No viewshed cached yet — fetch in background, redraw when ready
                 _fetchViewshed(u.id).then(() => {
                     if (selectedUnitIds.has(uid)) _drawSelectionOverlays();
                 });
             }
 
-            // ── Indirect fire range: always circle (not LOS-affected) ──
             if (isIndirect) {
                 _selectionLayer.addLayer(L.circle(pos, {
                     radius: fireRange,
-                    color: '#ff9800',
-                    weight: 1.5,
-                    opacity: 0.6,
-                    dashArray: '6,4',
-                    fillColor: '#ff9800',
+                    color: fireColor,
+                    weight: vsCfg.detection_line_weight || 1.5,
+                    opacity: vsCfg.detection_line_opacity || 0.6,
+                    dashArray: fbDash,
+                    fillColor: fireColor,
                     fillOpacity: 0.10,
                     interactive: false,
                 }));
             }
 
-            // ── Heading indicator (only if NOT moving — arrows handle movement) ──
+            // Heading indicator
             const target = _extractTarget(u);
             if (!target && u.heading_deg != null && u.heading_deg !== 0) {
                 _drawHeadingIndicator(pos, u.heading_deg, accent);
@@ -1851,7 +1760,6 @@ const KUnits = (() => {
         });
     }
 
-    /** Extract target lat/lon from unit's current_task, if any. */
     function _extractTarget(u) {
         if (!u.current_task) return null;
         const t = u.current_task;
@@ -1864,10 +1772,9 @@ const KUnits = (() => {
         return null;
     }
 
-    /** Draw a short heading indicator line (no movement target). */
     function _drawHeadingIndicator(pos, headingDeg, color) {
         const rad = (headingDeg * Math.PI) / 180;
-        const dist = 250; // 250 m indicator
+        const dist = (CFG && CFG.heading_indicator_m) || 250;
         const latRad = pos.lat * Math.PI / 180;
         const dLat = (dist / 111320) * Math.cos(rad);
         const dLon = (dist / (111320 * Math.cos(latRad))) * Math.sin(rad);
@@ -1882,16 +1789,17 @@ const KUnits = (() => {
             interactive: false,
         }));
 
-        _drawArrowhead(pos.lat, pos.lng, endLat, endLon, color, 0.00025);
+        const haCfg = (CFG && CFG.heading_arrowhead) || {};
+        _drawArrowhead(pos.lat, pos.lng, endLat, endLon, color, haCfg.size || 0.00025);
     }
 
-    /** Draw a small triangular arrowhead at (toLat, toLon) on the selection layer. */
     function _drawArrowhead(fromLat, fromLon, toLat, toLon, color, size) {
         size = size || 0.0005;
+        const haCfg = (CFG && CFG.heading_arrowhead) || {};
         const dLat = toLat - fromLat;
         const dLon = toLon - fromLon;
         const angle = Math.atan2(dLon, dLat);
-        const spread = 0.5;
+        const spread = haCfg.spread || 0.5;
 
         const tip   = [toLat, toLon];
         const left  = [toLat - size * Math.cos(angle - spread), toLon - size * Math.sin(angle - spread)];
@@ -1921,10 +1829,8 @@ const KUnits = (() => {
     }
 
     function _updateSelectionUI() {
-        // Delegate to KOrders for styled unit chip display
         const ids = Array.from(selectedUnitIds);
         try { KOrders.updateSelectedDisplay(ids); } catch(e) {
-            // Fallback if KOrders not loaded yet
             const selDisplay = document.getElementById('selected-units-display');
             if (!selDisplay) return;
             if (ids.length === 0) {
@@ -1942,7 +1848,6 @@ const KUnits = (() => {
         return allUnitsData;
     }
 
-    /** Clear all unit layers and data (used on logout). */
     function clearAll() {
         if (unitsLayer) unitsLayer.clearLayers();
         if (_selectionLayer) _selectionLayer.clearLayers();
@@ -1957,19 +1862,11 @@ const KUnits = (() => {
     }
 
     function update(units, tick) {
-        // Invalidate viewshed cache on tick change
         if (tick !== undefined) _invalidateViewshedCache(tick);
-
-        // Invalidate viewshed for units whose position changed (e.g. admin move, engine tick)
         _invalidateMovedUnitsViewshed(units);
-
         render(units);
     }
 
-    /**
-     * Compare incoming unit positions with cached data and invalidate
-     * viewshed entries for units that have moved.
-     */
     function _invalidateMovedUnitsViewshed(newUnits) {
         if (!newUnits || !allUnitsData.length) return;
         const oldMap = {};
@@ -1977,14 +1874,12 @@ const KUnits = (() => {
         for (const nu of newUnits) {
             const old = oldMap[nu.id];
             if (!old) continue;
-            // If position changed, clear viewshed for this unit
             if (old.lat !== nu.lat || old.lon !== nu.lon) {
                 delete _viewshedCache[nu.id];
             }
         }
     }
 
-    /** Force-clear the entire viewshed cache (e.g., after admin adds/removes a unit). */
     function _invalidateAllViewsheds() {
         _viewshedCache = {};
         _viewshedPending = {};
@@ -1994,6 +1889,17 @@ const KUnits = (() => {
         return unitMarkers[unitId] || null;
     }
 
+    /** Expose config getters for other modules that may need them */
+    function getConfig() { return CFG; }
+    function getFireRange(unitType) { return FIRE_RANGE[unitType] || DEFAULT_FIRE_RANGE; }
+    function getPersonnel(unitType) { return PERSONNEL[unitType] || DEFAULT_PERSONNEL; }
+    function getEyeHeight(unitType) { return UNIT_EYE_HEIGHTS[unitType] || DEFAULT_UNIT_EYE_HEIGHT; }
+    function getStatusIcon(status) { return STATUS_ICONS[status] || '•'; }
+    function getStatusColor(status) { return STATUS_COLORS[status] || '#aaa'; }
+    function getSpeedOptions() { return SPEED_OPTIONS; }
+    function getFormations() { return FORMATIONS; }
+    function isIndirectFire(unitType) { return INDIRECT_FIRE_TYPES.has(unitType); }
+
     return {
         init, load, update, render, getMarker,
         toggle, isVisible,
@@ -2002,5 +1908,9 @@ const KUnits = (() => {
         clearAll, setAdminDrag,
         invalidateViewshedCache: _invalidateViewshedCache,
         invalidateAllViewsheds: _invalidateAllViewsheds,
+        // Config accessors
+        getConfig, getFireRange, getPersonnel, getEyeHeight,
+        getStatusIcon, getStatusColor, getSpeedOptions, getFormations,
+        isIndirectFire,
     };
 })();

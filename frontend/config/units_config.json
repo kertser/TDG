@@ -1,0 +1,111 @@
+{
+    "_comment": "Display and behavior configuration for units.js. All hard-coded constants extracted here.",
+
+    "defaults": {
+        "personnel": 20,
+        "fire_range": 400,
+        "detection_range": 2000,
+        "eye_height": 2.0,
+        "speed_slow": 1.2,
+        "speed_fast": 3.0
+    },
+
+    "status_icons": {
+        "idle": "⏸",
+        "moving": "🚶",
+        "engaging": "⚔",
+        "defending": "🛡",
+        "retreating": "↩",
+        "observing": "👁",
+        "suppressed": "💥",
+        "broken": "💔",
+        "destroyed": "☠",
+        "supporting": "🤝"
+    },
+
+    "status_colors": {
+        "idle": "#aaa",
+        "moving": "#4fc3f7",
+        "engaging": "#f44336",
+        "defending": "#66bb6a",
+        "retreating": "#ff9800",
+        "observing": "#90caf9",
+        "suppressed": "#e91e63",
+        "broken": "#9c27b0",
+        "destroyed": "#666",
+        "supporting": "#4caf50"
+    },
+
+    "speed_options": {
+        "slow": { "label": "Slow", "icon": "🐢", "color": "#81c784" },
+        "fast": { "label": "Fast", "icon": "⚡", "color": "#ff9800" }
+    },
+
+    "formations": [
+        { "key": "column", "label": "Column", "icon": "║" },
+        { "key": "line", "label": "Line", "icon": "═" },
+        { "key": "wedge", "label": "Wedge", "icon": "▽" },
+        { "key": "vee", "label": "Vee", "icon": "△" },
+        { "key": "echelon_left", "label": "Echelon L", "icon": "╲" },
+        { "key": "echelon_right", "label": "Echelon R", "icon": "╱" },
+        { "key": "staggered", "label": "Staggered", "icon": "⋮" },
+        { "key": "box", "label": "Box", "icon": "▢" },
+        { "key": "diamond", "label": "Diamond", "icon": "◇" },
+        { "key": "dispersed", "label": "Dispersed", "icon": "·:·" }
+    ],
+
+    "side_colors": {
+        "blue": "#4fc3f7",
+        "red": "#ef5350"
+    },
+
+    "selection": {
+        "threshold_px": 6,
+        "ring_radius_px": 20,
+        "rubber_band_color": "#4fc3f7",
+        "rubber_band_weight": 1,
+        "rubber_band_fill_opacity": 0.12,
+        "rubber_band_dash": "5,4"
+    },
+
+    "merge_distance_m": 50,
+    "heading_indicator_m": 250,
+
+    "movement_arrows": {
+        "max_length_deg": 0.0027,
+        "segments": 5,
+        "start_weight": 5,
+        "end_weight": 1.2,
+        "arrowhead_ratio": 0.18,
+        "arrowhead_spread": 0.35,
+        "arrowhead_notch_ratio": 0.35,
+        "fill_opacity": 0.85,
+        "min_geo_len": 0.00005
+    },
+
+    "heading_arrowhead": {
+        "size": 0.00025,
+        "spread": 0.5
+    },
+
+    "viewshed": {
+        "rays": 72,
+        "smooth_iterations": 2,
+        "detection_line_weight": 1.5,
+        "detection_line_opacity": 0.6,
+        "detection_fill_opacity_hover": 0.10,
+        "detection_fill_opacity_selected": 0.12,
+        "fire_range_color": "#ff9800",
+        "fallback_dash": "6,4"
+    },
+
+    "size_suffixes": [
+        "_battalion", "_company", "_battery", "_platoon",
+        "_section", "_squad", "_team", "_post", "_unit"
+    ],
+
+    "movement_arrow_pane_z": 350,
+
+    "tooltip_offset": [0, -18]
+}
+

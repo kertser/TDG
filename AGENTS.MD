@@ -757,6 +757,7 @@ The Rules Engine runs once per **tick**. A tick represents a configurable time s
 1. Process pending validated orders → assign tasks to units
 2. Execute movement for all units with movement tasks
 3. Execute detection checks (Blue→Red and Red→Blue)
+3b. Map object discovery (LOS-based: units reveal hidden obstacles/structures)
 4. Decay stale contacts
 5. Execute combat resolution for engaged units
 6. Apply suppression effects
@@ -1183,12 +1184,14 @@ if unit.ammo <= 0:
 | **Unit Type Editor** | `admin.js`, `index.html`, `style.css` | Floating draggable window for editing unit type definitions. Two-column layout: form (Identity: key, display name, HQ checkbox; Combat Stats: detection, fire range, speed, personnel in 2×2 grid; Symbol Codes: Blue/Red SIDC) + live preview panel (Blue/Red milsymbol renders, stats summary). Replaces sequential prompt() dialogs. |
 | **Session Wizard Terrain Step** | `admin.js`, `index.html` | 4-step session creation wizard: Setup → Participants → Terrain → Done. Terrain step (step 3) runs auto-analysis (OSM + elevation) with SSE progress bar, depth selector, skip-elevation toggle, and skip option. Auto-advances to Done on success. Session Setup Steps guide updated to include terrain analysis. |
 | **Tactical Map Objects** | `map_objects.js` (FE), `map_objects.py` (API), `engine/map_objects.py` | Static and dynamic battlefield objects: barbed wire (polyline), minefields (ellipse areas), entrenchments (polyline), roadblocks (point), pillboxes (point), bridges (point), command posts (point), fuel depots (point), supply caches (point), observation towers (point), field hospitals (point), airfields (area, realistic runway SVG). NATO-style tactical markers. Admin-only placement/deletion. Objects affect engine: minefields damage/slow units, barbed wire slows, entrenchments add protection, etc. Draggable when admin panel is open. |
+| **Map Object Discovery** | `map_object.py` (model), `map_objects.py` (API), `tick.py` (engine), `map_objects.js` (FE) | Per-side discovery system for map objects. Objects have `discovered_by_blue` and `discovered_by_red` flags. **Obstacles** default to hidden (both sides), **structures** default to revealed. When a unit's LOS covers an object, it becomes permanently discovered for that side. Admin right-click context menu on objects: toggle Blue/Red Revealed/Hidden. Backend filters GET/WS broadcasts by discovery status — non-admin players only receive objects discovered by their side. Admin sees all objects with visual opacity hint for hidden ones. Tooltip shows Blue/Red discovery icons in admin mode. Discovery events generated during tick: `object_discovered` with side-specific visibility. **Immediate discovery**: `POST /map-objects/discover` endpoint runs LOS check without waiting for tick; frontend calls it on map-objects load. **Drag handles**: all object types (lines, polygons, airfields, points) draggable in admin mode via centroid drag handles. **Airfield hit-area**: transparent rectangle overlay for reliable tooltip/context-menu on airfields. |
 | **Engineering Units** | `unit_types.json`, `units.py`, `engine/engineering.py` | 12 engineering unit types: engineer platoon/section, combat engineer platoon/section/team, mine layer section/team, obstacle breacher team/section, engineer recon team, construction engineer platoon/section, AVLB vehicle/section. Each has specific capabilities (mine clearance, mine laying, breach, bridge deploy). Interact with tactical objects (clear minefields, breach barbed wire, deploy bridges). |
 | **SIDC Code Audit & Fix** | `unit_types.json` | Corrected all 36 unit type SIDC codes to proper MIL-STD-2525D: fixed echelon indicators (team=11, squad=12, section=13), added mechanized infantry entity subtype (121102), proper mortar entity (130200), anti-tank subtype (121104), sniper subtype (121106), observation post subtype (121302), differentiated all engineer subtypes (01-06), HQ entity (110000), logistics entity (160700). |
 | **Commander Hierarchy Management** | `units.py`, `admin.js`, `style.css` | Public API endpoint `PUT /sessions/{id}/units/{unit_id}/parent` for commanders to reparent units with authority checks. Drag-and-drop in CoC tree: drag onto unit = become child, drag to top = become sibling, drag to empty = detach. Move-up/move-down buttons visible on hover. Permission-aware: buttons/drag only for authorized units. Cycle detection prevents circular hierarchies. |
 | **Bottom Command Panel** | `index.html`, `session_ui.js`, `style.css` | Map-centered bottom panel with two tabs: Orders (text input for unit commands) and Radio (tactical radio chat between commanders). Auto-collapses to save map space, expands on hover/focus. Game time + author badges. |
 | **Radio Chat** | `session_ui.js`, `style.css` | Tactical radio channel between session commanders. Select recipient (all or specific commander). Messages stored and delivered to recipients. Blinking LED indicator for unread messages. Military radio styling. |
-| **Editable Unit Types Config** | `frontend/config/unit_types.json` | Unit type definitions (SIDC codes, speeds, personnel, detection/fire ranges) stored in editable JSON config file instead of hardcoded JavaScript. Loaded on startup. Admin Unit Type Editor reads/writes to this config. |
+| **Editable Unit Types Config** | `frontend/config/unit_types.json` | Unit type definitions (SIDC codes, speeds, personnel, detection/fire ranges, eye heights, indirect fire flag) stored in editable JSON config file instead of hardcoded JavaScript. Extended with `speed_slow`/`speed_fast`, `eye_height`, `indirect_fire` fields. Loaded on startup. Admin Unit Type Editor reads/writes to this config. |
+| **Units Display Config** | `frontend/config/units_config.json` | All non-per-type constants extracted from `units.js` into editable JSON: status icons/colors, speed options, formations, side colors, selection params, merge distance, movement arrow drawing params, heading indicator, viewshed rendering params, size suffixes, default values. Loaded async at `KUnits.init()`. |
 
 ### Permission / Authority System
 
@@ -1238,7 +1241,7 @@ if unit.ammo <= 0:
 5. **Side + role dual observer check**: Observer restriction checks both `participant.side == 'observer'` and `participant.role == 'observer'` to handle blue/red-side observers.
 6. **Append-only events**: Event table is never updated/deleted. Supports replay.
 7. **JSONB for flexibility**: Unit tasks, capabilities, order payloads, scenario config use JSONB columns.
-8. **Editable config over hardcode**: Unit type definitions (SIDC, speeds, personnel) in `frontend/config/unit_types.json` instead of JavaScript constants. Backend `UNIT_TYPE_SPEEDS` mirrors config for engine use.
+8. **Editable config over hardcode**: Unit type definitions (SIDC, speeds, personnel) in `frontend/config/unit_types.json` instead of JavaScript constants. Display/behavior constants (status icons, formations, movement arrows, selection params) in `frontend/config/units_config.json`. Backend `UNIT_TYPE_SPEEDS` mirrors config for engine use.
 9. **MIL-STD-2525D SIDC compliance**: All unit SIDCs follow 20-character 2525D format with correct echelon (pos 9-10), HQ indicator (pos 8), entity/type/subtype (pos 11-16), and standard identity (pos 4: 3=Friend, 6=Hostile).
 
 ---
@@ -1343,6 +1346,7 @@ KShU/
 │   ├── favicon.svg
 │   ├── config/
 │   │   └── unit_types.json        ← Editable unit type registry (SIDC, speeds, personnel, capabilities)
+│   │   └── units_config.json      ← Units display/behavior config (status icons, formations, drawing params)
 │   ├── css/
 │   │   └── style.css
 │   └── js/
