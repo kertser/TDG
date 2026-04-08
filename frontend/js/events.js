@@ -81,7 +81,7 @@ const KEvents = (() => {
         }
 
         div.innerHTML = `
-            <span style="font-size:11px;color:#888;">Turn ${event.tick || '?'}</span>
+            <span style="font-size:11px;color:#888;">Turn ${event.tick != null ? event.tick : '?'}</span>
             ${icon} ${event.text_summary || event.event_type}
         `;
 

@@ -155,6 +155,62 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     blue_units = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
 
+    # ── 1b. Resolve attack targets from contacts ──────────────
+    # For units with attack/engage task but no target_location, find the nearest
+    # known enemy contact and set it as the movement target so they advance.
+    result_contacts = await db.execute(
+        select(Contact).where(Contact.session_id == session_id, Contact.is_stale == False)
+    )
+    active_contacts = list(result_contacts.scalars().all())
+
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        task = unit.current_task
+        if not task:
+            continue
+        task_type = task.get("type", "")
+        if task_type not in ("attack", "engage", "fire"):
+            continue
+        # Already has a target location — movement engine will handle it
+        if task.get("target_location"):
+            continue
+
+        unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+        # Try to find nearest enemy contact for this unit's side
+        best_dist = float('inf')
+        best_lat = None
+        best_lon = None
+
+        for contact in active_contacts:
+            c_side = contact.observing_side.value if hasattr(contact.observing_side, 'value') else str(contact.observing_side)
+            if c_side != unit_side:
+                continue  # This contact is observed by the other side
+            if contact.location_estimate is None:
+                continue
+            try:
+                c_pt = to_shape(contact.location_estimate)
+                c_lat, c_lon = c_pt.y, c_pt.x
+            except Exception:
+                continue
+            try:
+                u_pt = to_shape(unit.position)
+                u_lat, u_lon = u_pt.y, u_pt.x
+            except Exception:
+                continue
+            dlat = (c_lat - u_lat) * 111320
+            dlon = (c_lon - u_lon) * 74000
+            dist = (dlat**2 + dlon**2) ** 0.5
+            if dist < best_dist:
+                best_dist = dist
+                best_lat = c_lat
+                best_lon = c_lon
+
+        if best_lat is not None:
+            task["target_location"] = {"lat": best_lat, "lon": best_lon}
+            unit.current_task = task
+
     # ── Load map objects (obstacles, structures) ─────────────
     mo_result = await db.execute(
         select(MapObject).where(MapObject.session_id == session_id)

@@ -1,0 +1,301 @@
+<!DOCTYPE html><html><head><title>Corrected SIDC Check</title>
+<style>
+body { background: #1a1a2e; color: #e0e0e0; font-family: sans-serif; padding: 20px; }
+h1 { color: #4fc3f7; }
+h2 { color: #ff9800; margin-top: 30px; }
+.row { display: flex; align-items: center; gap: 15px; margin: 6px 0; padding: 6px 10px; background: #16213e; border-radius: 6px; }
+.row.bad { background: #2a1010; border-left: 3px solid #e53935; }
+.row.good { border-left: 3px solid #4caf50; }
+.label { width: 180px; font-size: 12px; font-weight: 700; }
+.expect { width: 150px; font-size: 11px; color: #888; }
+.sidc { font-family: monospace; font-size: 10px; color: #666; width: 200px; }
+.entity { font-family: monospace; font-size: 10px; color: #90caf9; width: 80px; }
+</style></head><body><h1>Corrected SIDC Verification</h1><div class="row good">
+        <div class="label">headquarters</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="111.6" viewBox="21 6 158 248"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><text x="100" y="115" text-anchor="middle" font-size="42" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >C2</text><path d="M25,150 L25,250" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,40L100,15" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="131.4" viewBox="24 -16 152 292"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><text x="100" y="115" text-anchor="middle" font-size="42" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >C2</text><path d="M28,100 L28,272" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,18L100,-7" ></path></g></svg></div>
+        <div class="entity">110000</div>
+        <div class="expect">C2 + HQ staff</div>
+        <div class="sidc">10031002151100000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">command_post</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="105.975" viewBox="21 18.5 158 235.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><text x="100" y="115" text-anchor="middle" font-size="42" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >C2</text><path d="M25,150 L25,250" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="125.775" viewBox="24 -3.5 152 279.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><text x="100" y="115" text-anchor="middle" font-size="42" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >C2</text><path d="M28,100 L28,272" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">110000</div>
+        <div class="expect">C2 + HQ staff</div>
+        <div class="sidc">10031002141100000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">infantry_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">121100</div>
+        <div class="expect">X cross</div>
+        <div class="sidc">10031000111211000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">infantry_squad</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">121100</div>
+        <div class="expect">X cross</div>
+        <div class="sidc">10031000121211000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">infantry_section</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">121100</div>
+        <div class="expect">X cross</div>
+        <div class="sidc">10031000131211000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">infantry_platoon</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">121100</div>
+        <div class="expect">X cross</div>
+        <div class="sidc">10031000141211000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">infantry_company</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,40L100,15" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,18L100,-7" ></path></g></svg></div>
+        <div class="entity">121100</div>
+        <div class="expect">X cross</div>
+        <div class="sidc">10031000151211000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">infantry_battalion</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M90,40L90,15" ></path><path d="M110,40L110,15" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M90,18L90,-7" ></path><path d="M110,18L110,-7" ></path></g></svg></div>
+        <div class="entity">121100</div>
+        <div class="expect">X cross</div>
+        <div class="sidc">10031000161211000000</div>
+        <div style="font-size:11px;">✅ paths=4</div>
+    </div><div class="row good">
+        <div class="label">mech_platoon</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">121102</div>
+        <div class="expect">X + oval</div>
+        <div class="sidc">10031000141211020000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">mech_company</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,50 L175,150 M25,150 L175,50" stroke-width="4" stroke="black" fill="black" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,40L100,15" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,70L140,130M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,18L100,-7" ></path></g></svg></div>
+        <div class="entity">121102</div>
+        <div class="expect">X + oval</div>
+        <div class="sidc">10031000151211020000</div>
+        <div style="font-size:11px;">✅ paths=4</div>
+    </div><div class="row good">
+        <div class="label">tank_platoon</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">120500</div>
+        <div class="expect">oval</div>
+        <div class="sidc">10031000141205000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">tank_company</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,40L100,15" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M125,80 C150,80 150,120 125,120 L75,120 C50,120 50,80 75,80 Z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,18L100,-7" ></path></g></svg></div>
+        <div class="entity">120500</div>
+        <div class="expect">oval</div>
+        <div class="sidc">10031000151205000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">artillery_battery</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><circle cx="100" cy="100" r="15" stroke-width="4" stroke="black" fill="black" ></circle><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,40L100,15" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><circle cx="100" cy="100" r="15" stroke-width="4" stroke="black" fill="black" ></circle><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><path d="M100,18L100,-7" ></path></g></svg></div>
+        <div class="entity">130300</div>
+        <div class="expect">FA dot</div>
+        <div class="sidc">10031000151303000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row bad">
+        <div class="label">artillery_platoon</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><circle cx="100" cy="100" r="15" stroke-width="4" stroke="black" fill="black" ></circle><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><circle cx="100" cy="100" r="15" stroke-width="4" stroke="black" fill="black" ></circle><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">130300</div>
+        <div class="expect">FA dot</div>
+        <div class="sidc">10031000141303000000</div>
+        <div style="font-size:11px;">❌ paths=1</div>
+    </div><div class="row good">
+        <div class="label">mortar_section</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><circle cx="100" cy="115" r="5" stroke-width="4" stroke="black" fill="none" ></circle><path d="M100,111 l0,-30 M90,90 l10,-10 10,10" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><circle cx="100" cy="115" r="5" stroke-width="4" stroke="black" fill="none" ></circle><path d="M100,111 l0,-30 M90,90 l10,-10 10,10" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">130800</div>
+        <div class="expect">mortar circle</div>
+        <div class="sidc">10031000131308000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">mortar_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><circle cx="100" cy="115" r="5" stroke-width="4" stroke="black" fill="none" ></circle><path d="M100,111 l0,-30 M90,90 l10,-10 10,10" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><circle cx="100" cy="115" r="5" stroke-width="4" stroke="black" fill="none" ></circle><path d="M100,111 l0,-30 M90,90 l10,-10 10,10" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">130800</div>
+        <div class="expect">mortar circle</div>
+        <div class="sidc">10031000111308000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">at_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,150 L100,52 175,150" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,132 L100,30 140,132" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">120400</div>
+        <div class="expect">anti-armor</div>
+        <div class="sidc">10031000111204000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">recon_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,150L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">121300</div>
+        <div class="expect">slash</div>
+        <div class="sidc">10031000111213000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">recon_section</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M25,150L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">121300</div>
+        <div class="expect">slash</div>
+        <div class="sidc">10031000131213000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">observation_post</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="m 100,80 -25,40 50,0 z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="m 100,80 -25,40 50,0 z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">121200</div>
+        <div class="expect">eye/obs</div>
+        <div class="sidc">10031000111212000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">sniper_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M 60 85 L 90 85 L 60 85 z M 110 85 L 140 85 L 110 85 z M 100 90 L 100 115 L 100 90 z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M 60 85 L 90 85 L 60 85 z M 110 85 L 140 85 L 110 85 z M 100 90 L 100 115 L 100 90 z" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">121500</div>
+        <div class="expect">sniper</div>
+        <div class="sidc">10031000111215000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">engineer_platoon</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle</div>
+        <div class="sidc">10031000141407000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">engineer_section</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle</div>
+        <div class="sidc">10031000131407000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">combat_engr_plt</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CBT</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CBT</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+combat</div>
+        <div class="sidc">10031000141407000900</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">combat_engr_sect</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CBT</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CBT</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+combat</div>
+        <div class="sidc">10031000131407000900</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">combat_engr_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CBT</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CBT</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+combat</div>
+        <div class="sidc">10031000111407000900</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">mine_layer_sect</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><path d="m 80,65 0,10 40,0 0,-10 z" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><path d="m 80,65 0,10 40,0 0,-10 z" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">141600</div>
+        <div class="expect">mine laying</div>
+        <div class="sidc">10031000131416000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">mine_layer_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><path d="m 80,65 0,10 40,0 0,-10 z" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><path d="m 80,65 0,10 40,0 0,-10 z" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">141600</div>
+        <div class="expect">mine laying</div>
+        <div class="sidc">10031000111416000000</div>
+        <div style="font-size:11px;">✅ paths=4</div>
+    </div><div class="row good">
+        <div class="label">obst_breacher_tm</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CLR</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CLR</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">141400</div>
+        <div class="expect">mine clearing</div>
+        <div class="sidc">10031000111414000000</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row good">
+        <div class="label">obst_breacher_sect</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CLR</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="m 120,100 c 0,5.5 -9,10 -20,10 -11,0 -20,-4.5 -20,-10 0,-5.5 9,-10 20,-10 11,0 20,4.5 20,10 z m -5,-20 -30,40 m 0,-40 30,40 m -15,-40 0,40" stroke-width="4" stroke="black" fill="black" ></path><text x="100" y="77" text-anchor="middle" font-size="25" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CLR</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">141400</div>
+        <div class="expect">mine clearing</div>
+        <div class="sidc">10031000131414000000</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">engr_recon_team</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><path d="M25,150L175,50" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><path d="M60,130L140,70" stroke-width="4" stroke="black" fill="black" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">140703</div>
+        <div class="expect">castle+slash</div>
+        <div class="sidc">10031000111407030000</div>
+        <div style="font-size:11px;">✅ paths=4</div>
+    </div><div class="row good">
+        <div class="label">const_engr_plt</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="75" text-anchor="middle" font-size="20" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CONST</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="75" text-anchor="middle" font-size="20" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CONST</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+construction</div>
+        <div class="sidc">10031000141407001200</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">const_engr_sect</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="75" text-anchor="middle" font-size="20" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CONST</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><text x="100" y="75" text-anchor="middle" font-size="20" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CONST</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+construction</div>
+        <div class="sidc">10031000131407001200</div>
+        <div style="font-size:11px;">✅ paths=2</div>
+    </div><div class="row good">
+        <div class="label">avlb_vehicle</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="66.6" viewBox="21 6 158 148"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><path d="m 80,80 5,-5 30,0 5,5 m -40,-20 5,5 30,0 5,-5" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="15" ></circle><path d="M80,40L120,20" ></path></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="86.4" viewBox="24 -16 152 192"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><path d="m 80,80 5,-5 30,0 5,5 m -40,-20 5,5 30,0 5,-5" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="15" ></circle><path d="M80,18L120,-2" ></path></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+bridge</div>
+        <div class="sidc">10031000111407000600</div>
+        <div style="font-size:11px;">✅ paths=4</div>
+    </div><div class="row good">
+        <div class="label">avlb_section</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><path d="m 80,80 5,-5 30,0 5,5 m -40,-20 5,5 30,0 5,-5" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="30" r="7.5" fill="black" ></circle><circle cx="85" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><path d="M60,120 L60,80 140,80 140,120 M100,80 L100,110" stroke-width="4" stroke="black" fill="none" ></path><path d="m 80,80 5,-5 30,0 5,5 m -40,-20 5,5 30,0 5,-5" stroke-width="4" stroke="black" fill="none" ></path><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="115" cy="8" r="7.5" fill="black" ></circle><circle cx="85" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">140700</div>
+        <div class="expect">castle+bridge</div>
+        <div class="sidc">10031000131407000600</div>
+        <div style="font-size:11px;">✅ paths=3</div>
+    </div><div class="row bad">
+        <div class="label">logistics_unit</div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="71.1" height="60.975" viewBox="21 18.5 158 135.5"><path d="M25,50 l150,0 0,100 -150,0 z" stroke-width="4" stroke="black" fill="rgb(128,224,255)" fill-opacity="1" ></path><text x="100" y="110" text-anchor="middle" font-size="35" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CSS</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="30" r="7.5" fill="black" ></circle><circle cx="70" cy="30" r="7.5" fill="black" ></circle><circle cx="130" cy="30" r="7.5" fill="black" ></circle></g></svg></div>
+        <div><svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny" width="68.4" height="80.775" viewBox="24 -3.5 152 179.5"><path d="M 100,28 L172,100 100,172 28,100 100,28 Z" stroke-width="4" stroke="black" fill="rgb(255,128,128)" fill-opacity="1" ></path><text x="100" y="110" text-anchor="middle" font-size="35" font-family="Arial" font-weight="bold" stroke-width="4" stroke="none" fill="black" >CSS</text><g transform="translate(0,0)" stroke-width="4" stroke="black" fill="none" ><circle cx="100" cy="8" r="7.5" fill="black" ></circle><circle cx="70" cy="8" r="7.5" fill="black" ></circle><circle cx="130" cy="8" r="7.5" fill="black" ></circle></g></svg></div>
+        <div class="entity">160600</div>
+        <div class="expect">CSS icon</div>
+        <div class="sidc">10031000141606000000</div>
+        <div style="font-size:11px;">❌ paths=1</div>
+    </div></body></html>

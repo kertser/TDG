@@ -1903,6 +1903,22 @@ const KUnits = (() => {
         }
     }
 
+    /** Select all units the current user can command (same side, not observer). */
+    function selectAllCommandable() {
+        const side = typeof KSessionUI !== 'undefined' ? KSessionUI.getSide() : null;
+        const role = typeof KSessionUI !== 'undefined' ? KSessionUI.getRole() : null;
+        if (role === 'observer' || side === 'observer') return;
+
+        selectedUnitIds.clear();
+        for (const u of allUnitsData) {
+            if (u.side === side) {
+                selectedUnitIds.add(u.id);
+            }
+        }
+        _drawSelectionOverlays();
+        _updateSelectionUI();
+    }
+
     function getAllUnits() {
         return allUnitsData;
     }
@@ -1982,7 +1998,7 @@ const KUnits = (() => {
         init, load, update, render, getMarker,
         toggle, isVisible,
         toggleSelect, assignToMe,
-        getSelectedIds, clearSelection, getAllUnits,
+        getSelectedIds, clearSelection, selectAllCommandable, getAllUnits,
         clearAll, setAdminDrag,
         invalidateViewshedCache: _invalidateViewshedCache,
         invalidateAllViewsheds: _invalidateAllViewsheds,

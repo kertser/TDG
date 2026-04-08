@@ -153,7 +153,6 @@
         });
 
         KWebSocket.on('order_status', (data) => {
-            KGameLog.addEntry(`Order [${data.status}]: ${data.original_text || data.id}`, 'order');
             KOrders.onOrderStatus(data);
         });
 

@@ -131,7 +131,13 @@
 
             <!-- Game log panel -->
             <div id="log-tab" class="tab-panel">
-                <h3>Game Log</h3>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <h3 style="flex:1;margin:0;">Game Log</h3>
+                    <button id="export-log-btn" class="log-export-btn" title="Export log as text file">
+                        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>
+                        <span>Export</span>
+                    </button>
+                </div>
                 <div id="game-log"></div>
             </div>
 
@@ -163,6 +169,9 @@
                 <span id="cmd-author" class="cmd-author-badge" title="Sender"></span>
                 <span id="cmd-datetime" class="cmd-datetime-badge" title="Game time"></span>
             </div>
+            <button id="cmd-panel-maximize" class="cmd-toggle-btn" title="Maximize panel">
+                <svg viewBox="0 0 16 16" width="10" height="10"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+            </button>
             <button id="cmd-panel-toggle" class="cmd-toggle-btn" title="Pin panel open">
                 <svg viewBox="0 0 16 16" width="10" height="10"><path d="M8 2L8 10M4 6L8 2L12 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
@@ -174,6 +183,7 @@
                 <div id="selected-units-display" class="cmd-unit-chips">
                     <span class="cmd-hint">Select units on the map</span>
                 </div>
+                <button id="select-all-units-btn" class="cmd-chip-btn" title="Select all your units">👥 All</button>
                 <button id="clear-unit-selection-btn" class="cmd-chip-clear" title="Clear selection">✕</button>
             </div>
             <div class="cmd-input-row">
@@ -190,7 +200,11 @@
                 <select id="radio-recipient" class="cmd-radio-select" title="Select recipient">
                     <option value="all">📢 All Commanders</option>
                 </select>
-                <span class="cmd-radio-freq">CH 1 · SECURE</span>
+                <div class="radio-channel-toggle">
+                    <button class="radio-ch-btn active" data-radio-ch="all" title="All messages">All</button>
+                    <button class="radio-ch-btn" data-radio-ch="chat" title="Human chat only">💬 Chat</button>
+                    <button class="radio-ch-btn" data-radio-ch="operative" title="Unit radio responses">📡 Units</button>
+                </div>
             </div>
             <div id="radio-messages" class="cmd-radio-messages"></div>
             <div class="cmd-input-row">
@@ -1228,7 +1242,7 @@
                 <div class="rules-section">
                     <div class="rules-section-title">The Map</div>
                     <ul>
-                        <li><b>Pan</b> — Left-click drag or middle-mouse-button drag.</li>
+                        <li><b>Pan</b> — Middle-mouse-button drag (left-click is reserved for selection &amp; tools).</li>
                         <li><b>Zoom</b> — Scroll wheel, or use +/− controls.</li>
                         <li><b>Select units</b> — Left-click a unit marker. Shift+click or rubber-band drag to multi-select.</li>
                         <li><b>Unit context menu</b> — Right-click a unit for actions (move, formation, split, merge, etc.).</li>

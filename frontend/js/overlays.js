@@ -754,7 +754,7 @@ const KOverlays = (() => {
         const data = overlayDataMap[oid];
         _editState = null;
         if (data) addOverlayToMap(data);
-        map.dragging.enable();
+        // Note: map dragging stays disabled (middle-button pan only)
     }
 
     function isEditing() {
@@ -930,7 +930,7 @@ const KOverlays = (() => {
         _editState.isDragging = true;
         _editState.dragStartLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
         _editState.dragStartCenter = [..._editState.params.center];
-        map.dragging.disable();
+        map.dragging.disable(); // keep disabled (middle-button pan only)
         map.on('mousemove', _onShapeDragMove);
         map.on('mouseup', _onShapeDragEnd);
     }
@@ -948,7 +948,7 @@ const KOverlays = (() => {
         if (!_editState) return;
         map.off('mousemove', _onShapeDragMove);
         map.off('mouseup', _onShapeDragEnd);
-        map.dragging.enable();
+        // Note: map dragging stays disabled (middle-button pan only)
         _editState.isDragging = false;
         _sendEditUpdate();
     }

@@ -221,7 +221,40 @@ def process_combat(
                     target = u
                     break
 
+        # ── Auto-targeting: find nearest enemy in range if no specific target ──
         if target is None:
+            attacker_side = attacker.side.value if hasattr(attacker.side, 'value') else str(attacker.side)
+            best_dist = float('inf')
+            best_target = None
+            weapon_range_search = WEAPON_RANGE.get(attacker.unit_type, 800)
+            caps_search = attacker.capabilities or {}
+            if caps_search.get("atgm_range_m"):
+                weapon_range_search = max(weapon_range_search, caps_search["atgm_range_m"])
+            if caps_search.get("mortar_range_m"):
+                weapon_range_search = max(weapon_range_search, caps_search["mortar_range_m"])
+
+            for u in all_units:
+                if u.is_destroyed:
+                    continue
+                u_side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+                if u_side == attacker_side:
+                    continue  # same side
+                u_pos = _get_position(u)
+                if u_pos is None:
+                    continue
+                d = _distance_m(atk_pos[0], atk_pos[1], u_pos[0], u_pos[1])
+                if d <= weapon_range_search and d < best_dist:
+                    best_dist = d
+                    best_target = u
+
+            if best_target is not None:
+                target = best_target
+                # Update task with found target for future ticks
+                task["target_unit_id"] = str(target.id)
+                attacker.current_task = task
+
+        if target is None:
+            # No target found — unit will try to advance toward contacts in movement
             continue
 
         tgt_pos = _get_position(target)
@@ -239,7 +272,11 @@ def process_combat(
             weapon_range = max(weapon_range, caps["mortar_range_m"])
 
         if dist > weapon_range:
-            continue  # Out of range
+            # Out of range — set target location so movement engine advances unit
+            if not task.get("target_location"):
+                task["target_location"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+                attacker.current_task = task
+            continue  # Will move toward target via movement engine
 
         # Calculate fire effectiveness
         base_fp = BASE_FIREPOWER.get(attacker.unit_type, 5)

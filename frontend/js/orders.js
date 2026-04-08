@@ -9,6 +9,7 @@ const KOrders = (() => {
     let _chatMessages = []; // chat message history
     let _participants = []; // session participants (commanders only)
     let _radioUnread = 0;  // count of unread radio messages
+    let _radioChannel = 'all'; // 'all', 'chat', 'operative'
 
     /** Get localStorage key for last-read timestamp. */
     function _lastReadKey() {
@@ -67,6 +68,30 @@ const KOrders = (() => {
             });
         }
 
+        // ── Maximize / restore toggle ──
+        const maxBtn = document.getElementById('cmd-panel-maximize');
+        if (maxBtn) {
+            maxBtn.addEventListener('click', () => {
+                const isMax = panel.classList.contains('maximized');
+                panel.classList.toggle('maximized', !isMax);
+                if (!isMax) panel.classList.add('expanded');
+                maxBtn.innerHTML = isMax
+                    ? '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="2" fill="none"/></svg>'
+                    : '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="1" y="5" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5 5V3h8v8h-2" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
+                maxBtn.title = isMax ? 'Maximize panel' : 'Restore panel';
+            });
+        }
+
+        // ── Radio channel sub-tabs ──
+        document.querySelectorAll('.radio-ch-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.radio-ch-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                _radioChannel = btn.dataset.radioCh || 'all';
+                _renderRadioMessages();
+            });
+        });
+
         // ── Order submit ──
         const submitBtn = document.getElementById('submit-order-btn');
         const textArea = document.getElementById('order-text');
@@ -89,6 +114,16 @@ const KOrders = (() => {
             clearSelBtn.addEventListener('click', () => {
                 KUnits.clearSelection();
                 updateSelectedDisplay([]);
+            });
+        }
+        // ── All Units button ──
+        const allUnitsBtn = document.getElementById('select-all-units-btn');
+        if (allUnitsBtn) {
+            allUnitsBtn.addEventListener('click', () => {
+                if (typeof KUnits !== 'undefined' && KUnits.selectAllCommandable) {
+                    KUnits.selectAllCommandable();
+                    updateSelectedDisplay(KUnits.getSelectedIds());
+                }
             });
         }
 
@@ -358,12 +393,25 @@ const KOrders = (() => {
         const container = document.getElementById('radio-messages');
         if (!container) return;
 
-        if (_chatMessages.length === 0) {
-            container.innerHTML = '<div class="radio-empty-hint">No messages yet. Select a recipient and start communicating.</div>';
+        // Filter by channel
+        let filtered = _chatMessages;
+        if (_radioChannel === 'chat') {
+            filtered = _chatMessages.filter(m => !m.is_unit_response);
+        } else if (_radioChannel === 'operative') {
+            filtered = _chatMessages.filter(m => m.is_unit_response);
+        }
+
+        if (filtered.length === 0) {
+            const emptyMsg = _radioChannel === 'operative'
+                ? 'No unit radio traffic yet. Issue orders and units will respond here.'
+                : _radioChannel === 'chat'
+                ? 'No commander messages yet. Select a recipient and start communicating.'
+                : 'No messages yet. Select a recipient and start communicating.';
+            container.innerHTML = `<div class="radio-empty-hint">${emptyMsg}</div>`;
             return;
         }
 
-        container.innerHTML = _chatMessages.map(msg => {
+        container.innerHTML = filtered.map(msg => {
             const isUnit = msg.is_unit_response || false;
             const cls = isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
             const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
@@ -517,25 +565,18 @@ const KOrders = (() => {
         if (idx >= 0) {
             // Merge all new fields into existing order
             Object.assign(_orders[idx], data);
-            _renderOrders();
         } else {
-            // New order we haven't seen — add it
+            // New order we haven't seen — add it (but only if not a dupe by text+time)
             _orders.unshift(data);
-            _renderOrders();
         }
+        _renderOrders();
 
-        // If the LLM finished processing, show a gamelog entry
-        if (data.classification && data.status !== 'pending') {
-            const classIcons = {
-                command: '📋', status_request: '❓', acknowledgment: '✅',
-                status_report: '📊', unclear: '⚠️'
-            };
-            const icon = classIcons[data.classification] || '📝';
-            const conf = data.confidence ? ` (${Math.round(data.confidence * 100)}%)` : '';
-            KGameLog.addEntry(
-                `${icon} Order ${data.status}: ${data.classification}${conf}`,
-                data.status === 'validated' ? 'order' : 'info'
-            );
+        // Only show a gamelog entry for meaningful status transitions (not initial pending)
+        if (data.status && data.status !== 'pending') {
+            const statusLabels = { validated: '✓ Validated', executing: '⚙ Executing', completed: '✅ Completed', failed: '✗ Failed', cancelled: '— Cancelled' };
+            const label = statusLabels[data.status] || data.status;
+            const brief = data.original_text ? data.original_text.substring(0, 60) : data.id.slice(0,8);
+            KGameLog.addEntry(`${label}: ${brief}`, data.status === 'failed' ? 'error' : 'order');
         }
 
         // Highlight resolved locations on the map

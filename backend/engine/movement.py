@@ -186,6 +186,156 @@ def _check_obstacles(
     return move_factor, damage_total, events
 
 
+def _check_minefield_ahead(
+    cur_lat: float, cur_lon: float,
+    target_lat: float, target_lon: float,
+    unit,
+    map_objects: list,
+) -> dict | None:
+    """
+    Check if the movement path crosses a DISCOVERED minefield for this unit's side.
+    Returns an event dict if the unit should halt, or None if path is clear.
+    Only checks minefields the unit's side has discovered (fog-of-war aware).
+    """
+    if not map_objects:
+        return None
+
+    try:
+        path_line = LineString([(cur_lon, cur_lat), (target_lon, target_lat)])
+    except Exception:
+        return None
+
+    unit_point = Point(cur_lon, cur_lat)
+    side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+    for obj in map_objects:
+        if not obj.is_active:
+            continue
+        if obj.object_type not in ("minefield", "at_minefield"):
+            continue
+
+        # Only avoid minefields the unit's side has discovered
+        if side == "blue" and not obj.discovered_by_blue:
+            continue
+        if side == "red" and not obj.discovered_by_red:
+            continue
+
+        if obj.geometry is None:
+            continue
+
+        try:
+            obj_shape = to_shape(obj.geometry)
+        except Exception:
+            continue
+
+        # Check if the unit is already inside the minefield (don't halt — they need to get out)
+        if obj_shape.contains(unit_point):
+            continue
+
+        # Check if path intersects the minefield
+        geom_type = obj_shape.geom_type
+        intersects = False
+        if geom_type in ("Polygon", "MultiPolygon"):
+            intersects = path_line.intersects(obj_shape)
+        elif geom_type in ("LineString", "MultiLineString"):
+            buffer_deg = 15 / METERS_PER_DEG_LAT
+            intersects = path_line.intersects(obj_shape.buffer(buffer_deg))
+
+        if intersects:
+            label = obj.label or obj.object_type.replace('_', ' ')
+            return {
+                "event_type": "minefield_avoidance",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} halted — detected {label} ahead on route. Requesting engineers.",
+                "payload": {
+                    "object_type": obj.object_type,
+                    "object_id": str(obj.id),
+                    "reason": "minefield_detected",
+                },
+            }
+
+    return None
+
+
+def _check_water_crossing(
+    cur_lat: float, cur_lon: float,
+    target_lat: float, target_lon: float,
+    unit,
+    terrain: TerrainService,
+    map_objects: list | None = None,
+) -> dict | None:
+    """
+    Check if the movement path crosses water terrain without a bridge nearby.
+    Returns an event dict if unit should halt, or None if path is clear.
+    Infantry can ford shallow crossings (slower), vehicles cannot cross at all.
+    """
+    # Sample points along the path to check for water terrain
+    dist = _distance_m(cur_lat, cur_lon, target_lat, target_lon)
+    if dist < 1.0:
+        return None
+
+    # Check terrain at several points along the path
+    steps = max(3, int(dist / 50))  # check every ~50m
+    for i in range(1, steps + 1):
+        frac = i / steps
+        sample_lat = cur_lat + (target_lat - cur_lat) * frac
+        sample_lon = cur_lon + (target_lon - cur_lon) * frac
+        t = terrain.get_terrain_at(sample_lon, sample_lat)
+        if t == "water":
+            # Check if there's a bridge nearby (within 60m of this water point)
+            bridge_nearby = False
+            if map_objects:
+                for obj in map_objects:
+                    if not obj.is_active:
+                        continue
+                    if obj.object_type != "bridge_structure":
+                        continue
+                    if obj.geometry is None:
+                        continue
+                    try:
+                        obj_shape = to_shape(obj.geometry)
+                        bridge_lat, bridge_lon = obj_shape.centroid.y, obj_shape.centroid.x
+                        bridge_dist = _distance_m(sample_lat, sample_lon, bridge_lat, bridge_lon)
+                        if bridge_dist <= 60:
+                            bridge_nearby = True
+                            break
+                    except Exception:
+                        continue
+
+            # Also check OSM-sourced bridge terrain cells
+            if not bridge_nearby:
+                bridge_t = terrain.get_terrain_at(sample_lon, sample_lat)
+                if bridge_t == "bridge":
+                    bridge_nearby = True
+
+            if not bridge_nearby:
+                is_veh = _is_vehicle(unit)
+                if is_veh:
+                    return {
+                        "event_type": "water_blocked",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} halted — cannot cross river without bridge. Engineering bridge unit required.",
+                        "payload": {
+                            "reason": "water_no_bridge",
+                            "water_lat": sample_lat,
+                            "water_lon": sample_lon,
+                        },
+                    }
+                else:
+                    # Infantry blocked at deep water, needs bridge too
+                    return {
+                        "event_type": "water_blocked",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} halted — river crossing requires engineering bridge unit.",
+                        "payload": {
+                            "reason": "water_no_bridge",
+                            "water_lat": sample_lat,
+                            "water_lon": sample_lon,
+                        },
+                    }
+    return None
+
+
 def process_movement(
     units: list,
     tick_duration_sec: int,
@@ -235,6 +385,26 @@ def process_movement(
             pt = to_shape(unit.position)
             cur_lon, cur_lat = pt.x, pt.y
         except Exception:
+            continue
+
+        # ── Check for discovered minefields ahead ──
+        if map_objects:
+            mine_event = _check_minefield_ahead(
+                cur_lat, cur_lon, target_lat, target_lon, unit, map_objects
+            )
+            if mine_event:
+                # Halt the unit — don't walk into the minefield
+                unit.current_task = None
+                events.append(mine_event)
+                continue
+
+        # ── Check for water/river crossing without bridge ──
+        water_event = _check_water_crossing(
+            cur_lat, cur_lon, target_lat, target_lon, unit, terrain, map_objects
+        )
+        if water_event:
+            unit.current_task = None
+            events.append(water_event)
             continue
 
         # Calculate effective speed
