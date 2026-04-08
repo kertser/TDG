@@ -351,3 +351,130 @@ def process_combat(
     return events, under_fire
 
 
+# ── Artillery unit types that can provide fire support ──
+ARTILLERY_TYPES = {
+    "artillery_battery", "artillery_platoon",
+    "mortar_section", "mortar_team",
+}
+
+
+def process_artillery_support(
+    all_units: list,
+    terrain: TerrainService | None = None,
+) -> list[dict]:
+    """
+    Auto-assign idle artillery units to support attacking units in their CoC.
+
+    Walks up each attacking unit's parent chain to find artillery siblings
+    (children of the same parent). If found and idle with ammo, assigns
+    a fire task targeting the attacker's target.
+
+    Returns list of event dicts.
+    """
+    events = []
+
+    # Build lookup maps
+    units_by_id = {str(u.id): u for u in all_units if not u.is_destroyed}
+    children_by_parent = {}  # parent_id → [unit, ...]
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        pid = str(u.parent_unit_id) if u.parent_unit_id else None
+        if pid:
+            children_by_parent.setdefault(pid, []).append(u)
+
+    # Track which artillery units have already been tasked this tick
+    tasked_artillery = set()
+
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        task = unit.current_task
+        if not task:
+            continue
+        task_type = task.get("type", "")
+        if task_type not in ("attack", "engage", "fire"):
+            continue
+
+        # Get the target location
+        target_loc = task.get("target_location")
+        target_uid = task.get("target_unit_id")
+        if not target_loc and target_uid:
+            # Resolve from the target unit's position
+            tgt = units_by_id.get(str(target_uid))
+            if tgt:
+                tgt_pos = _get_position(tgt)
+                if tgt_pos:
+                    target_loc = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+        if not target_loc:
+            continue
+
+        unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+        # Walk up the CoC to find artillery siblings (up to 3 levels)
+        visited = set()
+        current_id = str(unit.id)
+        for _ in range(3):
+            current = units_by_id.get(current_id)
+            if not current or not current.parent_unit_id:
+                break
+            parent_id = str(current.parent_unit_id)
+            if parent_id in visited:
+                break
+            visited.add(parent_id)
+
+            # Check all siblings (children of the same parent)
+            siblings = children_by_parent.get(parent_id, [])
+            for sib in siblings:
+                if str(sib.id) in tasked_artillery:
+                    continue
+                if sib.unit_type not in ARTILLERY_TYPES:
+                    continue
+                sib_side = sib.side.value if hasattr(sib.side, 'value') else str(sib.side)
+                if sib_side != unit_side:
+                    continue
+                if sib.is_destroyed:
+                    continue
+                if (sib.ammo or 0) <= 0:
+                    continue
+
+                # Check if artillery already has a task
+                sib_task = sib.current_task
+                if sib_task and sib_task.get("type") in ("fire", "attack", "engage"):
+                    continue  # Already firing
+
+                # Check range
+                sib_pos = _get_position(sib)
+                if not sib_pos:
+                    continue
+                weapon_range = WEAPON_RANGE.get(sib.unit_type, 5000)
+                dist = _distance_m(sib_pos[0], sib_pos[1], target_loc["lat"], target_loc["lon"])
+                if dist > weapon_range:
+                    continue
+
+                # Assign fire mission
+                sib.current_task = {
+                    "type": "fire",
+                    "target_location": target_loc,
+                    "target_unit_id": target_uid,
+                    "support_for": str(unit.id),
+                }
+                tasked_artillery.add(str(sib.id))
+
+                events.append({
+                    "event_type": "artillery_support",
+                    "actor_unit_id": sib.id,
+                    "target_unit_id": uuid.UUID(target_uid) if target_uid else None,
+                    "text_summary": f"{sib.name} firing in support of {unit.name}",
+                    "payload": {
+                        "artillery_id": str(sib.id),
+                        "supported_unit_id": str(unit.id),
+                        "target_lat": target_loc["lat"],
+                        "target_lon": target_loc["lon"],
+                    },
+                })
+                break  # One artillery unit per requesting unit per tick
+
+            current_id = parent_id
+
+    return events

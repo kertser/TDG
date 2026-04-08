@@ -93,6 +93,65 @@ async def _run_order_pipeline(
                     only_side=issuer_side,
                 )
 
+                # ── Broadcast outgoing order as Radio chat message ──
+                # Resolve issuer name and target unit names
+                from backend.models.user import User
+                from backend.models.unit import Unit
+
+                issuer_name = "Commander"
+                if order.issued_by_user_id:
+                    usr_result = await db.execute(
+                        select(User.display_name).where(User.id == order.issued_by_user_id)
+                    )
+                    usr_row = usr_result.scalar_one_or_none()
+                    if usr_row:
+                        issuer_name = usr_row
+
+                target_names = []
+                if order.target_unit_ids:
+                    for uid in order.target_unit_ids:
+                        u_result = await db.execute(
+                            select(Unit.name).where(Unit.id == uid)
+                        )
+                        u_name = u_result.scalar_one_or_none()
+                        if u_name:
+                            target_names.append(u_name)
+
+                to_str = ", ".join(target_names) if target_names else "all units"
+                order_text = order.original_text or order.order_type or "—"
+                outgoing_text = f"📋 {issuer_name} → {to_str}: {order_text}"
+
+                now_order = datetime.now(timezone.utc)
+                try:
+                    order_chat = ChatMessage(
+                        session_id=session_id,
+                        sender_id=order.issued_by_user_id,
+                        sender_name=f"📋 {issuer_name}",
+                        side=issuer_side,
+                        recipient="all",
+                        text=outgoing_text,
+                        created_at=now_order,
+                    )
+                    db.add(order_chat)
+                except Exception:
+                    pass
+
+                order_chat_data = {
+                    "sender_id": str(order.issued_by_user_id) if order.issued_by_user_id else "",
+                    "sender_name": f"📋 {issuer_name}",
+                    "text": outgoing_text,
+                    "recipient": "all",
+                    "side": issuer_side,
+                    "timestamp": now_order.isoformat(),
+                    "is_order": True,
+                    "is_unit_response": False,
+                }
+                await ws_manager.broadcast(
+                    session_id,
+                    {"type": "chat_message", "data": order_chat_data},
+                    only_side=issuer_side,
+                )
+
                 # Send unit radio responses as chat messages
                 for resp in parse_result.responses:
                     now = datetime.now(timezone.utc)
@@ -346,13 +405,15 @@ async def list_chat_messages(
 
     return [
         {
-            "sender_id": str(m.sender_id),
+            "sender_id": str(m.sender_id) if m.sender_id else "",
             "sender_name": m.sender_name,
             "text": m.text,
             "recipient": m.recipient,
             "side": m.side,
             "timestamp": m.created_at.isoformat() if m.created_at else None,
             "own": m.sender_id == my_user_id,
+            "is_unit_response": bool(m.sender_name and m.sender_name.startswith("📻")),
+            "is_order": bool(m.sender_name and m.sender_name.startswith("📋")),
         }
         for m in messages
         # Include if broadcast (all) or if I'm sender or recipient

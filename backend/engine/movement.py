@@ -365,7 +365,7 @@ def process_movement(
             continue
 
         task_type = task.get("type", "")
-        if task_type not in ("move", "attack", "advance"):
+        if task_type not in ("move", "attack", "advance", "engage", "fire"):
             continue
 
         target = task.get("target_location")

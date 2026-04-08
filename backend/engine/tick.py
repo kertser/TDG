@@ -40,7 +40,7 @@ from backend.models.map_object import MapObject
 from backend.engine.terrain import TerrainService
 from backend.engine.movement import process_movement
 from backend.engine.detection import process_detection
-from backend.engine.combat import process_combat
+from backend.engine.combat import process_combat, process_artillery_support
 from backend.engine.morale import process_morale
 from backend.engine.comms import process_comms
 from backend.engine.contacts import process_contacts
@@ -267,9 +267,23 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     for c in contacts_to_delete:
         await db.delete(c)
 
+    # ── 4b. Artillery support (auto-assign idle artillery in CoC) ──
+    arty_events = process_artillery_support(all_units, terrain)
+    all_events.extend(arty_events)
+
     # ── 5. Execute combat ────────────────────────────────────────
     combat_events, under_fire = process_combat(all_units, terrain, map_objects_list)
     all_events.extend(combat_events)
+
+    # ── 5b. Remove contacts referencing destroyed units ────────
+    destroyed_ids = {str(u.id) for u in all_units if u.is_destroyed}
+    if destroyed_ids:
+        result_dc = await db.execute(
+            select(Contact).where(Contact.session_id == session_id)
+        )
+        for contact in result_dc.scalars().all():
+            if contact.target_unit_id and str(contact.target_unit_id) in destroyed_ids:
+                await db.delete(contact)
 
     # ── 6. Suppression recovery ──────────────────────────────
     process_suppression_recovery(all_units, under_fire)
@@ -297,6 +311,48 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         event_row = create_event(session_id, tick, game_time, evt_dict, vis)
         db.add(event_row)
 
+    # ── 10b. Generate radio chatter (idle requests + peer support) ──
+    from backend.engine.radio_chatter import (
+        generate_idle_radio_messages,
+        generate_peer_support_requests,
+    )
+    from backend.models.chat_message import ChatMessage
+
+    # Determine language from scenario environment
+    _lang = "ru"
+    if scenario and scenario.environment:
+        _lang = scenario.environment.get("language", "ru")
+
+    idle_msgs = generate_idle_radio_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang,
+    )
+    peer_msgs = generate_peer_support_requests(
+        all_units, under_fire, tick,
+        grid_service=grid_service, language=_lang,
+    )
+
+    radio_messages = idle_msgs + peer_msgs
+    radio_broadcast = []
+    for msg in radio_messages:
+        chat = ChatMessage(
+            session_id=session_id,
+            sender_name=msg["sender_name"],
+            side=msg["side"],
+            recipient="all",
+            text=msg["text"],
+        )
+        db.add(chat)
+        radio_broadcast.append({
+            "type": "chat_message",
+            "sender_name": msg["sender_name"],
+            "side": msg["side"],
+            "text": msg["text"],
+            "recipient": "all",
+            "is_unit_response": msg.get("is_unit_response", True),
+            "response_type": msg.get("response_type", ""),
+        })
+
     # ── 11. Advance tick ─────────────────────────────────────────
     session.tick = tick + 1
     session.current_time = game_time + timedelta(seconds=tick_duration)
@@ -308,6 +364,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         "game_time": session.current_time.isoformat() if session.current_time else None,
         "events_count": len(all_events),
         "units_alive": sum(1 for u in all_units if not u.is_destroyed),
+        "radio_messages": radio_broadcast,
     }
 
 

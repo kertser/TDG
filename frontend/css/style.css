@@ -1073,6 +1073,19 @@ button:hover { background: #1a5276; }
     font-style: italic;
 }
 
+/* Outgoing order styling in radio */
+.radio-msg.msg-order {
+    border-left: 2px solid #ffa726;
+    background: rgba(255, 167, 38, 0.07);
+}
+.radio-msg.msg-order .radio-msg-sender {
+    color: #ffa726;
+    font-weight: 600;
+}
+.radio-msg.msg-order .radio-msg-text {
+    color: #ffe0b2;
+}
+
 /* Location highlight tooltip */
 .location-tooltip {
     background: rgba(255, 102, 0, 0.9) !important;
@@ -3438,7 +3451,7 @@ button:hover { background: #1a5276; }
     /* Center relative to the map area (viewport minus 340px sidebar) */
     left: calc((100vw - 340px) / 2);
     transform: translateX(-50%);
-    width: clamp(460px, 44vw, 680px);
+    width: clamp(580px, 55vw, 860px);
     z-index: 2000;
     background: rgba(11, 17, 34, 0.96);
     border: 1px solid rgba(79, 195, 247, 0.2);
@@ -3480,8 +3493,12 @@ button:hover { background: #1a5276; }
 }
 
 /* Maximized panel state */
+#command-panel.maximized {
+    width: clamp(660px, 60vw, 960px) !important;
+}
 #command-panel.maximized .cmd-tab-panel.active {
     max-height: 50vh !important;
+    min-height: 200px;
     opacity: 1 !important;
     padding-top: 8px !important;
     padding-bottom: 10px !important;
@@ -3489,6 +3506,7 @@ button:hover { background: #1a5276; }
 }
 #command-panel.maximized .cmd-radio-messages {
     max-height: calc(50vh - 100px);
+    min-height: 140px;
 }
 
 /* ── Radio Channel Toggle ─────────────────────── */
@@ -3758,8 +3776,8 @@ button:hover { background: #1a5276; }
     font-size: 12px;
     line-height: 1.4;
     resize: none;
-    min-height: 34px;
-    max-height: 80px;
+    min-height: 52px;
+    max-height: 120px;
     transition: border-color 0.2s, box-shadow 0.2s;
     overflow-y: auto;
 }

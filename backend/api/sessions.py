@@ -421,5 +421,15 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
         {"type": "tick_update", "data": {"tick": result["tick"], "game_time": result.get("game_time")}},
     )
 
+    # Broadcast radio chatter messages generated during tick
+    radio_messages = result.get("radio_messages", [])
+    for msg in radio_messages:
+        msg_side = msg.get("side", "blue")
+        await ws_manager.broadcast(
+            session_id,
+            {"type": "chat_message", "data": msg},
+            only_side=msg_side,
+        )
+
     return result
 

@@ -137,398 +137,373 @@ class ResponseGenerator:
         task = unit.get("current_task")
 
         if language == "ru":
-            # ── Basic status ──
-            task_text = "без задачи" if not task else f"выполняем: {task.get('type', '?')}"
-            if task and task.get("target_snail"):
-                task_text += f", цель: {task['target_snail']}"
-            status = (
-                f"Личный состав: {strength:.0%}, "
-                f"боеприпасы: {ammo:.0%}, "
-                f"подавление: {suppression:.0%}. "
-                f"Состояние: {task_text}."
+            return self._generate_status_report_ru(
+                unit, strength, morale, ammo, suppression, task, situation
             )
-            if morale < 0.3:
-                status += " Моральный дух критически низкий!"
-            elif morale < 0.5:
-                status += " Моральный дух снижен."
-
-            # Situational awareness
-            if situation:
-                parts = []
-
-                # Position: coordinates + grid ref
-                coords = situation.get("coordinates")
-                grid_ref = situation.get("grid_ref")
-                if coords and grid_ref:
-                    parts.append(f"Позиция: {grid_ref} (координаты {coords['lat']:.4f}, {coords['lon']:.4f})")
-                elif grid_ref:
-                    parts.append(f"Позиция: {grid_ref}")
-                elif coords:
-                    parts.append(f"Позиция: координаты {coords['lat']:.4f}, {coords['lon']:.4f}")
-
-                # Heading
-                heading_compass = situation.get("heading_compass")
-                if heading_compass:
-                    compass_ru = {
-                        "N": "С", "NNE": "ССВ", "NE": "СВ", "ENE": "ВСВ",
-                        "E": "В", "ESE": "ВЮВ", "SE": "ЮВ", "SSE": "ЮЮВ",
-                        "S": "Ю", "SSW": "ЮЮЗ", "SW": "ЮЗ", "WSW": "ЗЮЗ",
-                        "W": "З", "WNW": "ЗСЗ", "NW": "СЗ", "NNW": "ССЗ",
-                    }
-                    parts.append(f"Курс: {compass_ru.get(heading_compass, heading_compass)} ({situation.get('heading_deg', '?')}°)")
-
-                # Terrain + elevation
-                t = situation.get("terrain")
-                if t:
-                    terrain_names_ru = {
-                        "road": "дорога", "open": "открытая местность",
-                        "forest": "лес", "urban": "город", "water": "вода",
-                        "fields": "поля", "marsh": "болото", "desert": "пустыня",
-                        "scrub": "кустарник", "bridge": "мост", "mountain": "горы",
-                        "orchard": "сад",
-                    }
-                    tname = terrain_names_ru.get(t["type"], t["type"])
-                    elev_str = ""
-                    elev = situation.get("elevation", {})
-                    if elev.get("elevation_m") is not None:
-                        elev_str = f", высота {elev['elevation_m']:.0f}м"
-                        if elev.get("slope_deg") and elev["slope_deg"] > 5:
-                            elev_str += f", уклон {elev['slope_deg']:.0f}°"
-                    elif t.get("elevation_m") is not None:
-                        elev_str = f", высота {t['elevation_m']:.0f}м"
-                    parts.append(f"Местность: {tname}{elev_str}")
-
-                # Surrounding terrain summary
-                surr = situation.get("surrounding_terrain")
-                if surr:
-                    surr_items = sorted(surr.items(), key=lambda x: -x[1])[:3]
-                    surr_names = {
-                        "road": "дороги", "open": "открытая", "forest": "лес",
-                        "urban": "застройка", "water": "вода", "fields": "поля",
-                        "marsh": "болото", "scrub": "кустарник", "mountain": "горы",
-                    }
-                    surr_strs = [surr_names.get(s[0], s[0]) for s in surr_items]
-                    parts.append(f"Вокруг: {', '.join(surr_strs)}")
-
-                # Weather
-                weather = situation.get("weather")
-                if weather:
-                    w_parts = []
-                    if weather.get("weather"):
-                        w_parts.append(str(weather["weather"]))
-                    if weather.get("visibility"):
-                        w_parts.append(f"видимость: {weather['visibility']}")
-                    if weather.get("wind"):
-                        w_parts.append(f"ветер: {weather['wind']}")
-                    if weather.get("temperature"):
-                        w_parts.append(f"температура: {weather['temperature']}")
-                    if w_parts:
-                        parts.append(f"Погода: {', '.join(w_parts)}")
-
-                # Time of day
-                game_time = situation.get("game_time")
-                if game_time:
-                    period_ru = {
-                        "morning": "утро", "afternoon": "день",
-                        "evening": "вечер", "night": "ночь",
-                    }
-                    period_name = period_ru.get(game_time.get("period", ""), "")
-                    time_str = f"Ход {game_time.get('tick', '?')}"
-                    if game_time.get("hour") is not None:
-                        time_str += f", {game_time['hour']:02d}:00"
-                    if period_name:
-                        time_str += f" ({period_name})"
-                    parts.append(time_str)
-
-                # Combat status
-                combat_status = situation.get("combat_status")
-                combat_ru = {
-                    "nominal": None,
-                    "light_fire": "лёгкий огневой контакт",
-                    "under_fire": "под обстрелом",
-                    "heavily_suppressed": "сильно подавлены огнём",
-                    "heavy_casualties": "тяжёлые потери",
-                    "combat_ineffective": "небоеспособны",
-                    "broken": "подразделение разбито",
-                    "shaken": "моральный дух подорван",
-                }
-                cs_text = combat_ru.get(combat_status)
-                if cs_text:
-                    parts.append(f"Боевая обстановка: {cs_text}")
-
-                # Task with coordinates
-                task_info = situation.get("current_task")
-                if task_info and task_info.get("target_coordinates"):
-                    tc = task_info["target_coordinates"]
-                    task_loc = f"Цель задачи: "
-                    if task_info.get("target_snail"):
-                        task_loc += f"{task_info['target_snail']} "
-                    task_loc += f"(коорд. {tc['lat']:.4f}, {tc['lon']:.4f})"
-                    if task_info.get("speed_mode"):
-                        speed_ru = {"slow": "скрытно", "fast": "быстро"}
-                        task_loc += f", режим: {speed_ru.get(task_info['speed_mode'], task_info['speed_mode'])}"
-                    parts.append(task_loc)
-
-                # Contacts
-                contacts = situation.get("contacts", [])
-                if contacts:
-                    close = [c for c in contacts if c.get("distance_m", 99999) < 3000]
-                    if close:
-                        c_descs = []
-                        for c in close[:3]:
-                            d = c.get("distance_m", "?")
-                            ctype = c.get("type", "противник")
-                            gref = c.get("grid_ref", "")
-                            c_coords = c.get("coordinates")
-                            ref_str = ""
-                            if gref:
-                                ref_str = f" ({gref}"
-                                if c_coords:
-                                    ref_str += f", {c_coords['lat']:.4f},{c_coords['lon']:.4f}"
-                                ref_str += ")"
-                            elif c_coords:
-                                ref_str = f" ({c_coords['lat']:.4f},{c_coords['lon']:.4f})"
-                            bearing = c.get("bearing_deg")
-                            bearing_str = f", азимут {bearing}°" if bearing is not None else ""
-                            c_descs.append(f"{ctype} ~{d}м{ref_str}{bearing_str}")
-                        parts.append(f"Противник: {'; '.join(c_descs)}")
-                    else:
-                        parts.append("Противника не наблюдаем")
-                else:
-                    parts.append("Противника не наблюдаем")
-
-                # Nearby map objects (obstacles, structures)
-                nearby_objs = situation.get("nearby_objects", [])
-                if nearby_objs:
-                    obj_names_ru = {
-                        "minefield": "минное поле", "barbed_wire": "проволока",
-                        "entrenchment": "окопы", "roadblock": "заграждение",
-                        "pillbox": "ДОТ", "bridge": "мост",
-                        "command_post": "КП", "fuel_depot": "склад ГСМ",
-                        "supply_cache": "склад", "observation_tower": "НП",
-                        "field_hospital": "госпиталь", "airfield": "аэродром",
-                    }
-                    close_objs = [o for o in nearby_objs if o.get("distance_m", 99999) < 1500][:3]
-                    if close_objs:
-                        o_descs = []
-                        for o in close_objs:
-                            oname = obj_names_ru.get(o["type"], o["type"])
-                            o_gref = o.get("grid_ref", "")
-                            o_ref = f" ({o_gref})" if o_gref else ""
-                            o_descs.append(f"{oname} ~{o['distance_m']}м{o_ref}")
-                        parts.append(f"Объекты: {'; '.join(o_descs)}")
-
-                # Nearby friendlies
-                friendlies = situation.get("nearby_friendlies", [])
-                if friendlies:
-                    f_descs = []
-                    for f in friendlies[:3]:
-                        f_gref = f.get("grid_ref", "")
-                        f_ref = f" ({f_gref})" if f_gref else ""
-                        f_descs.append(f"{f['name']} ~{f['distance_m']}м{f_ref}")
-                    parts.append(f"Рядом свои: {', '.join(f_descs)}")
-
-                # Parent unit
-                parent = situation.get("parent_unit")
-                if parent:
-                    parts.append(f"Подчинены: {parent['name']}")
-
-                # Subordinate summary
-                subs = situation.get("subordinate_units", [])
-                if subs:
-                    sub_strs = [f"{s['name']} ({s['strength']:.0%})" for s in subs[:4]]
-                    parts.append(f"Подчинённые: {', '.join(sub_strs)}")
-
-                # Recent events
-                events = situation.get("recent_events", [])
-                combat_events = [e for e in events if e["type"] in ("combat", "detection", "contact_new", "morale_break")]
-                if combat_events:
-                    last = combat_events[0]
-                    parts.append(f"Последнее: {last.get('summary', last['type'])}")
-
-                if parts:
-                    status += " " + ". ".join(parts) + "."
         else:
-            # ── English status ──
-            task_text = "no task assigned" if not task else f"executing: {task.get('type', '?')}"
-            if task and task.get("target_snail"):
-                task_text += f", target: {task['target_snail']}"
-            status = (
-                f"Strength: {strength:.0%}, "
-                f"ammo: {ammo:.0%}, "
-                f"suppression: {suppression:.0%}. "
-                f"Status: {task_text}."
+            return self._generate_status_report_en(
+                unit, strength, morale, ammo, suppression, task, situation
             )
-            if morale < 0.3:
-                status += " Morale critically low!"
-            elif morale < 0.5:
-                status += " Morale degraded."
 
-            # Situational awareness
-            if situation:
-                parts = []
+    # ── Translation dictionaries ──
 
-                # Position: coordinates + grid ref
-                coords = situation.get("coordinates")
-                grid_ref = situation.get("grid_ref")
-                if coords and grid_ref:
-                    parts.append(f"Position: {grid_ref} (coords {coords['lat']:.4f}, {coords['lon']:.4f})")
-                elif grid_ref:
-                    parts.append(f"Position: {grid_ref}")
-                elif coords:
-                    parts.append(f"Position: coords {coords['lat']:.4f}, {coords['lon']:.4f}")
+    TASK_TYPES_RU = {
+        "move": "марш", "attack": "атака", "engage": "огневой контакт",
+        "fire": "огонь", "defend": "оборона", "observe": "наблюдение",
+        "halt": "остановка", "retreat": "отход", "withdraw": "отступление",
+        "advance": "выдвижение", "dig_in": "окапывание", "support": "поддержка",
+    }
 
-                # Heading
-                heading_compass = situation.get("heading_compass")
-                if heading_compass:
-                    parts.append(f"Facing: {heading_compass} ({situation.get('heading_deg', '?')}°)")
+    WEATHER_RU = {
+        "clear": "ясно", "overcast": "облачно", "cloudy": "облачно",
+        "rain": "дождь", "heavy_rain": "ливень", "fog": "туман",
+        "snow": "снег", "storm": "шторм", "haze": "дымка",
+        "good": "хорошая", "moderate": "умеренная", "poor": "плохая",
+        "very_poor": "очень плохая", "light": "слабый", "moderate_wind": "умеренный",
+        "strong": "сильный", "calm": "штиль",
+    }
 
-                # Terrain + elevation
-                t = situation.get("terrain")
-                if t:
-                    elev_str = ""
-                    elev = situation.get("elevation", {})
-                    if elev.get("elevation_m") is not None:
-                        elev_str = f", elev {elev['elevation_m']:.0f}m"
-                        if elev.get("slope_deg") and elev["slope_deg"] > 5:
-                            elev_str += f", slope {elev['slope_deg']:.0f}°"
-                    elif t.get("elevation_m") is not None:
-                        elev_str = f", elev {t['elevation_m']:.0f}m"
-                    parts.append(f"Terrain: {t['type']}{elev_str}")
+    UNIT_TYPES_RU = {
+        "infantry_platoon": "пех. взвод", "infantry_company": "пех. рота",
+        "infantry_section": "пех. отделение", "infantry_squad": "пех. отделение",
+        "infantry_team": "пех. группа", "infantry_battalion": "пех. батальон",
+        "mech_platoon": "мех. взвод", "mech_company": "мех. рота",
+        "tank_platoon": "танк. взвод", "tank_company": "танк. рота",
+        "artillery_battery": "арт. батарея", "artillery_platoon": "арт. взвод",
+        "mortar_section": "минометное отделение", "mortar_team": "минометная группа",
+        "at_team": "ПТ группа", "recon_team": "разведгруппа",
+        "recon_section": "разведотделение", "observation_post": "НП",
+        "sniper_team": "снайперская пара", "headquarters": "штаб",
+        "command_post": "КП", "logistics_unit": "тыловое подразделение",
+        "combat_engineer_platoon": "инж. взвод", "engineer_platoon": "инж. взвод",
+    }
 
-                # Surrounding terrain summary
-                surr = situation.get("surrounding_terrain")
-                if surr:
-                    surr_items = sorted(surr.items(), key=lambda x: -x[1])[:3]
-                    surr_strs = [s[0] for s in surr_items]
-                    parts.append(f"Surrounding: {', '.join(surr_strs)}")
+    TERRAIN_NAMES_RU = {
+        "road": "дорога", "open": "открытая местность",
+        "forest": "лес", "urban": "город", "water": "вода",
+        "fields": "поля", "marsh": "болото", "desert": "пустыня",
+        "scrub": "кустарник", "bridge": "мост", "mountain": "горы",
+        "orchard": "сад",
+    }
 
-                # Weather
-                weather = situation.get("weather")
-                if weather:
-                    w_parts = []
-                    if weather.get("weather"):
-                        w_parts.append(str(weather["weather"]))
-                    if weather.get("visibility"):
-                        w_parts.append(f"visibility: {weather['visibility']}")
-                    if weather.get("wind"):
-                        w_parts.append(f"wind: {weather['wind']}")
-                    if weather.get("temperature"):
-                        w_parts.append(f"temp: {weather['temperature']}")
-                    if w_parts:
-                        parts.append(f"Weather: {', '.join(w_parts)}")
+    TERRAIN_SHORT_RU = {
+        "road": "дороги", "open": "открытая", "forest": "лес",
+        "urban": "застройка", "water": "вода", "fields": "поля",
+        "marsh": "болото", "scrub": "кустарник", "mountain": "горы",
+    }
 
-                # Time of day
-                game_time = situation.get("game_time")
-                if game_time:
-                    time_str = f"Turn {game_time.get('tick', '?')}"
-                    if game_time.get("hour") is not None:
-                        time_str += f", {game_time['hour']:02d}:00"
-                    period = game_time.get("period")
-                    if period:
-                        time_str += f" ({period})"
-                    parts.append(time_str)
+    COMBAT_STATUS_RU = {
+        "nominal": None,
+        "light_fire": "лёгкий огневой контакт",
+        "under_fire": "под обстрелом",
+        "heavily_suppressed": "сильно подавлены огнём",
+        "heavy_casualties": "тяжёлые потери",
+        "combat_ineffective": "небоеспособны",
+        "broken": "подразделение разбито",
+        "shaken": "моральный дух подорван",
+    }
 
-                # Combat status
-                combat_status = situation.get("combat_status")
-                combat_en = {
-                    "nominal": None,
-                    "light_fire": "light contact",
-                    "under_fire": "under fire",
-                    "heavily_suppressed": "heavily suppressed",
-                    "heavy_casualties": "heavy casualties",
-                    "combat_ineffective": "combat ineffective",
-                    "broken": "unit broken",
-                    "shaken": "morale shaken",
-                }
-                cs_text = combat_en.get(combat_status)
-                if cs_text:
-                    parts.append(f"Situation: {cs_text}")
+    COMBAT_STATUS_EN = {
+        "nominal": None,
+        "light_fire": "light contact",
+        "under_fire": "under fire",
+        "heavily_suppressed": "heavily suppressed",
+        "heavy_casualties": "heavy casualties",
+        "combat_ineffective": "combat ineffective",
+        "broken": "unit broken",
+        "shaken": "morale shaken",
+    }
 
-                # Task with coordinates
-                task_info = situation.get("current_task")
-                if task_info and task_info.get("target_coordinates"):
-                    tc = task_info["target_coordinates"]
-                    task_loc = f"Task target: "
-                    if task_info.get("target_snail"):
-                        task_loc += f"{task_info['target_snail']} "
-                    task_loc += f"(coords {tc['lat']:.4f}, {tc['lon']:.4f})"
-                    if task_info.get("speed_mode"):
-                        task_loc += f", mode: {task_info['speed_mode']}"
-                    parts.append(task_loc)
+    OBJ_NAMES_RU = {
+        "minefield": "минное поле", "barbed_wire": "проволока",
+        "entrenchment": "окопы", "roadblock": "заграждение",
+        "pillbox": "ДОТ", "bridge": "мост",
+        "command_post": "КП", "fuel_depot": "склад ГСМ",
+        "supply_cache": "склад", "observation_tower": "НП",
+        "field_hospital": "госпиталь", "airfield": "аэродром",
+    }
 
-                # Contacts
-                contacts = situation.get("contacts", [])
-                if contacts:
-                    close = [c for c in contacts if c.get("distance_m", 99999) < 3000]
-                    if close:
-                        c_descs = []
-                        for c in close[:3]:
-                            d = c.get("distance_m", "?")
-                            ctype = c.get("type", "enemy")
-                            gref = c.get("grid_ref", "")
-                            c_coords = c.get("coordinates")
-                            ref_str = ""
-                            if gref:
-                                ref_str = f" ({gref}"
-                                if c_coords:
-                                    ref_str += f", {c_coords['lat']:.4f},{c_coords['lon']:.4f}"
-                                ref_str += ")"
-                            elif c_coords:
-                                ref_str = f" ({c_coords['lat']:.4f},{c_coords['lon']:.4f})"
-                            bearing = c.get("bearing_deg")
-                            bearing_str = f", bearing {bearing}°" if bearing is not None else ""
-                            c_descs.append(f"{ctype} ~{d}m{ref_str}{bearing_str}")
-                        parts.append(f"Contacts: {'; '.join(c_descs)}")
-                    else:
-                        parts.append("No enemy contacts")
-                else:
-                    parts.append("No enemy contacts")
+    COMPASS_RU = {
+        "N": "С", "NNE": "ССВ", "NE": "СВ", "ENE": "ВСВ",
+        "E": "В", "ESE": "ВЮВ", "SE": "ЮВ", "SSE": "ЮЮВ",
+        "S": "Ю", "SSW": "ЮЮЗ", "SW": "ЮЗ", "WSW": "ЗЮЗ",
+        "W": "З", "WNW": "ЗСЗ", "NW": "СЗ", "NNW": "ССЗ",
+    }
 
-                # Nearby map objects (obstacles, structures)
-                nearby_objs = situation.get("nearby_objects", [])
-                if nearby_objs:
-                    close_objs = [o for o in nearby_objs if o.get("distance_m", 99999) < 1500][:3]
-                    if close_objs:
-                        o_descs = []
-                        for o in close_objs:
-                            o_gref = o.get("grid_ref", "")
-                            o_ref = f" ({o_gref})" if o_gref else ""
-                            o_descs.append(f"{o['type']} ~{o['distance_m']}m{o_ref}")
-                        parts.append(f"Objects: {'; '.join(o_descs)}")
+    PERIOD_RU = {
+        "morning": "утро", "afternoon": "день",
+        "evening": "вечер", "night": "ночь",
+    }
 
-                # Nearby friendlies
-                friendlies = situation.get("nearby_friendlies", [])
-                if friendlies:
-                    f_descs = []
-                    for f in friendlies[:3]:
-                        f_gref = f.get("grid_ref", "")
-                        f_ref = f" ({f_gref})" if f_gref else ""
-                        f_descs.append(f"{f['name']} ~{f['distance_m']}m{f_ref}")
-                    parts.append(f"Friendlies nearby: {', '.join(f_descs)}")
+    def _translate_weather_val(self, val: str) -> str:
+        """Translate a weather value to Russian, or return as-is."""
+        if not val:
+            return val
+        return self.WEATHER_RU.get(str(val).lower(), str(val))
 
-                # Parent unit
-                parent = situation.get("parent_unit")
-                if parent:
-                    parts.append(f"Reporting to: {parent['name']}")
+    def _translate_unit_type(self, utype: str, lang: str = "ru") -> str:
+        """Translate a unit type key to a readable name."""
+        if lang == "ru":
+            return self.UNIT_TYPES_RU.get(utype, utype)
+        return utype.replace("_", " ")
 
-                # Subordinate summary
-                subs = situation.get("subordinate_units", [])
-                if subs:
-                    sub_strs = [f"{s['name']} ({s['strength']:.0%})" for s in subs[:4]]
-                    parts.append(f"Subordinates: {', '.join(sub_strs)}")
+    # ── Natural language descriptors ──
 
-                # Recent events
-                events = situation.get("recent_events", [])
-                combat_events = [e for e in events if e["type"] in ("combat", "detection", "contact_new", "morale_break")]
-                if combat_events:
-                    last = combat_events[0]
-                    parts.append(f"Recent: {last.get('summary', last['type'])}")
+    @staticmethod
+    def _strength_desc(val, lang):
+        if lang == "ru":
+            if val >= 0.9: return "полный состав"
+            if val >= 0.7: return "незначительные потери"
+            if val >= 0.5: return "умеренные потери"
+            if val >= 0.3: return "тяжёлые потери"
+            return "критические потери"
+        else:
+            if val >= 0.9: return "full strength"
+            if val >= 0.7: return "minor casualties"
+            if val >= 0.5: return "moderate casualties"
+            if val >= 0.3: return "heavy casualties"
+            return "critical casualties"
 
-                if parts:
-                    status += " " + ". ".join(parts) + "."
+    @staticmethod
+    def _ammo_desc(val, lang):
+        if lang == "ru":
+            if val >= 0.7: return None  # don't mention if OK
+            if val >= 0.4: return "бк ниже нормы"
+            if val >= 0.2: return "бк на исходе"
+            return "бк практически нет"
+        else:
+            if val >= 0.7: return None
+            if val >= 0.4: return "ammo below normal"
+            if val >= 0.2: return "running low on ammo"
+            return "ammo critical"
 
-        return status
+    @staticmethod
+    def _morale_desc(val, lang):
+        if lang == "ru":
+            if val >= 0.7: return None  # don't mention if OK
+            if val >= 0.5: return "дух снижен"
+            if val >= 0.3: return "дух подорван"
+            return "подразделение деморализовано"
+        else:
+            if val >= 0.7: return None
+            if val >= 0.5: return "morale degraded"
+            if val >= 0.3: return "morale shaken"
+            return "unit demoralized"
+
+    def _generate_status_report_ru(
+        self, unit, strength, morale, ammo, suppression, task, situation
+    ) -> str:
+        """Russian status report — natural military radio style."""
+        name = unit.get("name", "Unknown")
+        parts = []
+
+        # Position (always first in a sitrep)
+        if situation:
+            grid_ref = situation.get("grid_ref")
+            if grid_ref:
+                parts.append(f"находимся квадрат {grid_ref}")
+
+        # Task status in natural language
+        if task:
+            task_type_raw = task.get("type", "")
+            task_type = self.TASK_TYPES_RU.get(task_type_raw, task_type_raw)
+            target_snail = task.get("target_snail")
+            if task_type_raw in ("move", "advance"):
+                parts.append(f"выдвигаемся" + (f" на {target_snail}" if target_snail else ""))
+            elif task_type_raw in ("attack", "engage"):
+                parts.append(f"ведём бой" + (f", район {target_snail}" if target_snail else ""))
+            elif task_type_raw == "fire":
+                parts.append("ведём огонь")
+            elif task_type_raw == "defend":
+                parts.append("обороняем позиции")
+            elif task_type_raw == "observe":
+                parts.append("ведём наблюдение")
+            else:
+                parts.append(f"выполняем: {task_type}")
+        else:
+            parts.append("на месте, без задачи")
+
+        # Combat status
+        if situation:
+            combat_status = situation.get("combat_status")
+            cs_text = self.COMBAT_STATUS_RU.get(combat_status) if combat_status else None
+            if cs_text:
+                parts.append(cs_text)
+
+        # Unit condition — natural language, only notable things
+        condition_parts = []
+        s_desc = self._strength_desc(strength, "ru")
+        if strength < 0.9:  # only mention if not full
+            condition_parts.append(s_desc)
+        a_desc = self._ammo_desc(ammo, "ru")
+        if a_desc:
+            condition_parts.append(a_desc)
+        m_desc = self._morale_desc(morale, "ru")
+        if m_desc:
+            condition_parts.append(m_desc)
+        if suppression > 0.3:
+            condition_parts.append("прижаты огнём" if suppression > 0.6 else "под обстрелом")
+
+        if condition_parts:
+            parts.append(", ".join(condition_parts))
+
+        if not situation:
+            return ". ".join(p[0].upper() + p[1:] if p else p for p in parts) + ". Приём."
+
+        # Contacts — most critical intel
+        contacts = situation.get("contacts", [])
+        if contacts:
+            close = [c for c in contacts if c.get("distance_m", 99999) < 3000]
+            if close:
+                c_descs = []
+                for c in close[:3]:
+                    d = c.get("distance_m", "?")
+                    ctype_raw = c.get("type", "противник")
+                    ctype = self._translate_unit_type(ctype_raw, "ru")
+                    bearing = c.get("bearing_deg")
+                    gref = c.get("grid_ref", "")
+                    bearing_str = f", азимут {bearing}°" if bearing is not None else ""
+                    ref_str = f" ({gref})" if gref else ""
+                    c_descs.append(f"{ctype} ~{d}м{ref_str}{bearing_str}")
+                parts.append(f"противник: {'; '.join(c_descs)}")
+            else:
+                parts.append("противника не наблюдаем")
+        else:
+            parts.append("противника не наблюдаем")
+
+        # Nearby obstacles (brief, only if close)
+        nearby_objs = situation.get("nearby_objects", [])
+        if nearby_objs:
+            close_objs = [o for o in nearby_objs if o.get("distance_m", 99999) < 500][:2]
+            if close_objs:
+                o_descs = []
+                for o in close_objs:
+                    oname = self.OBJ_NAMES_RU.get(o["type"], o["type"])
+                    o_descs.append(f"{oname} ~{o['distance_m']}м")
+                parts.append(f"внимание: {'; '.join(o_descs)}")
+
+        # Nearby friendlies (only in combat or weakened)
+        combat_status = situation.get("combat_status")
+        if (combat_status and combat_status not in ("nominal",)) or strength < 0.5:
+            friendlies = situation.get("nearby_friendlies", [])
+            if friendlies:
+                f_descs = [f"{f['name']} ~{f['distance_m']}м" for f in friendlies[:2]]
+                parts.append(f"свои рядом: {', '.join(f_descs)}")
+
+        # Recent combat events (brief)
+        events = situation.get("recent_events", [])
+        combat_events = [e for e in events if e["type"] in ("combat", "contact_new", "morale_break", "unit_destroyed")]
+        if combat_events:
+            last = combat_events[0]
+            parts.append(last.get("summary", last["type"]))
+
+        result = ". ".join(p[0].upper() + p[1:] if p else p for p in parts if p)
+        return result + ". Приём."
+
+    def _generate_status_report_en(
+        self, unit, strength, morale, ammo, suppression, task, situation
+    ) -> str:
+        """English status report — natural military radio style."""
+        name = unit.get("name", "Unknown")
+        parts = []
+
+        # Position
+        if situation:
+            grid_ref = situation.get("grid_ref")
+            if grid_ref:
+                parts.append(f"at grid {grid_ref}")
+
+        # Task status
+        if task:
+            task_type = task.get("type", "")
+            target_snail = task.get("target_snail")
+            if task_type in ("move", "advance"):
+                parts.append(f"moving" + (f" to {target_snail}" if target_snail else ""))
+            elif task_type in ("attack", "engage"):
+                parts.append(f"in contact" + (f", grid {target_snail}" if target_snail else ""))
+            elif task_type == "fire":
+                parts.append("engaging targets")
+            elif task_type == "defend":
+                parts.append("holding position")
+            elif task_type == "observe":
+                parts.append("observing")
+            else:
+                parts.append(f"executing: {task_type}")
+        else:
+            parts.append("stationary, no orders")
+
+        # Combat status
+        if situation:
+            combat_status = situation.get("combat_status")
+            cs_text = self.COMBAT_STATUS_EN.get(combat_status) if combat_status else None
+            if cs_text:
+                parts.append(cs_text)
+
+        # Unit condition
+        condition_parts = []
+        s_desc = self._strength_desc(strength, "en")
+        if strength < 0.9:
+            condition_parts.append(s_desc)
+        a_desc = self._ammo_desc(ammo, "en")
+        if a_desc:
+            condition_parts.append(a_desc)
+        m_desc = self._morale_desc(morale, "en")
+        if m_desc:
+            condition_parts.append(m_desc)
+        if suppression > 0.3:
+            condition_parts.append("pinned down" if suppression > 0.6 else "taking fire")
+
+        if condition_parts:
+            parts.append(", ".join(condition_parts))
+
+        if not situation:
+            return ". ".join(p.capitalize() if p else p for p in parts) + ". Over."
+
+        # Contacts
+        contacts = situation.get("contacts", [])
+        if contacts:
+            close = [c for c in contacts if c.get("distance_m", 99999) < 3000]
+            if close:
+                c_descs = []
+                for c in close[:3]:
+                    d = c.get("distance_m", "?")
+                    ctype = self._translate_unit_type(c.get("type", "enemy"), "en")
+                    bearing = c.get("bearing_deg")
+                    gref = c.get("grid_ref", "")
+                    bearing_str = f", bearing {bearing}°" if bearing is not None else ""
+                    ref_str = f" ({gref})" if gref else ""
+                    c_descs.append(f"{ctype} ~{d}m{ref_str}{bearing_str}")
+                parts.append(f"enemy: {'; '.join(c_descs)}")
+            else:
+                parts.append("no enemy contact")
+        else:
+            parts.append("no enemy contact")
+
+        # Nearby obstacles
+        nearby_objs = situation.get("nearby_objects", [])
+        if nearby_objs:
+            close_objs = [o for o in nearby_objs if o.get("distance_m", 99999) < 500][:2]
+            if close_objs:
+                o_descs = [f"{o['type'].replace('_',' ')} ~{o['distance_m']}m" for o in close_objs]
+                parts.append(f"be advised: {'; '.join(o_descs)}")
+
+        # Nearby friendlies (in combat or weakened)
+        combat_status = situation.get("combat_status")
+        if (combat_status and combat_status not in ("nominal",)) or strength < 0.5:
+            friendlies = situation.get("nearby_friendlies", [])
+            if friendlies:
+                f_descs = [f"{f['name']} ~{f['distance_m']}m" for f in friendlies[:2]]
+                parts.append(f"friendlies nearby: {', '.join(f_descs)}")
+
+        # Recent combat events
+        events = situation.get("recent_events", [])
+        combat_events = [e for e in events if e["type"] in ("combat", "contact_new", "morale_break", "unit_destroyed")]
+        if combat_events:
+            last = combat_events[0]
+            parts.append(last.get("summary", last["type"]))
+
+        result = ". ".join(p[0].upper() + p[1:] if p else p for p in parts if p)
+        return result + ". Over."
 
     def generate_brief_sitrep(
         self,
@@ -542,72 +517,39 @@ class ResponseGenerator:
 
         if language == "ru":
             parts = []
-            # Position (coordinates + grid)
-            coords = situation.get("coordinates")
             grid_ref = situation.get("grid_ref")
-            if coords and grid_ref:
-                parts.append(f"Находимся: {grid_ref} ({coords['lat']:.4f}, {coords['lon']:.4f})")
-            elif grid_ref:
-                parts.append(f"Находимся: {grid_ref}")
-            elif coords:
-                parts.append(f"Находимся: {coords['lat']:.4f}, {coords['lon']:.4f}")
+            if grid_ref:
+                parts.append(f"квадрат {grid_ref}")
 
-            # Terrain
-            t = situation.get("terrain")
-            if t:
-                terrain_names_ru = {
-                    "road": "дорога", "open": "открытая", "forest": "лес",
-                    "urban": "город", "water": "вода", "fields": "поля",
-                    "marsh": "болото", "scrub": "кустарник", "mountain": "горы",
-                }
-                parts.append(terrain_names_ru.get(t["type"], t["type"]))
-
-            # Combat status if not nominal
             cs = situation.get("combat_status")
-            combat_ru = {
-                "light_fire": "лёгкий контакт",
-                "under_fire": "под обстрелом",
-                "heavily_suppressed": "подавлены",
-            }
-            if cs and cs in combat_ru:
-                parts.append(combat_ru[cs])
+            cs_text = self.COMBAT_STATUS_RU.get(cs) if cs else None
+            if cs_text:
+                parts.append(cs_text)
 
-            # Closest enemy
             contacts = situation.get("contacts", [])
             close = [c for c in contacts if c.get("distance_m", 99999) < 2000]
             if close:
                 c = close[0]
-                parts.append(f"противник ~{c.get('distance_m', '?')}м")
+                ctype = self._translate_unit_type(c.get("type", "противник"), "ru")
+                parts.append(f"{ctype} ~{c.get('distance_m', '?')}м")
             return ". ".join(parts) if parts else ""
         else:
             parts = []
-            coords = situation.get("coordinates")
             grid_ref = situation.get("grid_ref")
-            if coords and grid_ref:
-                parts.append(f"At {grid_ref} ({coords['lat']:.4f}, {coords['lon']:.4f})")
-            elif grid_ref:
-                parts.append(f"At {grid_ref}")
-            elif coords:
-                parts.append(f"At {coords['lat']:.4f}, {coords['lon']:.4f}")
-
-            t = situation.get("terrain")
-            if t:
-                parts.append(t["type"])
+            if grid_ref:
+                parts.append(f"grid {grid_ref}")
 
             cs = situation.get("combat_status")
-            combat_en = {
-                "light_fire": "light contact",
-                "under_fire": "under fire",
-                "heavily_suppressed": "suppressed",
-            }
-            if cs and cs in combat_en:
-                parts.append(combat_en[cs])
+            cs_text = self.COMBAT_STATUS_EN.get(cs) if cs else None
+            if cs_text:
+                parts.append(cs_text)
 
             contacts = situation.get("contacts", [])
             close = [c for c in contacts if c.get("distance_m", 99999) < 2000]
             if close:
                 c = close[0]
-                parts.append(f"enemy ~{c.get('distance_m', '?')}m")
+                ctype = self._translate_unit_type(c.get("type", "enemy"), "en")
+                parts.append(f"{ctype} ~{c.get('distance_m', '?')}m")
             return ". ".join(parts) if parts else ""
 
 

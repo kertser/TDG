@@ -545,13 +545,16 @@ const KAdmin = (() => {
             let html = '';
             scenarios.forEach(s => {
                 const unitCount = _countUnits(s.initial_units);
+                const descPreview = s.description ? s.description.substring(0, 40) + (s.description.length > 40 ? '…' : '') : '<i style="color:#555">no description</i>';
                 html += `<div class="admin-item">
                     <div>
                         <b>${s.title || 'Untitled'}</b>
                         <span class="admin-item-meta">${unitCount} units</span>
+                        <div style="font-size:9px;color:#777;margin-top:2px;">${descPreview}</div>
                     </div>
                     <div style="display:flex;gap:4px;">
                         <button class="admin-btn" onclick="KAdmin.createSessionFromScenario('${s.id}')" style="padding:2px 8px;font-size:10px;background:#1b5e20;color:#a5d6a7;" title="Create a new game session from this scenario">🎮 Session</button>
+                        <button class="admin-btn" onclick="KAdmin.editScenarioDetails('${s.id}')" style="padding:2px 8px;font-size:10px;background:#0d3b66;color:#90caf9;" title="Edit scenario description & task">📝 Details</button>
                         <button class="admin-btn" onclick="KAdmin.editScenario('${s.id}')" style="padding:2px 8px;font-size:10px;" title="Edit this scenario">✏ Edit</button>
                         <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteScenario('${s.id}')" style="padding:2px 8px;font-size:10px;" title="Delete this scenario">✕</button>
                     </div>
@@ -598,6 +601,109 @@ const KAdmin = (() => {
         const token = _getToken();
         if (!token) { await KDialogs.alert('Not logged in'); return; }
         _openSessionWizard(scenarioId);
+    }
+
+    /** Edit scenario description and task text in a modal dialog. */
+    async function editScenarioDetails(scenarioId) {
+        const token = _getToken();
+        if (!token) { await KDialogs.alert('Not logged in'); return; }
+        try {
+            const resp = await fetch(`/api/scenarios/${scenarioId}`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (!resp.ok) throw new Error('Failed to load scenario');
+            const scenario = await resp.json();
+
+            // Build modal HTML
+            const objectives = scenario.objectives || {};
+            const taskText = objectives.task_text || objectives.task || '';
+            const environment = scenario.environment || {};
+
+            let overlay = document.getElementById('scenario-details-overlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'scenario-details-overlay';
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:12000;display:flex;align-items:center;justify-content:center;';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.display = 'flex';
+            overlay.innerHTML = `
+                <div style="background:#0b1122;border:1px solid rgba(79,195,247,0.3);border-radius:10px;padding:20px;width:520px;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                        <h3 style="color:#4fc3f7;margin:0;font-size:14px;">📝 Scenario Details</h3>
+                        <button id="sd-close" style="background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:2px 6px;">✕</button>
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <label style="display:block;font-size:10px;color:#90caf9;margin-bottom:3px;font-weight:600;">Title</label>
+                        <input type="text" id="sd-title" value="${(scenario.title || '').replace(/"/g, '&quot;')}" style="width:100%;padding:6px 10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:4px;font-size:12px;box-sizing:border-box;" />
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <label style="display:block;font-size:10px;color:#90caf9;margin-bottom:3px;font-weight:600;">Description</label>
+                        <textarea id="sd-description" rows="5" style="width:100%;padding:6px 10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:4px;font-size:11px;resize:vertical;line-height:1.5;box-sizing:border-box;">${_escHtml(scenario.description || '')}</textarea>
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <label style="display:block;font-size:10px;color:#90caf9;margin-bottom:3px;font-weight:600;">Task / Mission Briefing</label>
+                        <textarea id="sd-task" rows="5" style="width:100%;padding:6px 10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:4px;font-size:11px;resize:vertical;line-height:1.5;box-sizing:border-box;">${_escHtml(taskText)}</textarea>
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <label style="display:block;font-size:10px;color:#90caf9;margin-bottom:3px;font-weight:600;">Environment (JSON)</label>
+                        <textarea id="sd-environment" rows="3" style="width:100%;padding:6px 10px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:4px;font-size:10px;font-family:monospace;resize:vertical;box-sizing:border-box;">${_escHtml(JSON.stringify(environment, null, 2))}</textarea>
+                    </div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button id="sd-cancel" class="admin-btn" style="padding:6px 16px;font-size:11px;">Cancel</button>
+                        <button id="sd-save" class="admin-btn" style="padding:6px 16px;font-size:11px;background:#1b5e20;color:#a5d6a7;font-weight:600;">💾 Save</button>
+                    </div>
+                </div>
+            `;
+
+            const close = () => { overlay.style.display = 'none'; };
+            overlay.querySelector('#sd-close').addEventListener('click', close);
+            overlay.querySelector('#sd-cancel').addEventListener('click', close);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+            overlay.querySelector('#sd-save').addEventListener('click', async () => {
+                const newTitle = document.getElementById('sd-title').value.trim();
+                const newDesc = document.getElementById('sd-description').value.trim();
+                const newTask = document.getElementById('sd-task').value.trim();
+                const envText = document.getElementById('sd-environment').value.trim();
+
+                let newEnv = environment;
+                try { if (envText) newEnv = JSON.parse(envText); } catch { /* keep old */ }
+
+                const newObjectives = { ...(scenario.objectives || {}), task_text: newTask };
+
+                try {
+                    const updateResp = await fetch(`/api/scenarios/${scenarioId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                        },
+                        body: JSON.stringify({
+                            title: newTitle || undefined,
+                            description: newDesc,
+                            objectives: newObjectives,
+                            environment: newEnv,
+                        }),
+                    });
+                    if (!updateResp.ok) throw new Error('Save failed');
+                    close();
+                    refreshScenarioList();
+                    _showInfo('admin-scenario-list', '✓ Scenario details saved', 'ok');
+                } catch (err) {
+                    await KDialogs.alert('Save failed: ' + err.message);
+                }
+            });
+        } catch (err) {
+            await KDialogs.alert('Failed to load scenario: ' + err.message);
+        }
+    }
+
+    function _escHtml(s) {
+        if (!s) return '';
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
     }
 
     // ══════════════════════════════════════════════════
@@ -4486,7 +4592,7 @@ const KAdmin = (() => {
         init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
         getAdminSessionId: _getAdminSessionId,
         onStateUpdate, refreshMapUnits, resetOnLogout,
-        editScenario, deleteScenario, deleteSession, createSessionFromScenario,
+        editScenario, editScenarioDetails, deleteScenario, deleteSession, createSessionFromScenario,
         renameSession, enterSession,
         kickParticipant,
         renameUser, deleteUser, assignUserToSession,

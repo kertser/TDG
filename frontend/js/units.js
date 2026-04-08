@@ -1579,16 +1579,21 @@ const KUnits = (() => {
         allUnitsData.forEach(u => {
             if (u.lat == null || u.lon == null || u.is_destroyed) return;
 
-            // Check for active task arrow (solid)
+            // Check for active task arrow
             const target = _extractTarget(u);
             if (target) {
                 const taskType = u.current_task && u.current_task.type;
                 const isMoving = taskType && ['move', 'attack', 'advance', 'retreat', 'withdraw'].includes(taskType);
-                if (isMoving) {
+                const isEngaging = taskType && ['engage', 'fire'].includes(taskType);
+                if (isMoving || isEngaging) {
                     const from = L.latLng(u.lat, u.lon);
                     const to = L.latLng(target.lat, target.lon);
                     const accent = _sideColor(u.side);
-                    _drawMovementArrow(from, to, accent);
+                    if (isEngaging) {
+                        _drawEngageArrow(from, to, accent);
+                    } else {
+                        _drawMovementArrow(from, to, accent);
+                    }
                 }
             }
 
@@ -1601,6 +1606,47 @@ const KUnits = (() => {
                 _drawPendingArrow(from, to, accent);
             }
         });
+    }
+
+    /** Draw a dashed engage/fire arrow (lighter, dashed — indicates target, not movement path). */
+    function _drawEngageArrow(from, to, accent) {
+        const engageColor = '#ff5252';
+        const dLat = to.lat - from.lat;
+        const dLon = to.lng - from.lng;
+        const geoLen = Math.sqrt(dLat * dLat + dLon * dLon);
+        if (geoLen < 0.00005) return;
+
+        const MAX_LEN = 0.004;
+        let endLat = to.lat, endLon = to.lng;
+        if (geoLen > MAX_LEN) {
+            const ratio = MAX_LEN / geoLen;
+            endLat = from.lat + dLat * ratio;
+            endLon = from.lng + dLon * ratio;
+        }
+
+        _movementArrowsLayer.addLayer(L.polyline(
+            [from, [endLat, endLon]], {
+                color: engageColor,
+                weight: 2,
+                opacity: 0.6,
+                dashArray: '6, 4',
+                lineCap: 'round',
+                interactive: false,
+                pane: 'movementArrowsPane',
+            }
+        ));
+
+        // Crosshair at target
+        _movementArrowsLayer.addLayer(L.circleMarker([endLat, endLon], {
+            radius: 5,
+            color: engageColor,
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            weight: 1.5,
+            opacity: 0.6,
+            interactive: false,
+            pane: 'movementArrowsPane',
+        }));
     }
 
     /** Draw a dashed arrow for a pending (queued) move order. */
@@ -1936,6 +1982,12 @@ const KUnits = (() => {
         _viewshedTick = -1;
     }
 
+    // ── Animation state ─────────────────────────────
+    let _previousPositions = {};  // unit_id → {lat, lon}
+    let _animating = false;
+    let _animationFrameId = null;
+    const ANIM_DURATION_MS = 800;
+
     function update(units, tick) {
         if (tick !== undefined) _invalidateViewshedCache(tick);
         _invalidateMovedUnitsViewshed(units);
@@ -1946,19 +1998,83 @@ const KUnits = (() => {
                 if (_pendingOrders[u.id]) {
                     const pending = _pendingOrders[u.id];
                     if (pending.type === 'halt') {
-                        // Halt was executed — unit should no longer have a move task
                         if (!u.current_task || u.current_task.type !== 'move') {
                             delete _pendingOrders[u.id];
                         }
                     } else if (pending.type === 'move' && u.current_task && u.current_task.type === 'move') {
-                        // Move was picked up by tick engine
                         delete _pendingOrders[u.id];
                     }
                 }
             }
         }
 
+        // Snapshot positions BEFORE render for animation
+        _previousPositions = {};
+        for (const u of allUnitsData) {
+            if (u.lat != null && u.lon != null) {
+                _previousPositions[u.id] = { lat: u.lat, lon: u.lon };
+            }
+        }
+
         render(units);
+
+        // Animate units that moved
+        if (units && Object.keys(_previousPositions).length > 0) {
+            _animateMovedUnits(units);
+        }
+    }
+
+    /** Animate markers that moved from old positions to new positions. */
+    function _animateMovedUnits(newUnits) {
+        const movedUnits = [];
+        for (const u of newUnits) {
+            if (u.lat == null || u.lon == null || u.is_destroyed) continue;
+            const old = _previousPositions[u.id];
+            if (!old) continue;
+            const marker = unitMarkers[u.id];
+            if (!marker) continue;
+            const dLat = u.lat - old.lat;
+            const dLon = u.lon - old.lon;
+            if (Math.abs(dLat) < 0.000001 && Math.abs(dLon) < 0.000001) continue;
+            movedUnits.push({ marker, fromLat: old.lat, fromLon: old.lon, toLat: u.lat, toLon: u.lon });
+        }
+
+        if (movedUnits.length === 0) return;
+
+        // Set markers to old positions first
+        for (const m of movedUnits) {
+            m.marker.setLatLng([m.fromLat, m.fromLon]);
+        }
+
+        const startTime = performance.now();
+        _animating = true;
+
+        function step(now) {
+            const elapsed = now - startTime;
+            const t = Math.min(1, elapsed / ANIM_DURATION_MS);
+            // Ease-out cubic
+            const ease = 1 - Math.pow(1 - t, 3);
+
+            for (const m of movedUnits) {
+                const lat = m.fromLat + (m.toLat - m.fromLat) * ease;
+                const lon = m.fromLon + (m.toLon - m.fromLon) * ease;
+                m.marker.setLatLng([lat, lon]);
+            }
+
+            if (t < 1) {
+                _animationFrameId = requestAnimationFrame(step);
+            } else {
+                _animating = false;
+                _animationFrameId = null;
+                // Ensure final positions are exact
+                for (const m of movedUnits) {
+                    m.marker.setLatLng([m.toLat, m.toLon]);
+                }
+                _drawMovementArrows();
+            }
+        }
+
+        _animationFrameId = requestAnimationFrame(step);
     }
 
     function _invalidateMovedUnitsViewshed(newUnits) {

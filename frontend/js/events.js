@@ -17,6 +17,8 @@ const KEvents = (() => {
         morale_break: '🏳️',
         comms_change: '📡',
         ammo_depleted: '🔴',
+        artillery_support: '💣',
+        object_discovered: '🔍',
     };
 
     async function load(sessionId, token) {
@@ -48,8 +50,8 @@ const KEvents = (() => {
             ? events.filter(e => e.event_type === filterType)
             : events;
 
-        // Show most recent first
-        filtered.slice().reverse().forEach(e => _appendEventDom(e));
+        // Show most recent first (prepend puts each new item on top)
+        filtered.forEach(e => _appendEventDom(e));
     }
 
     function _getEventPosition(event) {

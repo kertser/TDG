@@ -65,7 +65,6 @@
         <div id="sidebar">
             <div id="sidebar-tabs">
                 <button class="tab-btn active" data-tab="session-tab">Session</button>
-                <button class="tab-btn" data-tab="orders-tab">Radio Log</button>
                 <button class="tab-btn" data-tab="events-tab">Events</button>
                 <button class="tab-btn" data-tab="coc-tab">CoC</button>
                 <button class="tab-btn" data-tab="log-tab">Log</button>
@@ -112,15 +111,6 @@
                     <div id="session-list"></div>
                 </div>
                 <div id="participants-panel"></div>
-            </div>
-
-            <!-- Orders panel (radio-style order log) -->
-            <div id="orders-tab" class="tab-panel">
-                <h3>📡 Order Log</h3>
-                <div style="font-size:10px;color:#888;margin-bottom:6px;">
-                    Radio transcript of all orders issued during this session.
-                </div>
-                <div id="order-list" class="order-radio-log"></div>
             </div>
 
             <!-- Events panel -->
@@ -187,7 +177,7 @@
                 <button id="clear-unit-selection-btn" class="cmd-chip-clear" title="Clear selection">✕</button>
             </div>
             <div class="cmd-input-row">
-                <textarea id="order-text" class="cmd-textarea" placeholder="Type your order… (Ctrl+Enter to send)" rows="1"></textarea>
+                <textarea id="order-text" class="cmd-textarea" placeholder="Type your order… (Ctrl+Enter to send)" rows="3"></textarea>
                 <button id="submit-order-btn" class="cmd-send-btn" title="Issue Order (Ctrl+Enter)">
                     <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 8L6 14L15 2" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
@@ -287,7 +277,7 @@
                     <div class="admin-section">
                         <h4>Scenario Info</h4>
                         <input type="text" id="sb-scenario-title" placeholder="Scenario title" style="margin-bottom:4px;" />
-                        <input type="text" id="sb-scenario-desc" placeholder="Description (optional)" style="font-size:11px;" />
+                        <textarea id="sb-scenario-desc" placeholder="Description (optional)" rows="2" style="font-size:11px;width:100%;resize:vertical;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;padding:4px 6px;box-sizing:border-box;"></textarea>
                     </div>
 
                     <div class="admin-section">

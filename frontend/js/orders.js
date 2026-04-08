@@ -161,7 +161,7 @@ const KOrders = (() => {
 
     function _autoResize(ta) {
         ta.style.height = 'auto';
-        ta.style.height = Math.min(ta.scrollHeight, 80) + 'px';
+        ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
     }
 
     function _updateMeta() {
@@ -363,6 +363,7 @@ const KOrders = (() => {
     function onChatMessage(data) {
         const myId = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserId() : '';
         const isUnitResponse = data.is_unit_response || false;
+        const isOrder = data.is_order || false;
         _chatMessages.push({
             sender_id: data.sender_id,
             sender_name: data.sender_name || 'Unknown',
@@ -371,6 +372,7 @@ const KOrders = (() => {
             timestamp: data.timestamp || new Date().toISOString(),
             own: data.sender_id === myId,
             is_unit_response: isUnitResponse,
+            is_order: isOrder,
             response_type: data.response_type || null,
         });
         _renderRadioMessages();
@@ -396,9 +398,9 @@ const KOrders = (() => {
         // Filter by channel
         let filtered = _chatMessages;
         if (_radioChannel === 'chat') {
-            filtered = _chatMessages.filter(m => !m.is_unit_response);
+            filtered = _chatMessages.filter(m => !m.is_unit_response && !m.is_order);
         } else if (_radioChannel === 'operative') {
-            filtered = _chatMessages.filter(m => m.is_unit_response);
+            filtered = _chatMessages.filter(m => m.is_unit_response || m.is_order);
         }
 
         if (filtered.length === 0) {
@@ -413,7 +415,8 @@ const KOrders = (() => {
 
         container.innerHTML = filtered.map(msg => {
             const isUnit = msg.is_unit_response || false;
-            const cls = isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
+            const isOrder = msg.is_order || false;
+            const cls = isOrder ? 'msg-order' : isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
             const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
             const recipientTag = msg.recipient !== 'all' && !msg.own ? ' (DM)' : '';
             return `<div class="radio-msg ${cls}">
