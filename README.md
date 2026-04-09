@@ -6,12 +6,13 @@ collaborative map drawing, terrain intelligence, and structured order understand
 ## Features
 
 - **Interactive Tactical Map** — Leaflet-based map with MIL-STD-2525D military symbols (milsymbol.js), zoom-scaled markers, grid overlay with recursive snail subdivision
-- **Fog of War** — Server-authoritative visibility filtering via PostGIS `ST_DWithin` + terrain-aware LOS viewshed; players only see enemy units within line-of-sight
+- **Fog of War** — Server-authoritative visibility filtering via PostGIS `ST_DWithin` + terrain-aware LOS viewshed; players only see enemy units within line-of-sight; recon/sniper units in concealment mode are nearly invisible
 - **LOS Viewshed** — Ray-casting based visibility polygons replace simple circles; terrain obstacles (forests, buildings) block line-of-sight; unit-type-specific eye heights
 - **Collaborative Overlays** — Real-time synchronized drawing tools (arrows, polylines, rectangles, markers, ellipses, measurement) via WebSocket
 - **Terrain Intelligence** — Automatic terrain classification from OSM Overpass + ESA WorldCover + Open-Elevation API; 12-type taxonomy with military modifiers; admin manual painting; SSE progress streaming
-- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds), detection (LOS-based), combat, morale, suppression, ammo, communications
+- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos), morale, suppression, ammo, communications, disengage/break contact
 - **Tactical Map Objects** — Static battlefield objects: barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, command posts, fuel depots, airfields (rotatable), etc. NATO-style markers with per-side discovery system
+- **Area Effects** — Transient polygon-based hazards: smoke (blocks detection), fog (reduces visibility), fire (damages units, blocks movement), chemical clouds (heavy infantry damage). All effects decay over time.
 - **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge
 - **Admin Panel** — Floating admin window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor
 - **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with situational awareness
@@ -110,13 +111,14 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 3. **Detection** → LOS-based visibility checks between opposing units; new contacts created/updated
 4. **Map Object Discovery** → units reveal hidden obstacles/structures within their LOS
 5. **Stale Contacts** → old contacts decay and eventually expire
-6. **Combat** → engaged units exchange fire; damage, suppression inflicted based on firepower, terrain, ammo. Artillery auto-supports attacking allies. Units under fire auto-return fire
+6. **Combat** → engaged units exchange fire; damage, suppression inflicted based on firepower, terrain, ammo. Artillery auto-supports attacking allies. Area fire hits enemies within 150m blast radius. Finite salvos (default 3). Units under fire auto-return fire. Danger close check prevents friendly fire.
 7. **Suppression Recovery** → units not under fire gradually recover from suppression
 8. **Morale** → suppression and casualties erode morale; safety and nearby friendlies restore it; units break below 15%; destroying enemies boosts nearby morale; long marches cause fatigue
 9. **Communications** → heavy suppression can degrade comms; offline units continue last task but can't receive new orders
 10. **Events & Reports** → notable state changes logged as events
 11. **Radio Chatter** → idle units report task completion; units under fire request support from CoC siblings
-12. **Broadcast** → updated state pushed to all connected clients via WebSocket
+12. **Area Effects** → fire/chemical cloud damage applied; effect durations tick down; expired effects removed
+13. **Broadcast** → updated state pushed to all connected clients via WebSocket
 
 ### Movement
 - Each unit type has unique **slow** (tactical) and **fast** (rapid) movement speeds in m/s
@@ -129,11 +131,15 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 - **Viewshed-based**: 72-ray cast from unit position, terrain obstacles (forests, buildings) block view
 - **Eye height**: unit-type-specific (observation post=8m, tanks=3m, infantry=2m default)
 - **Detection probability**: `base_prob × (1 - distance/range) × posture_mod × recon_bonus × concealment`
+- **Recon concealment**: Stationary recon/sniper/OP units are nearly invisible (max 300m detection range, 10% base probability, 25% cap)
 - Deterministic hash ensures reproducibility for replay
 
 ### Combat
 - `fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod`
 - Elevation advantage: +15% effectiveness when firing from higher ground
+- **Area fire**: Artillery/mortar can fire at grid locations — 150m blast radius, damage falls off with distance
+- **Finite salvos**: Fire missions limited to 3 salvos (configurable), then auto-complete
+- **Danger close**: Artillery auto-ceases fire if friendly within 50m of target
 - Indirect fire units (mortars, artillery) have extended range shown as dashed circles
 
 ### Unit Types

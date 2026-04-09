@@ -37,6 +37,9 @@
 27. [Night-Time Operations](#27-night-time-operations)
 28. [Phased & Conditional Orders](#28-phased--conditional-orders)
 29. [Unit Disband](#29-unit-disband)
+30. [Area Effects](#30-area-effects)
+31. [Disengage Order](#31-disengage-order)
+32. [Grid Boundary Enforcement](#32-grid-boundary-enforcement)
 
 ---
 
@@ -49,7 +52,7 @@ Each **tick** represents a configurable time step (default: **60 seconds** of ga
 | 0.5 | Red AI | Run Red AI agents (create orders for AI-controlled Red units) |
 | 1 | Orders | Process pending/validated orders → assign tasks to units |
 | 1b | Target Resolution | Units with attack/engage tasks but no target → find nearest known enemy contact |
-| 1c | Smoke Decay | Decrement active smoke screen timers; dissipate expired smoke |
+| 1c | Effect Decay | Decrement active transient effect timers (smoke, fog, fire, chemical); dissipate expired effects |
 | 1d | Weather/Night | Compute weather and night visibility/movement modifiers from scenario environment |
 | 2 | Movement | Execute movement for all units with movement tasks (applies weather movement mod) |
 | 2a | Order Completion | Mark orders as completed when units arrive at destinations |
@@ -68,6 +71,7 @@ Each **tick** represents a configurable time step (default: **60 seconds** of ga
 | 8 | Communications | Update comms status — degradation from suppression, recovery |
 | 9 | Ammo Consumption | Consume ammo for units that fired |
 | 9b | Structure Effects | Apply resupply, comms bonuses from structures |
+| 9c | Effect Damage | Apply damage from fire/chemical area effects to units inside them |
 | 10 | Events & Reports | Persist events, generate auto-reports (SPOTREP, SHELREP, CASREP, SITREP, INTSUM) |
 | 10c | Radio Chatter | Generate idle unit requests and peer support messages |
 | 11 | Advance | Increment tick counter and game time |
@@ -226,6 +230,7 @@ For each opposing unit within effective_range:
 |----------------|----------|
 | Moving (move, advance, attack) | 1.0 |
 | Stationary (no task) | 0.6 |
+| Disengaging (break contact) | 0.5 |
 | Dug in (defend, dig_in) | 0.3 |
 
 ### 3.4 Height Advantage
@@ -283,6 +288,56 @@ Higher eye height lets units see over obstacles (forests, buildings).
 Detection uses a deterministic hash `SHA256(tick:observer_id:target_id)` instead of random numbers. This ensures:
 - Identical results on replay
 - No exploitation through save/reload
+
+### 3.10 Recon Concealment
+
+Stationary reconnaissance, sniper, and observation units can enter **concealment mode** — making them extremely difficult to detect.
+
+#### Concealment-Capable Unit Types
+
+```
+recon_team, recon_section, sniper_team, observation_post, engineer_recon_team
+```
+
+#### Concealment Conditions
+
+A unit is concealed when **all** of the following are true:
+- It is a concealment-capable type (listed above)
+- It is **NOT** moving, attacking, engaging, firing, or disengaging
+- Its morale is above 0.25 (panicked units can't maintain concealment)
+
+#### Concealment Detection Rules
+
+| Parameter | Normal Detection | Against Concealed Unit |
+|-----------|-----------------|----------------------|
+| **Max detection range** | `base_range × terrain × weather × night` | 300m × target_terrain_vis × weather × night |
+| **Base probability** | 0.6 (0.8 for recon) | 0.10 |
+| **Probability cap** | 0.95 | 0.25 |
+| **Position accuracy** | `max(50, dist × 0.05 + (1-prob) × 200)` | `max(80, dist × 0.1 + (1-prob) × 300)` |
+| **Smoke modifier** | Target ×0.1, Observer ×0.15 | ×0.05 |
+
+#### Effective Concealment Ranges by Terrain
+
+| Target Terrain | Terrain Visibility | Max Detection Range |
+|---------------|-------------------|-------------------|
+| Open/Road | 1.0 | 300m |
+| Fields | 0.9 | 270m |
+| Scrub | 0.7 | 210m |
+| Mountain | 0.6 | 180m |
+| Urban | 0.5 | 150m |
+| Forest | 0.4 | 120m |
+
+Weather and night further reduce these ranges multiplicatively.
+
+#### Breaking Concealment
+
+Concealment is broken immediately when a unit:
+- Receives a move, advance, attack, engage, fire, or disengage order
+- Has morale drop below 0.25 (broken/panicking)
+
+#### Fog-of-War Integration
+
+Concealment also affects fog-of-war filtering in the visibility service. Concealed enemies won't appear on the map unless an observer is very close, using the same reduced detection ranges.
 
 ---
 
@@ -368,6 +423,18 @@ Where `DAMAGE_SCALAR = 0.02` (~2% strength loss per tick under sustained fire).
 | `command_post` | 3 |
 | `combat_engineer_platoon` | 8 |
 | `combat_engineer_section` | 5 |
+| `combat_engineer_team` | 3 |
+| `mine_layer_section` | 3 |
+| `mine_layer_team` | 2 |
+| `obstacle_breacher_team` | 4 |
+| `obstacle_breacher_section` | 6 |
+| `engineer_recon_team` | 3 |
+| `engineer_platoon` | 6 |
+| `engineer_section` | 4 |
+| `construction_engineer_platoon` | 4 |
+| `construction_engineer_section` | 3 |
+| `avlb_vehicle` | 2 |
+| `avlb_section` | 3 |
 | `logistics_unit` | 2 |
 | *Default (unknown)* | 5 |
 
@@ -377,6 +444,7 @@ Where `DAMAGE_SCALAR = 0.02` (~2% strength loss per tick under sustained fire).
 |-----------|----------|
 | `infantry_team` | 300 |
 | `infantry_squad` | 400 |
+| `infantry_section` | 400 |
 | `infantry_platoon` | 600 |
 | `infantry_company` | 800 |
 | `infantry_battalion` | 1200 |
@@ -391,9 +459,24 @@ Where `DAMAGE_SCALAR = 0.02` (~2% strength loss per tick under sustained fire).
 | `at_team` | 2000 |
 | `sniper_team` | 1000 |
 | `recon_team` | 400 |
+| `recon_section` | 500 |
 | `observation_post` | 300 |
 | `headquarters` | 200 |
 | `command_post` | 100 |
+| `combat_engineer_platoon` | 600 |
+| `combat_engineer_section` | 600 |
+| `combat_engineer_team` | 400 |
+| `mine_layer_section` | 300 |
+| `mine_layer_team` | 200 |
+| `obstacle_breacher_team` | 400 |
+| `obstacle_breacher_section` | 500 |
+| `engineer_recon_team` | 400 |
+| `engineer_platoon` | 400 |
+| `engineer_section` | 300 |
+| `construction_engineer_platoon` | 300 |
+| `construction_engineer_section` | 200 |
+| `avlb_vehicle` | 200 |
+| `avlb_section` | 200 |
 | `logistics_unit` | 100 |
 
 Special ranges from `capabilities.atgm_range_m` and `capabilities.mortar_range_m` extend weapon range.
@@ -448,6 +531,51 @@ When `target.strength ≤ 0.01`:
 | 0.45 – 0.65 | Reduced to ~50% |
 | 0.25 – 0.45 | Heavily damaged |
 | ≤ 0.25 | Near destruction |
+
+### 5.10 Area Fire (Indirect)
+
+Artillery and mortar units can fire at a **grid location** rather than a specific enemy unit. This is called area fire.
+
+```
+Area fire effectiveness = base_firepower × strength × ammo_factor × (1 - suppression)
+Proximity damage = effectiveness × DAMAGE_SCALAR × proximity_factor / target_protection
+Proximity suppression = effectiveness × 0.04 × proximity_factor
+```
+
+| Parameter | Value |
+|-----------|-------|
+| **Blast radius** | 150m from target location |
+| **Proximity factor** | `max(0.2, 1.0 - distance_to_center / 150)` |
+| **Suppression multiplier** | 0.04 (vs 0.03 for direct fire — area fire is more suppressive) |
+| **Eligible units** | `artillery_battery`, `artillery_platoon`, `mortar_section`, `mortar_team` |
+
+Area fire damages all enemy units within the blast radius. Damage falls off with distance from the impact point. Friendly units within the blast radius are NOT hit (no friendly fire from area fire).
+
+Visual impact effects are generated at the target location even if no enemy is hit, providing area suppression feedback.
+
+### 5.11 Finite Salvos
+
+Fire missions for artillery/mortar units have a **finite salvo count** (default: 3 salvos). Each tick of firing decrements `salvos_remaining` by 1. When salvos reach 0, the fire task auto-completes.
+
+| Context | Default Salvos |
+|---------|---------------|
+| Player-ordered fire mission | 3 (or specified in order) |
+| Auto-assigned artillery support | 3 |
+| Order parser can override | Via `salvos` field in parsed_order |
+
+When salvos are expended:
+- Fire task is cleared (`current_task = None`)
+- `order_completed` event generated with reason `salvos_expended`
+- Unit becomes idle and available for new orders
+
+### 5.12 Danger Close
+
+Artillery/mortar units automatically **cease fire** if any friendly unit is within **50m** of the target location.
+
+- Applies to both direct targeted fire and area fire
+- Also checked during auto-assigned artillery support (friendly units are never assigned support fire that would endanger allies)
+- Generates `ceasefire_friendly` event
+- Fire task is cleared immediately
 
 ---
 
@@ -1150,6 +1278,12 @@ Red AI operates with **limited information**:
 | `NIGHT_MOD_FULL` | 0.3 (21:00-05:00) | `tick.py` |
 | `NIGHT_MOD_TWILIGHT` | 0.6 (dawn/dusk) | `tick.py` |
 | `NVG_PENALTY_REDUCTION` | 50% | `detection.py` |
+| `CONCEALMENT_MAX_RANGE_M` | 300m | `detection.py` |
+| `CONCEALMENT_BASE_PROB` | 0.10 | `detection.py` |
+| `CONCEALMENT_PROB_CAP` | 0.25 | `detection.py` |
+| `AREA_FIRE_BLAST_RADIUS_M` | 150m | `combat.py` |
+| `DEFAULT_FIRE_SALVOS` | 3 | `combat.py` |
+| `COVER_SEARCH_RADIUS` | 800m | `movement.py` |
 
 ---
 
@@ -1231,7 +1365,7 @@ Artillery and mortar units can deploy smoke screens to conceal movement and bloc
 
 ### 25.3 Smoke Decay
 
-Each tick, `ticks_remaining` decrements. When it reaches 0, the smoke MapObject is deactivated and a `smoke_dissipated` event is generated. The smoke polygon is removed from the map.
+Each tick, `ticks_remaining` decrements. When it reaches 0, the smoke MapObject is deactivated and an `effect_dissipated` event is generated. The smoke polygon is removed from the map.
 
 **Source:** `backend/engine/map_objects.py` (definition), `backend/engine/detection.py` (`_is_in_smoke`), `backend/engine/tick.py` (decay), `backend/api/map_objects.py` (`fire_smoke` endpoint)
 
@@ -1351,12 +1485,94 @@ Right-click a unit → **⛔ Disband Unit** (only visible for non-admin players 
 
 ---
 
+## 30. Area Effects
+
+Area effects are transient polygon-based hazards that affect units within their boundaries. They are placed by admin or created by game events (e.g., artillery smoke).
+
+### 30.1 Effect Types
+
+| Effect | Visibility Mod | Movement Mod | Damage/Tick (Infantry) | Damage/Tick (Vehicle) | Duration (Ticks) |
+|--------|---------------|-------------|----------------------|---------------------|-----------------|
+| **Smoke** | ×0.1 | ×0.9 | 0 | 0 | 3 |
+| **Fog** | ×0.15 | ×1.0 (no penalty) | 0 | 0 | 6 |
+| **Fire** | ×0.3 | ×0.1 (nearly blocked) | 0.03 (3%/tick) | 0.03 (3%/tick) | 5 |
+| **Chemical Cloud** | ×0.2 | ×0.5 | 0.05–0.06 (5–6%/tick) | 0.02 (2%/tick) | 8 |
+
+### 30.2 Effect Mechanics
+
+- **Visibility**: Detection engine applies visibility modifiers from all active effects at both observer and target positions.
+- **Movement**: Movement engine applies speed penalties when units traverse effect areas.
+- **Damage**: Each tick, units inside fire or chemical effects take damage. Infantry suffers more than vehicles from chemical agents.
+- **Decay**: Each tick, `ticks_remaining` decrements by 1. When it reaches 0, the effect is deactivated and an `effect_dissipated` event is generated.
+
+### 30.3 Effect Placement
+
+- **Admin**: Place effects from the admin panel "Effects" section (with default durations).
+- **Artillery smoke**: Created via `POST /units/{id}/fire-smoke` API. Uses existing fire-smoke mechanics.
+
+**Source:** `backend/engine/map_objects.py` (definitions), `backend/engine/tick.py` (decay + damage), `backend/engine/detection.py` (visibility), `backend/engine/movement.py` (speed penalty)
+
+---
+
+## 31. Disengage Order
+
+The **disengage** order allows units to break contact with the enemy and retreat to cover.
+
+### 31.1 Order Recognition
+
+| Language | Keywords |
+|----------|---------|
+| English | disengage, break contact |
+| Russian | разорвать контакт, выйти из боя, отцепиться |
+
+### 31.2 Execution Sequence
+
+1. Unit stops all combat tasks immediately
+2. Speed is set to **fast** (withdrawal speed)
+3. Engine searches for nearest **covered terrain** within 800m (forest, urban, scrub, orchard, mountain)
+4. If cover found → unit moves there at fast speed, then switches to **defend**
+5. If no cover found → unit holds current position and defends
+
+### 31.3 Special Rules
+
+| Rule | Detail |
+|------|--------|
+| **Auto-return fire** | Disengaging units do **NOT** auto-return fire (they're trying to break contact) |
+| **Posture modifier** | 0.5 (lower visibility while retreating — trying to stay low) |
+| **Concealment break** | Disengaging breaks concealment for recon/sniper units |
+| **Cover search** | Samples terrain cells within 800m for `COVER_TERRAIN_TYPES` (forest, urban, scrub, orchard, mountain). Also samples 8 directions at 200m and 400m for protection factor if no cells available. |
+
+**Source:** `backend/engine/movement.py` (cover search + movement), `backend/engine/detection.py` (posture modifier), `backend/engine/tick.py` (auto-return-fire skip)
+
+---
+
+## 32. Grid Boundary Enforcement
+
+Units cannot move outside the defined grid/operations area.
+
+### 32.1 Validation Points
+
+| Check Point | Behavior |
+|-------------|----------|
+| **Order submission** | Target location validated against grid bounds. If outside, unit responds with `unable_area` radio message. |
+| **Movement engine** | Double-checks target at tick time. Cancels movement if target is outside grid bounds. |
+
+### 32.2 Response
+
+When a target is outside the area of operations:
+- English: *"Cannot comply. Target outside area of operations."*
+- Russian: *"Не могу выполнить. Указанная цель за пределами района операции."*
+
+**Source:** `backend/services/grid_service.py` (`is_point_inside_grid`), `backend/engine/movement.py`, `backend/api/orders.py`
+
+---
+
 ## Appendix B: Event Types
 
 | Event Type | Visibility | Description |
 |-----------|-----------|-------------|
 | `movement` | all | Unit moved this tick |
-| `order_completed` | all | Unit arrived at destination |
+| `order_completed` | all | Unit arrived at destination or task finished |
 | `order_issued` | all | New task assigned to unit |
 | `conditional_order_activated` | all | Conditional/phased order triggered |
 | `combat` | all | Unit engaged another unit |
@@ -1375,10 +1591,13 @@ Right-click a unit → **⛔ Disband Unit** (only visible for non-admin players 
 | `artillery_support` | all | Artillery unit firing in support |
 | `ceasefire_friendly` | all | Artillery ceased fire — friendly near target |
 | `dig_in_progress` | all | Unit improved defensive position |
-| `smoke_dissipated` | all | Smoke screen expired |
+| `effect_dissipated` | all | Area effect expired (smoke, fog, fire, chemical) |
+| `effect_damage` | all | Unit taking damage from area effect (fire/chemical) |
+| `fire_out_of_range` | all | Artillery target out of weapon range |
 | `object_discovered` | discovering side | Map object discovered via LOS |
 | `resupply` | all | Unit resupplied from structure |
 | `casualty_report` | unit side | Post-combat status report |
+| `game_finished` | all | Game ended (turn limit or victory condition) |
 | `red_ai_decision` | admin | Red AI issued orders |
 | `red_ai_error` | admin | Red AI decision failed |
 
