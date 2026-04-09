@@ -28,6 +28,33 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ── In-memory peaks cache per session ────────────────────────
+# Avoids recomputing peaks (expensive 8-ray algorithm) on every request.
+# Invalidated when terrain is analyzed or cleared.
+import time as _time
+_peaks_cache: dict[str, dict] = {}  # session_id → {"data": {...}, "ts": float, "params": (prom, dist)}
+_PEAKS_CACHE_TTL = 86400  # 24 hours
+
+
+def _invalidate_peaks_cache(session_id: str):
+    _peaks_cache.pop(session_id, None)
+
+
+def _get_peaks_cache(session_id: str, prominence: float, distance: float) -> dict | None:
+    entry = _peaks_cache.get(session_id)
+    if not entry:
+        return None
+    if _time.time() - entry["ts"] > _PEAKS_CACHE_TTL:
+        _peaks_cache.pop(session_id, None)
+        return None
+    if entry["params"] != (prominence, distance):
+        return None
+    return entry["data"]
+
+
+def _set_peaks_cache(session_id: str, prominence: float, distance: float, data: dict):
+    _peaks_cache[session_id] = {"data": data, "ts": _time.time(), "params": (prominence, distance)}
+
 
 # ── Pydantic schemas ─────────────────────────────────────────
 
@@ -78,6 +105,7 @@ async def analyze_terrain(
         # Invalidate terrain cache after analysis
         from backend.engine.terrain import clear_terrain_cache
         clear_terrain_cache(str(session_id))
+        _invalidate_peaks_cache(str(session_id))
         return summary
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -547,6 +575,7 @@ async def clear_terrain(
     # Invalidate terrain cache
     from backend.engine.terrain import clear_terrain_cache
     clear_terrain_cache(str(session_id))
+    _invalidate_peaks_cache(str(session_id))
 
     return {"deleted": deleted_count, "kept_manual": keep_manual}
 
@@ -691,6 +720,12 @@ async def get_elevation_peaks(
          peaks are significant relative to the landscape, not just noise.
       5. Dedup: within min_distance_m, only the highest peak is kept.
     """
+    # ── Check cache first ──
+    sid = str(session_id)
+    cached = _get_peaks_cache(sid, min_prominence_m, min_distance_m)
+    if cached is not None:
+        return cached
+
     result = await db.execute(
         select(ElevationCell).where(ElevationCell.session_id == session_id)
     )
@@ -835,7 +870,9 @@ async def get_elevation_peaks(
         if not too_close:
             deduped.append(peak)
 
-    return {"peaks": deduped}
+    response_data = {"peaks": deduped}
+    _set_peaks_cache(sid, min_prominence_m, min_distance_m, response_data)
+    return response_data
 
 
 # ── Reference data endpoint ──────────────────────────────────

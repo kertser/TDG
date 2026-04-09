@@ -843,7 +843,9 @@ def _order_to_task(order: Order) -> dict | None:
             return {"type": "halt", "order_id": str(order.id)}
         if any(kw in text for kw in ["disengage", "break contact", "разорвать контакт", "выйти из боя"]):
             return {"type": "disengage", "order_id": str(order.id)}
-        if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй"]):
+        if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй",
+                                      "artillery support", "fire support", "support fire",
+                                      "артподдержк", "огневая поддержк"]):
             from backend.engine.combat import DEFAULT_FIRE_SALVOS
             return {"type": "fire", "order_id": str(order.id), "salvos_remaining": DEFAULT_FIRE_SALVOS}
         if "move" in text or "advance" in text:
@@ -1261,13 +1263,22 @@ Respond with ONLY a valid JSON object:
         import json
 
         client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        response = await client.chat.completions.create(
+        create_kwargs = dict(
             model=settings.OPENAI_MODEL_NANO or "gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.1,
-            max_tokens=200,
+            max_completion_tokens=200,
         )
+        try:
+            response = await client.chat.completions.create(**create_kwargs)
+        except Exception as api_err:
+            err_str = str(api_err)
+            if "max_tokens" in err_str or "max_completion_tokens" in err_str:
+                create_kwargs.pop("max_completion_tokens", None)
+                response = await client.chat.completions.create(**create_kwargs)
+            else:
+                raise
 
         raw = response.choices[0].message.content
         if not raw:

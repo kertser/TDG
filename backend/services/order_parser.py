@@ -90,6 +90,7 @@ class OrderParser:
         grid_info: dict | None = None,
         game_time: str = "",
         issuer_side: str | None = None,
+        force_full_model: bool = False,
     ) -> ParsedOrderData:
         """
         Parse a radio message into structured data.
@@ -100,11 +101,26 @@ class OrderParser:
         3. If keyword confidence ≥ 0.5 → use cheap nano model (gpt-4o-mini)
         4. If keyword confidence < 0.5 → use full model (gpt-4.1)
         5. If no API key → try local model → fall back to keyword result
+
+        If force_full_model=True, skip tiers 1-3 and always use the full model.
         """
         # ── Step 1: Always run keyword parser first ──
         keyword_result = self._fallback_parse(original_text)
 
-        # ── Step 2: High confidence → skip LLM ──
+        # ── Step 2: If forced full model, skip keyword routing ──
+        if force_full_model:
+            if settings.OPENAI_API_KEY:
+                logger.info("OrderParser: force_full_model — using %s", settings.OPENAI_MODEL)
+                result = await self._call_llm(
+                    original_text, units, grid_info, game_time,
+                    client=self._get_client(),
+                    model=settings.OPENAI_MODEL,
+                    issuer_side=issuer_side,
+                )
+                return result if result else keyword_result
+            return keyword_result
+
+        # ── Step 3: High confidence → skip LLM ──
         if keyword_result.confidence >= CONF_SKIP_LLM:
             logger.info(
                 "OrderParser: keyword confidence %.2f ≥ %.2f, skipping LLM. class=%s",
@@ -151,6 +167,25 @@ class OrderParser:
             model=model,
             issuer_side=issuer_side,
         )
+
+        # ── Step 5: If result is "unclear" and we used a cheaper model, escalate to full model ──
+        if result and result.classification == MessageClassification.unclear and tier != "full":
+            logger.info(
+                "OrderParser: %s model classified as 'unclear' — escalating to full model (%s)",
+                tier, settings.OPENAI_MODEL,
+            )
+            full_result = await self._call_llm(
+                original_text, units, grid_info, game_time,
+                client=self._get_client(),
+                model=settings.OPENAI_MODEL,
+                issuer_side=issuer_side,
+            )
+            if full_result and full_result.classification != MessageClassification.unclear:
+                return full_result
+            # Full model also unclear — return the full model result (or original)
+            if full_result:
+                return full_result
+
         return result if result else keyword_result
 
     async def _call_llm(
@@ -186,7 +221,7 @@ class OrderParser:
 
         for attempt in range(MAX_RETRIES + 1):
             try:
-                response = await client.chat.completions.create(
+                create_kwargs = dict(
                     model=model,
                     messages=[
                         {"role": "system", "content": system},
@@ -194,8 +229,18 @@ class OrderParser:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_tokens=1000,
+                    max_completion_tokens=1000,
                 )
+                try:
+                    response = await client.chat.completions.create(**create_kwargs)
+                except Exception as api_err:
+                    # Some models don't support max_completion_tokens — retry without it
+                    err_str = str(api_err)
+                    if "max_tokens" in err_str or "max_completion_tokens" in err_str:
+                        create_kwargs.pop("max_completion_tokens", None)
+                        response = await client.chat.completions.create(**create_kwargs)
+                    else:
+                        raise
 
                 raw_content = response.choices[0].message.content
                 if not raw_content:
@@ -281,7 +326,10 @@ class OrderParser:
             if any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
                                                  "огонь по", "огонь на", "открыть огонь", "стреляй",
                                                  "suppress", "подавить", "подавляющ",
-                                                 "suppressive", "подавляющий"]):
+                                                 "suppressive", "подавляющий",
+                                                 "artillery support", "fire support", "support fire",
+                                                 "need support on", "support on",
+                                                 "артподдержк", "огневая поддержк", "поддержк огн"]):
                 order_type = "fire"
             elif any(kw in text_lower for kw in ["hit any", "hit enemy", "engage any",
                                                    "fire on any", "open fire",
@@ -363,6 +411,23 @@ class OrderParser:
                     "source_text": m.group().strip(),
                     "ref_type": "height",
                     "normalized": height_norm,
+                })
+
+        # Match named map objects: airfield, bridge, hospital, fuel depot, etc.
+        obj_pattern = re.compile(
+            r'\b(airfield|bridge|fuel\s+depot|hospital|command\s+post|supply\s+cache'
+            r'|observation\s+tower|pillbox|roadblock|bunker'
+            r'|аэродром|мост|госпиталь|медпункт|склад|заправк\w*'
+            r'|кп|командный\s+пункт|вышк\w*|дот|дзот|блокпост)\b',
+            re.IGNORECASE,
+        )
+        for m in obj_pattern.finditer(text):
+            obj_text = m.group().strip()
+            if not any(lr["source_text"].lower() == obj_text.lower() for lr in location_refs):
+                location_refs.append({
+                    "source_text": obj_text,
+                    "ref_type": "map_object",
+                    "normalized": obj_text.lower(),
                 })
 
         # Extract target unit references from text

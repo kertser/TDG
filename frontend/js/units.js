@@ -537,7 +537,7 @@ const KUnits = (() => {
             // Detect enemy unit for tooltip fog-of-war
             const _myTtSide = KSessionUI.getSide ? KSessionUI.getSide() : null;
             const _isAdminTt = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
-            const _isEnemyTt = _myTtSide && _myTtSide !== 'admin' && _myTtSide !== 'observer' && u.side !== _myTtSide;
+            const _isEnemyTt = u.is_enemy === true || (_myTtSide && _myTtSide !== 'admin' && _myTtSide !== 'observer' && u.side !== _myTtSide);
 
             // Stack count for overlapping units
             const _stackCount = units.filter(x => !x.is_destroyed && x.lat != null
@@ -552,15 +552,18 @@ const KUnits = (() => {
             }
             const tooltipEyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
             const tooltipEyeTag = tooltipEyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${tooltipEyeH}m)</span>` : '';
+            // Effective personnel: base × strength (floor to show even small casualties)
+            const _effPers = Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0)));
             let tooltipHtml;
             if (_isEnemyTt && !_isAdminTt) {
-                // Enemy tooltip: show only name, type, and approximate condition
+                // Enemy tooltip: show generic type estimate, NOT real unit name
                 const estimateLabel = u.strength_estimate || (u.strength > 0.75 ? 'full' : u.strength > 0.5 ? 'reduced' : u.strength > 0.25 ? 'weakened' : 'critical');
-                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#ef5350;">[ENEMY]</span>`
+                const _enemyTypeLabel = _getEnemyTypeLabel(u);
+                tooltipHtml = `<b>${_enemyTypeLabel}</b> <span style="font-size:10px;color:#ef5350;">[ENEMY]</span>`
                     + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
                     + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${estimateLabel}</span>`;
             } else {
-                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span>`
+                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${_effPers}p)</span>`
                     + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
                     + `<br>`
                     + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
@@ -980,6 +983,28 @@ const KUnits = (() => {
     // ── Unit Context Menu (right-click) ───────────────
     // ══════════════════════════════════════════════════
 
+    /** Generate a generic type/size label for enemy units (fog-of-war: hide real name). */
+    function _getEnemyTypeLabel(u) {
+        // Map unit_type to a vague category + size estimate
+        const type = (u.unit_type || '').toLowerCase();
+        let category = 'Unknown unit';
+        if (type.includes('infantry') || type.includes('mech')) category = 'Infantry';
+        else if (type.includes('tank')) category = 'Armored';
+        else if (type.includes('artillery') || type.includes('mortar')) category = 'Artillery';
+        else if (type.includes('recon') || type.includes('sniper') || type.includes('observation')) category = 'Recon';
+        else if (type.includes('engineer') || type.includes('mine') || type.includes('breacher') || type.includes('avlb')) category = 'Engineer';
+        else if (type.includes('logistics')) category = 'Support';
+        else if (type.includes('command') || type.includes('headquarters')) category = 'Command';
+        // Size suffix
+        let size = '';
+        if (type.includes('battalion')) size = ' battalion';
+        else if (type.includes('company') || type.includes('battery')) size = ' company';
+        else if (type.includes('platoon')) size = ' platoon';
+        else if (type.includes('section')) size = ' section';
+        else if (type.includes('team') || type.includes('squad')) size = ' team';
+        return category + size;
+    }
+
     let _unitCtxMenuEl = null;
 
     function _createUnitContextMenu() {
@@ -991,11 +1016,20 @@ const KUnits = (() => {
         document.body.appendChild(div);
         _unitCtxMenuEl = div;
 
+        // Close on left click outside the menu (not right-click, not inside)
         document.addEventListener('click', (e) => {
+            if (e.button === 2) return;  // Ignore right-clicks
             if (!div.contains(e.target)) _closeUnitContextMenu();
         });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') _closeUnitContextMenu();
+        });
+        // Also close on right-click outside (new context menu replaces old)
+        document.addEventListener('contextmenu', (e) => {
+            if (!div.contains(e.target) && div.style.display !== 'none') {
+                // Small delay to allow the new context menu handler to fire first
+                setTimeout(() => _closeUnitContextMenu(), 50);
+            }
         });
 
         return div;
@@ -1022,6 +1056,11 @@ const KUnits = (() => {
         const status = u.unit_status || 'idle';
         const statusIcon = STATUS_ICONS[status] || '•';
         const statusColor = STATUS_COLORS[status] || '#aaa';
+
+        // Detect enemy unit for fog-of-war info filtering
+        const _mySideCtx = KSessionUI.getSide ? KSessionUI.getSide() : null;
+        const isAdmin = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+        const isEnemy = u.is_enemy === true || (_mySideCtx && _mySideCtx !== 'admin' && _mySideCtx !== 'observer' && u.side !== _mySideCtx);
 
         const userId = KSessionUI.getUserId();
         const isAssignedToMe = u.assigned_user_ids && u.assigned_user_ids.includes(userId);
@@ -1056,12 +1095,15 @@ const KUnits = (() => {
         html += `<div class="unit-info-header">`;
         html += `<div class="unit-info-side-bar" style="background:${sideColor};"></div>`;
         html += `<div class="unit-info-title">`;
-        html += `<div class="unit-info-name">${u.name}</div>`;
         if (isEnemy && !isAdmin) {
-            // Enemy unit: hide personnel, show approximate type only
-            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')}</div>`;
+            // Enemy unit: hide real name, show generic type/size estimate
+            const _enemyLabel = _getEnemyTypeLabel(u);
+            html += `<div class="unit-info-name">${_enemyLabel}</div>`;
+            html += `<div class="unit-info-type" style="color:#ef5350;">Enemy contact</div>`;
         } else {
-            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${pers} personnel</div>`;
+            const _effPers = Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0)));
+            html += `<div class="unit-info-name">${u.name}</div>`;
+            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${_effPers}/${pers} personnel</div>`;
         }
         html += `</div>`;
         html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${displayStatusIcon} ${displayStatus}</span></div>`;

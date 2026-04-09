@@ -58,15 +58,19 @@ class LocationResolver:
     Deterministic resolution of location references to geographic coordinates.
     """
 
-    def __init__(self, grid_service: Any = None, elevation_peaks: list[dict] | None = None):
+    def __init__(self, grid_service: Any = None, elevation_peaks: list[dict] | None = None,
+                 map_objects: list[dict] | None = None):
         """
         Args:
             grid_service: An initialized GridService instance (for snail/grid resolution).
             elevation_peaks: List of elevation peak dicts with keys:
                 {snail_path, lat, lon, elevation_m, label, label_ru}
+            map_objects: List of map object dicts with keys:
+                {object_type, name, lat, lon}
         """
         self.grid_service = grid_service
         self.elevation_peaks = elevation_peaks or []
+        self.map_objects = map_objects or []
 
     def resolve_all(
         self,
@@ -117,9 +121,20 @@ class LocationResolver:
         if ref_type == "height" or self._looks_like_height(normalized):
             return self._resolve_height(ref, normalized)
 
+        # 3c. Try named map object reference (e.g. "airfield", "bridge")
+        if ref_type == "map_object":
+            map_obj_result = self._resolve_map_object(ref, normalized)
+            if map_obj_result and map_obj_result.lat is not None:
+                return map_obj_result
+
         # 4. Try relative direction
         if ref_type == "relative":
             return self._resolve_relative(ref, normalized, unit_pos, heading_deg)
+
+        # 4b. Try named map object (e.g. "Airfield", "Bridge", "supply cache")
+        map_obj_result = self._resolve_map_object(ref, normalized)
+        if map_obj_result and map_obj_result.lat is not None:
+            return map_obj_result
 
         # 5. Try to auto-detect from source_text
         return self._resolve_from_source(ref, unit_pos, heading_deg)
@@ -195,6 +210,77 @@ class LocationResolver:
             confidence=confidence,
             resolution_depth=best_peak.get("snail_path", "").count("-") if best_peak.get("snail_path") else 0,
         )
+
+    def _resolve_map_object(self, ref: LocationRefRaw, normalized: str) -> ResolvedLocation | None:
+        """Try to resolve text as a named map object (e.g. 'Airfield', 'Bridge', 'fuel depot')."""
+        if not self.map_objects:
+            return None
+
+        search_text = normalized.lower().strip()
+        # Also check source_text for better matching
+        source_lower = (ref.source_text or "").lower().strip()
+
+        # Map object type keywords for matching
+        TYPE_KEYWORDS = {
+            "airfield": ["airfield", "аэродром", "впп", "runway"],
+            "bridge_structure": ["bridge", "мост"],
+            "fuel_depot": ["fuel depot", "fuel", "топлив", "склад горюч", "горючее", "заправк"],
+            "supply_cache": ["supply", "cache", "склад", "запас"],
+            "field_hospital": ["hospital", "госпиталь", "медпункт", "медсанбат"],
+            "command_post_structure": ["command post", "кп", "командный пункт"],
+            "observation_tower": ["tower", "вышка", "наблюдательн"],
+            "pillbox": ["pillbox", "дот", "дзот", "bunker"],
+            "roadblock": ["roadblock", "блокпост", "заграждение", "кпп"],
+        }
+
+        best_obj = None
+        best_score = 0
+
+        for obj in self.map_objects:
+            if obj.get("lat") is None:
+                continue
+
+            score = 0
+            obj_type = (obj.get("object_type") or "").lower()
+            obj_name = (obj.get("name") or "").lower()
+
+            # Direct name match
+            if obj_name and obj_name in search_text:
+                score = 90
+            elif obj_name and search_text in obj_name:
+                score = 85
+            elif obj_name and obj_name in source_lower:
+                score = 80
+            elif obj_name and source_lower and any(w in source_lower for w in obj_name.split()):
+                score = 60
+
+            # Type keyword match
+            keywords = TYPE_KEYWORDS.get(obj_type, [])
+            for kw in keywords:
+                if kw in search_text or kw in source_lower:
+                    score = max(score, 70)
+                    break
+
+            # Also try matching object_type directly with underscores removed
+            type_readable = obj_type.replace("_", " ")
+            if type_readable and type_readable in source_lower:
+                score = max(score, 75)
+
+            if score > best_score:
+                best_score = score
+                best_obj = obj
+
+        if best_obj and best_score >= 60:
+            return ResolvedLocation(
+                source_text=ref.source_text,
+                ref_type="map_object",
+                normalized_ref=f"{best_obj.get('object_type', 'object')}",
+                lat=best_obj["lat"],
+                lon=best_obj["lon"],
+                confidence=best_score / 100.0,
+            )
+
+        return None
 
     def _resolve_snail(self, ref: LocationRefRaw, normalized: str) -> ResolvedLocation:
         """Resolve a snail path like 'B8-2-4' to coordinates."""
@@ -395,6 +481,11 @@ class LocationResolver:
         for direction, bearing in DIRECTION_BEARINGS.items():
             if direction in source_lower and len(direction) > 2:
                 return self._resolve_relative(ref, direction, unit_pos, heading_deg)
+
+        # Try map object name resolution as last resort
+        map_obj_result = self._resolve_map_object(ref, ref.normalized or ref.source_text)
+        if map_obj_result and map_obj_result.lat is not None:
+            return map_obj_result
 
         # Unresolvable
         return ResolvedLocation(

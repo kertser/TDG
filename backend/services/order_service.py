@@ -44,6 +44,31 @@ from backend.services.response_generator import response_generator
 
 logger = logging.getLogger(__name__)
 
+# ── Language persistence per session+side ──────────────────
+# Tracks the last detected language per (session_id, side) to maintain
+# language consistency: if the last order was in Russian, all unit
+# responses stay in Russian until the next order arrives in English.
+_session_language: dict[str, str] = {}  # key → "en" or "ru"
+
+# ── Elevation peaks cache per session ──────────────────────
+import time as _time
+_peaks_cache: dict[str, tuple[float, list]] = {}  # session_id → (timestamp, peaks)
+_PEAKS_CACHE_TTL = 3600  # 1 hour
+
+
+def _get_session_lang_key(session_id: uuid.UUID, side: str) -> str:
+    return f"{session_id}:{side}"
+
+
+def get_session_language(session_id: uuid.UUID, side: str) -> str | None:
+    """Get the persisted language for a session+side (or None if not set)."""
+    return _session_language.get(_get_session_lang_key(session_id, side))
+
+
+def set_session_language(session_id: uuid.UUID, side: str, lang: str):
+    """Set the language for a session+side."""
+    _session_language[_get_session_lang_key(session_id, side)] = lang
+
 
 class OrderService:
     """
@@ -75,6 +100,7 @@ class OrderService:
         units_context = await self._load_units_context(session_id, db)
         grid_info, grid_service = await self._load_grid(session_id, db)
         game_time = await self._get_game_time(session_id, db)
+        map_objects_context = await self._load_map_objects_context(session_id, db)
 
         # Load elevation peaks for height references in orders
         elevation_peaks = await self._load_elevation_peaks(session_id, db)
@@ -94,6 +120,29 @@ class OrderService:
             issuer_side=issuer_side,
         )
 
+        # ── 2b. Language consistency: enforce last-used language ─────
+        # If the new message has a definitive language signal, update the stored
+        # language. Otherwise, override the detected language with the stored one.
+        from backend.schemas.order import DetectedLanguage
+        stored_lang = get_session_language(session_id, issuer_side)
+        detected_lang = parsed.language.value  # "en" or "ru"
+
+        # Check if the original text has explicit language signal
+        has_cyrillic = any('\u0400' <= c <= '\u04ff' for c in original_text)
+        has_latin_alpha = any('a' <= c.lower() <= 'z' for c in original_text)
+
+        if has_cyrillic and not has_latin_alpha:
+            # Definitively Russian → update stored language
+            set_session_language(session_id, issuer_side, "ru")
+            parsed.language = DetectedLanguage.ru
+        elif has_latin_alpha and not has_cyrillic:
+            # Definitively English → update stored language
+            set_session_language(session_id, issuer_side, "en")
+            parsed.language = DetectedLanguage.en
+        elif stored_lang:
+            # Mixed or ambiguous → use stored language to prevent mixing
+            parsed.language = DetectedLanguage(stored_lang)
+
         # Save parsed order immediately
         order.parsed_order = parsed.model_dump(mode="json", exclude_none=True)
 
@@ -102,7 +151,8 @@ class OrderService:
 
         if parsed.classification == MessageClassification.command:
             await self._process_command(order, parsed, result, units_context,
-                                        grid_service, session_id, db, issuer_side)
+                                        grid_service, session_id, db, issuer_side,
+                                        map_objects=map_objects_context)
 
         elif parsed.classification == MessageClassification.status_request:
             await self._process_status_request(order, parsed, result, units_context,
@@ -117,27 +167,68 @@ class OrderService:
             order.completed_at = datetime.now(timezone.utc)
 
         elif parsed.classification == MessageClassification.unclear:
-            order.status = OrderStatus.failed
-            # Generate clarification request from target units (or first available unit)
-            matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
-            if not matched:
-                # No specific units referenced — pick first available unit on issuer's side
-                same_side = [
-                    u for u in units_context
-                    if u.get("side") == issuer_side
-                    and not u.get("is_destroyed")
-                    and u.get("comms_status") != "offline"
-                ]
-                if same_side:
-                    matched = [same_side[0]]
-            for unit_dict in matched:
-                resp = response_generator.generate_response(
-                    parsed=parsed,
-                    unit=unit_dict,
-                    response_type=ResponseType.clarify,
-                )
-                if resp:
-                    result.responses.append(resp)
+            # ── Escalate: try full model with richer context before giving up ──
+            escalated = False
+            try:
+                from backend.config import settings
+                if settings.OPENAI_API_KEY and parsed.confidence < 0.5:
+                    logger.info("Order unclear (conf=%.2f), escalating to full model %s",
+                                parsed.confidence, settings.OPENAI_MODEL)
+                    reparsed = await order_parser.parse(
+                        original_text=original_text,
+                        units=units_context,
+                        grid_info=grid_info,
+                        game_time=game_time,
+                        issuer_side=issuer_side,
+                        force_full_model=True,
+                    )
+                    if reparsed.classification != MessageClassification.unclear:
+                        # Escalation succeeded — re-route
+                        parsed = reparsed
+                        # Re-apply language consistency
+                        if stored_lang:
+                            parsed.language = DetectedLanguage(stored_lang)
+                        order.parsed_order = parsed.model_dump(mode="json", exclude_none=True)
+                        result.parsed = parsed
+                        escalated = True
+                        if parsed.classification == MessageClassification.command:
+                            await self._process_command(order, parsed, result, units_context,
+                                                        grid_service, session_id, db, issuer_side,
+                                                        map_objects=map_objects_context)
+                        elif parsed.classification == MessageClassification.status_request:
+                            await self._process_status_request(order, parsed, result, units_context,
+                                                                session_id, db, issuer_side, grid_service)
+                        elif parsed.classification == MessageClassification.acknowledgment:
+                            order.status = OrderStatus.completed
+                            order.completed_at = datetime.now(timezone.utc)
+                        elif parsed.classification == MessageClassification.status_report:
+                            order.status = OrderStatus.completed
+                            order.completed_at = datetime.now(timezone.utc)
+            except Exception as e:
+                logger.warning("Escalation to full model failed: %s", e)
+
+            if not escalated:
+                order.status = OrderStatus.failed
+                # Generate clarification request from target units (or first available unit)
+                matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
+                if not matched:
+                    # No specific units referenced — pick first available unit on issuer's side
+                    same_side = [
+                        u for u in units_context
+                        if u.get("side") == issuer_side
+                        and not u.get("is_destroyed")
+                        and u.get("comms_status") != "offline"
+                    ]
+                    if same_side:
+                        matched = [same_side[0]]
+                for unit_dict in matched:
+                    resp = response_generator.generate_response(
+                        parsed=parsed,
+                        unit=unit_dict,
+                        response_type=ResponseType.clarify,
+                    )
+                    if resp:
+                        result.responses.append(resp)
 
         await db.flush()
         return result
@@ -152,6 +243,7 @@ class OrderService:
         session_id: uuid.UUID,
         db: AsyncSession,
         issuer_side: str,
+        map_objects: list[dict] | None = None,
     ):
         """Process a command-type order through the full pipeline."""
 
@@ -180,7 +272,8 @@ class OrderService:
         # ── Resolve locations ─────────────────────────────
         # Load elevation peaks for height reference resolution
         elevation_peaks = await self._load_elevation_peaks(session_id, db)
-        resolver = LocationResolver(grid_service=grid_service, elevation_peaks=elevation_peaks)
+        resolver = LocationResolver(grid_service=grid_service, elevation_peaks=elevation_peaks,
+                                    map_objects=map_objects)
         # Use first matched unit's position for relative references
         unit_pos = None
         unit_heading = None
@@ -212,6 +305,7 @@ class OrderService:
                 "relative": ReferenceType.terrain,
                 "terrain": ReferenceType.terrain,
                 "height": ReferenceType.terrain,
+                "map_object": ReferenceType.terrain,
             }
             ref_type = ref_type_map.get(loc.ref_type, ReferenceType.mixed)
 
@@ -794,6 +888,14 @@ class OrderService:
         db: AsyncSession,
     ) -> list[dict]:
         """Load elevation peaks (local maxima) for height reference resolution."""
+        # Check cache first
+        sid = str(session_id)
+        cached = _peaks_cache.get(sid)
+        if cached:
+            ts, peaks = cached
+            if _time.time() - ts < _PEAKS_CACHE_TTL:
+                return peaks
+
         try:
             from backend.models.elevation_cell import ElevationCell
 
@@ -869,9 +971,51 @@ class OrderService:
                         break
                 if not too_close:
                     deduped.append(peak)
+            _peaks_cache[sid] = (_time.time(), deduped)
             return deduped
         except Exception as e:
             logger.warning("Failed to load elevation peaks: %s", e)
+            return []
+
+    async def _load_map_objects_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> list[dict]:
+        """Load map objects with geometry for named location resolution (e.g. 'Airfield')."""
+        try:
+            from backend.models.map_object import MapObject
+            from geoalchemy2.shape import to_shape
+
+            result = await db.execute(
+                select(MapObject).where(
+                    MapObject.session_id == session_id,
+                    MapObject.is_active == True,
+                )
+            )
+            objects = result.scalars().all()
+            context = []
+            for obj in objects:
+                lat, lon = None, None
+                if obj.geometry:
+                    try:
+                        shape = to_shape(obj.geometry)
+                        centroid = shape.centroid
+                        lon, lat = centroid.x, centroid.y
+                    except Exception:
+                        pass
+                name = ""
+                if obj.properties:
+                    name = obj.properties.get("name", "") or obj.properties.get("label", "")
+                context.append({
+                    "object_type": obj.object_type,
+                    "name": name,
+                    "lat": lat,
+                    "lon": lon,
+                })
+            return context
+        except Exception as e:
+            logger.warning("Failed to load map objects context: %s", e)
             return []
 
     async def _get_game_time(

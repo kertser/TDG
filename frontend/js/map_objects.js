@@ -259,6 +259,14 @@ const KMapObjects = (() => {
     // RENDERING
     // ═══════════════════════════════════════════════════════════
 
+    function disableAdminMode() {
+        // Explicitly remove any lingering admin context menus
+        const ctxMenu = document.getElementById('map-obj-ctx-menu');
+        if (ctxMenu) ctxMenu.remove();
+        // Force full re-render with admin state OFF
+        render();
+    }
+
     function render() {
         _layerGroup.clearLayers();
         _objectLayers = {};
@@ -281,7 +289,7 @@ const KMapObjects = (() => {
     }
 
     function _isAdminOpen() {
-        try { return KAdmin && KAdmin.isUnlocked(); } catch(e) { return false; }
+        try { return KAdmin && KAdmin.isWindowOpen && KAdmin.isWindowOpen(); } catch(e) { return false; }
     }
 
     function _createLayer(obj) {
@@ -1862,6 +1870,7 @@ const KMapObjects = (() => {
         onObjectCreated, onObjectUpdated, onObjectDeleted,
         getObjects, getDefinitions, clearAll,
         showImpact, processTickEvents,
+        disableAdminMode,
     };
 })();
 

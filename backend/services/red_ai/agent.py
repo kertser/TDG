@@ -93,16 +93,25 @@ class RedAIAgent:
         )
 
         client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-        response = await client.chat.completions.create(
+        create_kwargs = dict(
             model=settings.OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
             temperature=0.7,
-            max_tokens=1500,
+            max_completion_tokens=1500,
             response_format={"type": "json_object"},
         )
+        try:
+            response = await client.chat.completions.create(**create_kwargs)
+        except Exception as api_err:
+            err_str = str(api_err)
+            if "max_tokens" in err_str or "max_completion_tokens" in err_str:
+                create_kwargs.pop("max_completion_tokens", None)
+                response = await client.chat.completions.create(**create_kwargs)
+            else:
+                raise
 
         content = response.choices[0].message.content
         if not content:

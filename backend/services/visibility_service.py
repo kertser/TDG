@@ -127,6 +127,43 @@ def _compute_unit_status(unit: Unit) -> str:
     return "idle"
 
 
+def _make_enemy_label(unit_type: str) -> str:
+    """Generate a generic label for enemy units (fog-of-war: hide real name).
+
+    Maps unit_type to a vague category + size estimate, e.g. 'Infantry platoon'.
+    """
+    t = (unit_type or "").lower()
+    category = "Unknown unit"
+    if "infantry" in t or "mech" in t:
+        category = "Infantry"
+    elif "tank" in t:
+        category = "Armored"
+    elif "artillery" in t or "mortar" in t:
+        category = "Artillery"
+    elif "recon" in t or "sniper" in t or "observation" in t:
+        category = "Recon"
+    elif "engineer" in t or "mine" in t or "breacher" in t or "avlb" in t:
+        category = "Engineer"
+    elif "logistics" in t:
+        category = "Support"
+    elif "command" in t or "headquarters" in t:
+        category = "Command"
+
+    size = ""
+    if "battalion" in t:
+        size = " battalion"
+    elif "company" in t or "battery" in t:
+        size = " company"
+    elif "platoon" in t:
+        size = " platoon"
+    elif "section" in t:
+        size = " section"
+    elif "team" in t or "squad" in t:
+        size = " team"
+
+    return category + size
+
+
 def _serialize_contact(contact: Contact) -> dict:
     """Serialize a Contact ORM object to a dict with lat/lon."""
     lat, lon = None, None
@@ -266,6 +303,13 @@ async def get_visible_units(
         serialized["comms_status"] = None
         serialized["current_task"] = None
         serialized["move_speed_mps"] = None
+        serialized["detection_range_m"] = None
+        serialized["assigned_user_ids"] = None
+        serialized["capabilities"] = None
+        serialized["formation"] = None
+        # Hide real unit name — replace with generic type estimate
+        serialized["real_name"] = serialized["name"]  # kept for admin
+        serialized["name"] = _make_enemy_label(u.unit_type)
         # Quantize strength to 25% buckets (approximate observation)
         raw_strength = serialized.get("strength") or 1.0
         if raw_strength > 0.75:

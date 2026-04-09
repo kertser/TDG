@@ -274,7 +274,7 @@ const KAdmin = (() => {
         try { KUnits.setAdminDrag(false); } catch(e) {}
 
         // Re-render map objects so draggable markers become non-draggable
-        try { KMapObjects.render(); } catch(e) {}
+        try { KMapObjects.disableAdminMode(); } catch(e) {}
 
         // Disable god view if it was on
         if (_godViewEnabled) {
@@ -4708,6 +4708,10 @@ const KAdmin = (() => {
 
     return {
         init, updateSessionContext, refreshScenarioList, isUnlocked, isGodViewEnabled,
+        isWindowOpen: () => {
+            const win = document.getElementById('admin-window');
+            return _adminUnlocked && win && win.style.display !== 'none';
+        },
         getAdminSessionId: _getAdminSessionId,
         onStateUpdate, refreshMapUnits, resetOnLogout,
         editScenario, editScenarioDetails, deleteScenario, deleteSession, createSessionFromScenario,
