@@ -57,6 +57,7 @@ class ResponseType(str, enum.Enum):
     wilco_disengage = "wilco_disengage"  # will comply — disengage/break contact
     unable = "unable"                 # cannot comply
     unable_range = "unable_range"     # cannot comply — target beyond max fire range
+    unable_area = "unable_area"       # cannot comply — target outside operations area
     clarify = "clarify"              # request clarification
     status = "status"                # status report
     no_response = "no_response"      # comms down / destroyed
@@ -161,6 +162,11 @@ class TacticalIntent(BaseModel):
         description="Constraints on execution, e.g. 'avoid civilian areas', 'maintain radio silence'",
     )
     priority: Optional[str] = Field(None, description="'high', 'medium', 'low'")
+    suggested_formation: Optional[str] = Field(
+        None,
+        description="Tactically appropriate formation suggested by doctrine rules when "
+                    "none was explicitly ordered: column, line, wedge, vee, etc.",
+    )
 
 
 # ── Resolved location (after LocationResolver) ──────────────────

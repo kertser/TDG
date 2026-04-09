@@ -75,6 +75,29 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     text-shadow: 0 0 10px rgba(79, 195, 247, 0.2);
 }
 
+/* ── WarOnline Brand Title ─────────────────────── */
+#topbar-brand {
+    position: absolute;
+    left: 41%;
+    top: 50%;
+    transform: translate(calc(-50% - 40px), -50%);
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, #ffd700 0%, #f5c518 25%, #d4a017 50%, #c49b0c 75%, #ffd700 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6))
+            drop-shadow(0 0 8px rgba(255, 215, 0, 0.25));
+    pointer-events: none;
+    user-select: none;
+    white-space: nowrap;
+    z-index: 1;
+}
+
 /* ── Coordinate Info Bar (bottom-left, on map as Leaflet control) ── */
 .coord-info-control {
     display: flex;

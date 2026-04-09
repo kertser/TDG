@@ -458,12 +458,24 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
                     "is_artillery": payload.get("is_artillery", etype == "artillery_support"),
                 })
 
+    # Collect game_finished events for broadcast
+    game_events = []
+    for evt_dict in result.get("_raw_events", []):
+        etype = evt_dict.get("event_type", "")
+        if etype == "game_finished":
+            game_events.append({
+                "event_type": etype,
+                "text_summary": evt_dict.get("text_summary", ""),
+                "payload": evt_dict.get("payload", {}),
+            })
+
     await ws_manager.broadcast(
         session_id,
         {"type": "tick_update", "data": {
             "tick": result["tick"],
             "game_time": result.get("game_time"),
             "combat_impacts": combat_impacts,
+            "events": game_events,
         }},
     )
 

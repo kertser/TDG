@@ -109,8 +109,18 @@ class OrderService:
 
         elif parsed.classification == MessageClassification.unclear:
             order.status = OrderStatus.failed
-            # Generate clarification request from target units
+            # Generate clarification request from target units (or first available unit)
             matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
+            if not matched:
+                # No specific units referenced — pick first available unit on issuer's side
+                same_side = [
+                    u for u in units_context
+                    if u.get("side") == issuer_side
+                    and not u.get("is_destroyed")
+                    and u.get("comms_status") != "offline"
+                ]
+                if same_side:
+                    matched = [same_side[0]]
             for unit_dict in matched:
                 resp = response_generator.generate_response(
                     parsed=parsed,
@@ -225,6 +235,24 @@ class OrderService:
                 **task,  # merge task fields into parsed_order for tick engine
             }
 
+        # ── Grid boundary check: reject targets outside operations area ──
+        target_outside_grid = False
+        if task and grid_service and task.get("target_location"):
+            tgt = task["target_location"]
+            tgt_lat = tgt.get("lat")
+            tgt_lon = tgt.get("lon")
+            if tgt_lat is not None and tgt_lon is not None:
+                if not grid_service.is_point_inside_grid(tgt_lat, tgt_lon):
+                    target_outside_grid = True
+                    # Clear the task — don't execute it
+                    task = None
+                    result.engine_task = None
+                    order.status = OrderStatus.failed
+                    order.parsed_intent = {
+                        **(order.parsed_intent or {}),
+                        "error": "target_outside_grid",
+                    }
+
         # ── Fire range validation for artillery/mortar units ──
         # Check if fire-type orders target a location beyond the unit's weapon range.
         # If so, prepare range info for the unit response.
@@ -280,9 +308,28 @@ class OrderService:
                 reason = "out_of_range"
                 all_ok = False
 
+            # ── Override: target outside grid (operations area) ──
+            if target_outside_grid:
+                resp_type = ResponseType.unable_area
+                reason = "target_outside_area"
+                all_ok = False
+
             # Build situational awareness for status and command acknowledgments
             status_text = ""
-            if resp_type == ResponseType.unable_range and range_info:
+            if resp_type == ResponseType.unable_area:
+                # Target outside grid / operations area
+                lang = parsed.language.value
+                if lang == "ru":
+                    status_text = (
+                        "Не могу выполнить. Указанная цель находится за пределами района операции. "
+                        "Запрашиваю уточнение координат."
+                    )
+                else:
+                    status_text = (
+                        "Cannot comply. Target location is outside the area of operations. "
+                        "Requesting corrected coordinates."
+                    )
+            elif resp_type == ResponseType.unable_range and range_info:
                 # Build range info text for the unit's response
                 lang = parsed.language.value
                 if lang == "ru":
@@ -481,6 +528,13 @@ class OrderService:
         # Add speed if specified
         if parsed.speed:
             task["speed"] = parsed.speed.value
+
+        # Add formation if specified
+        if parsed.formation:
+            task["formation"] = parsed.formation
+        elif intent and hasattr(intent, "suggested_formation") and intent.suggested_formation:
+            # Apply doctrinally suggested formation when none was explicitly ordered
+            task["formation"] = intent.suggested_formation
 
         # Add target location from resolved locations
         for loc in resolved_locations:

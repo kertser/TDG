@@ -226,6 +226,24 @@
                     try { KMapObjects.showImpact(imp.lat, imp.lon, impactType); } catch(e) {}
                 }
             }
+            // Check for game_finished events
+            if (data.events && Array.isArray(data.events)) {
+                for (const evt of data.events) {
+                    if (evt.event_type === 'game_finished') {
+                        const payload = evt.payload || {};
+                        const summary = evt.text_summary || 'Game Over';
+                        const winner = payload.winner;
+                        const detail = payload.detail || '';
+                        let msg = `🏁 ${summary}`;
+                        if (winner) msg += `\n\n🏆 Winner: ${winner.toUpperCase()}`;
+                        if (detail) msg += `\n${detail}`;
+                        setTimeout(() => {
+                            try { KDialogs.alert(msg); } catch(e) { alert(msg); }
+                        }, 500);
+                        KGameLog.addEntry(summary, 'important');
+                    }
+                }
+            }
         });
 
         KGameLog.addEntry('Connected to session', 'info');

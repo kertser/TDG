@@ -12,7 +12,6 @@ making LLM unnecessary. This saves 100% of intent-stage API costs.
 from __future__ import annotations
 
 import logging
-import re
 
 from backend.schemas.order import TacticalIntent, ParsedOrderData
 
@@ -111,6 +110,13 @@ class IntentInterpreter:
         # ── Build constraints ──
         constraints = self._build_constraints(engagement, speed, purpose_text)
 
+        # ── Suggest formation if none explicitly specified ──
+        suggested_formation = None
+        if not parsed.formation:
+            suggested_formation = self._suggest_formation(
+                action, order_type, speed, is_recon, is_armor, target_units,
+            )
+
         intent = TacticalIntent(
             action=action,
             purpose=purpose,
@@ -118,13 +124,89 @@ class IntentInterpreter:
             implied_tasks=implied,
             constraints=constraints,
             priority=priority,
+            suggested_formation=suggested_formation,
         )
 
         logger.info(
-            "IntentInterpreter (rules): action=%s priority=%s order=%s speed=%s",
+            "IntentInterpreter (rules): action=%s priority=%s order=%s speed=%s formation=%s",
             intent.action, intent.priority, order_type, speed,
+            parsed.formation or suggested_formation or "none",
         )
         return intent
+
+    def _suggest_formation(
+        self,
+        action: str,
+        order_type: str,
+        speed: str | None,
+        is_recon: bool,
+        is_armor: bool,
+        target_units: list[dict],
+    ) -> str | None:
+        """
+        Suggest a tactically appropriate formation when none is explicitly given.
+
+        Rules based on military doctrine:
+        - Column: fast movement, road march, low threat
+        - Wedge: balanced movement with contact expected (default for advance)
+        - Line: assault, maximum firepower forward, close contact
+        - Staggered column: recon, cautious movement
+        - Vee: armor advance, contact expected from front
+        """
+        # Artillery / fire support units don't use formations
+        unit_type = ""
+        if target_units:
+            unit_type = target_units[0].get("unit_type", "")
+        if "artillery" in unit_type or "mortar" in unit_type:
+            return None
+
+        # Defensive postures don't suggest movement formations
+        if order_type in ("defend", "observe", "halt", "regroup", "report_status"):
+            return None
+
+        # Recon units → staggered column (cautious) or wedge
+        if is_recon:
+            if speed == "fast":
+                return "column"
+            return "staggered"
+
+        # Attack / assault → line for maximum firepower
+        if action in ("deliberate_attack", "hasty_attack", "fix"):
+            if is_armor:
+                return "line"  # armor assaults in line
+            return "line"
+
+        # Advance to contact → wedge (balanced security)
+        if action in ("advance_to_contact", "movement_to_contact"):
+            if speed == "fast":
+                if is_armor:
+                    return "vee"  # armor fast advance
+                return "wedge"
+            if speed == "slow":
+                return "wedge"  # cautious but ready for contact
+            return "wedge"  # default for movement to contact
+
+        # Flank maneuver → column (fast, then deploy)
+        if action == "flank":
+            return "column"
+
+        # Withdraw / disengage → column for speed
+        if action in ("withdraw", "disengage"):
+            return "column"
+
+        # Patrol → staggered column
+        if action == "patrol":
+            return "staggered"
+
+        # Road march (fast move, no contact expected) → column
+        if order_type == "move" and speed == "fast":
+            return "column"
+
+        # Default: wedge (balanced)
+        if order_type == "move":
+            return "wedge"
+
+        return None
 
     def _determine_action(
         self,

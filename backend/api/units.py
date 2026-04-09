@@ -399,7 +399,7 @@ async def set_unit_parent(
 
 VALID_FORMATIONS = {
     "column", "line", "wedge", "vee", "echelon_left", "echelon_right",
-    "staggered", "box", "diamond", "dispersed",
+    "staggered", "box", "diamond", "dispersed", "herringbone",
 }
 
 

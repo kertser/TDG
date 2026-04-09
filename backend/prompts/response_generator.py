@@ -46,10 +46,16 @@ TEMPLATES_RU = {
         "{unit}, приём. Не достаю — {status_text} Начинаю выдвижение на позицию ближе к цели.",
         "Здесь {unit}. Дальность недостаточна. {status_text} Перемещаюсь на огневой рубеж.",
     ],
+    "unable_area": [
+        "Здесь {unit}. Не могу выполнить! {status_text}",
+        "{unit}, приём. Цель за пределами района операции. Запрашиваю уточнение.",
+        "Здесь {unit}. Указанные координаты вне зоны ответственности. {status_text}",
+    ],
     "clarify": [
-        "Здесь {unit}. Не понял приказ. Уточните!",
-        "{unit}, приём. Повторите приказ, не понял.",
-        "Здесь {unit}. Уточните задачу, приём!",
+        "Здесь {unit}. Не понял приказ. Повторите, приём!",
+        "{unit}, приём. Приказ неясен. Уточните задачу!",
+        "Здесь {unit}. Не разобрал. Повторите приказ, приём!",
+        "Здесь {unit}. Что? Не понял. Повторите приказ чётко!",
     ],
     "status": [
         "Здесь {unit}, приём. {status_text}",
@@ -101,10 +107,16 @@ TEMPLATES_EN = {
         "{unit} here. Out of range — {status_text} Moving to engagement range.",
         "This is {unit}. Cannot engage from current position. {status_text} Advancing to firing position.",
     ],
+    "unable_area": [
+        "This is {unit}. Cannot comply! {status_text}",
+        "{unit} here. Target is outside the area of operations. Requesting corrected coordinates.",
+        "This is {unit}. Designated location outside our AO. {status_text}",
+    ],
     "clarify": [
-        "This is {unit}. Say again? Did not copy.",
-        "{unit} here. Requesting clarification, over.",
-        "This is {unit}. Unclear order. Please repeat.",
+        "This is {unit}. Say again? Orders unclear. Please repeat, over.",
+        "{unit} here. Did not copy. Requesting clarification, over.",
+        "This is {unit}. Unclear order. Say again all after, over.",
+        "This is {unit}. Cannot comply — orders not understood. Please repeat clearly, over.",
     ],
     "status": [
         "This is {unit}, over. {status_text}",

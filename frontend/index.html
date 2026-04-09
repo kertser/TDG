@@ -18,6 +18,7 @@
         <span id="app-title">TDG</span>
 
         <span id="session-info" class="session-info-btn" title="Click to view scenario description"></span>
+        <span id="topbar-brand">WarOnline</span>
 
         <!-- Spacer pushes right-side controls to the end -->
         <div style="flex:1;"></div>
@@ -297,6 +298,27 @@
                         <h4>Scenario Info</h4>
                         <input type="text" id="sb-scenario-title" placeholder="Scenario title" style="margin-bottom:4px;" />
                         <textarea id="sb-scenario-desc" placeholder="Description (optional)" rows="2" style="font-size:11px;width:100%;resize:vertical;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;padding:4px 6px;box-sizing:border-box;"></textarea>
+                    </div>
+
+                    <div class="admin-section">
+                        <h4>Game Rules</h4>
+                        <div class="sb-grid-row">
+                            <label>Turn Limit</label>
+                            <input type="number" id="sb-turn-limit" value="0" min="0" max="999" style="width:70px;" title="0 = unlimited" />
+                            <span style="font-size:10px;color:#888;margin-left:4px;">(0 = unlimited)</span>
+                        </div>
+                        <div style="margin-top:4px;">
+                            <label style="font-size:11px;color:#aaa;">Mission / Task</label>
+                            <textarea id="sb-scenario-mission" placeholder="Describe the mission objective..." rows="2" style="font-size:11px;width:100%;resize:vertical;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;padding:4px 6px;box-sizing:border-box;"></textarea>
+                        </div>
+                        <div style="margin-top:4px;">
+                            <label style="font-size:11px;color:#4fc3f7;">Blue Victory Condition</label>
+                            <textarea id="sb-victory-blue" placeholder="e.g. Capture hill B4 and eliminate all enemy forces" rows="2" style="font-size:11px;width:100%;resize:vertical;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;padding:4px 6px;box-sizing:border-box;"></textarea>
+                        </div>
+                        <div style="margin-top:4px;">
+                            <label style="font-size:11px;color:#ef5350;">Red Victory Condition</label>
+                            <textarea id="sb-victory-red" placeholder="e.g. Hold defensive positions and repel Blue attack" rows="2" style="font-size:11px;width:100%;resize:vertical;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;padding:4px 6px;box-sizing:border-box;"></textarea>
+                        </div>
                     </div>
 
                     <div class="admin-section">
@@ -927,6 +949,11 @@
                     <div class="admin-modal-row">
                         <label>Turn Interval (min)</label>
                         <input type="number" id="wizard-turn-interval" value="1" min="1" max="60" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Minutes of game time per turn" />
+                    </div>
+                    <div class="admin-modal-row">
+                        <label>Turn Limit</label>
+                        <input type="number" id="wizard-turn-limit" value="0" min="0" max="999" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Maximum number of turns (0 = unlimited)" />
+                        <span style="font-size:10px;color:#888;margin-left:4px;">(0 = unlimited)</span>
                     </div>
                     <div class="admin-modal-row">
                         <label>Operation Date &amp; Time</label>

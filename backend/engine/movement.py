@@ -452,6 +452,9 @@ def process_movement(
     """
     events = []
 
+    # Get grid service for boundary check (if available)
+    grid_service = terrain._grid if terrain else None
+
     for unit in units:
         if unit.is_destroyed:
             continue
@@ -501,6 +504,18 @@ def process_movement(
         target_lon = target.get("lon")
         if target_lat is None or target_lon is None:
             continue
+
+        # ── Grid boundary check: don't move to targets outside the grid ──
+        if grid_service and hasattr(grid_service, 'is_point_inside_grid'):
+            if not grid_service.is_point_inside_grid(target_lat, target_lon):
+                unit.current_task = None
+                events.append({
+                    "event_type": "order_completed",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} — target is outside the area of operations",
+                    "payload": {"reason": "target_outside_grid"},
+                })
+                continue
 
         # Get current position
         if unit.position is None:

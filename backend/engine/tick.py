@@ -547,6 +547,57 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     session.tick = tick + 1
     session.current_time = game_time + timedelta(seconds=tick_duration)
 
+    # ── 11b. Check turn limit → auto-finish session ──────────────
+    turn_limit = 0
+    # Check session settings first
+    if session.settings and isinstance(session.settings, dict):
+        turn_limit = session.settings.get("turn_limit", 0)
+    # Fallback: check scenario objectives
+    if not turn_limit and scenario and scenario.objectives and isinstance(scenario.objectives, dict):
+        turn_limit = scenario.objectives.get("turn_limit", 0)
+
+    game_finished = False
+    victory_result = None
+
+    if turn_limit and session.tick >= turn_limit:
+        session.status = SessionStatus.finished
+        game_finished = True
+        all_events.append({
+            "event_type": "game_finished",
+            "text_summary": f"Turn limit reached ({turn_limit} turns). Game over.",
+            "payload": {"reason": "turn_limit", "turn_limit": turn_limit},
+        })
+
+    # ── 11c. Evaluate victory conditions (AI referee) ────────────
+    if scenario and scenario.objectives and isinstance(scenario.objectives, dict):
+        victory_blue_cond = scenario.objectives.get("victory_blue")
+        victory_red_cond = scenario.objectives.get("victory_red")
+        if victory_blue_cond or victory_red_cond:
+            victory_result = await _evaluate_victory_conditions(
+                session=session,
+                scenario=scenario,
+                all_units=all_units,
+                all_contacts=_all_contacts,
+                tick=session.tick,
+                game_time=session.current_time,
+                grid_service=grid_service,
+                victory_blue_cond=victory_blue_cond,
+                victory_red_cond=victory_red_cond,
+            )
+            if victory_result and victory_result.get("winner"):
+                if not game_finished:
+                    session.status = SessionStatus.finished
+                    game_finished = True
+                all_events.append({
+                    "event_type": "game_finished",
+                    "text_summary": victory_result.get("summary", "Victory conditions met."),
+                    "payload": {
+                        "reason": "victory_condition",
+                        "winner": victory_result["winner"],
+                        "detail": victory_result.get("detail", ""),
+                    },
+                })
+
     await db.flush()
 
     return {
@@ -673,6 +724,13 @@ async def _process_orders(
                 speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
                 if speed_label in speeds:
                     unit.move_speed_mps = speeds[speed_label]
+
+            # Apply formation if specified in the order
+            formation = task.get("formation")
+            if formation:
+                caps = dict(unit.capabilities or {})
+                caps["formation"] = formation
+                unit.capabilities = caps
 
             # Handle phased/conditional orders: if order has "phases",
             # store subsequent phases in unit.order_queue
@@ -1069,3 +1127,126 @@ def _process_conditional_orders(
             unit.order_queue = new_queue if new_queue else None
 
     return events
+
+
+async def _evaluate_victory_conditions(
+    session,
+    scenario,
+    all_units: list,
+    all_contacts: list,
+    tick: int,
+    game_time,
+    grid_service,
+    victory_blue_cond: str | None,
+    victory_red_cond: str | None,
+) -> dict | None:
+    """
+    Use LLM to evaluate open-text victory conditions against current game state.
+
+    Returns:
+        {"winner": "blue"|"red"|None, "summary": str, "detail": str}
+        or None if evaluation fails or no conditions met.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Only evaluate every 5 ticks to save costs (and always on turn limit)
+    if tick % 5 != 0 and tick > 5:
+        return None
+
+    # Build game state summary for the AI referee
+    blue_alive = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
+    red_alive = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
+
+    # Unit summaries with grid refs
+    def _unit_summary(u):
+        info = f"{u.name} ({u.unit_type}, str={u.strength:.0%})"
+        if grid_service and u.position:
+            try:
+                pt = to_shape(u.position)
+                snail = grid_service.point_to_snail(pt.y, pt.x, depth=2)
+                if snail:
+                    info += f" at {snail}"
+            except Exception:
+                pass
+        task = u.current_task
+        if task:
+            info += f" [task: {task.get('type', '?')}]"
+        return info
+
+    blue_summary = "\n".join(f"  - {_unit_summary(u)}" for u in blue_alive) or "  (none)"
+    red_summary = "\n".join(f"  - {_unit_summary(u)}" for u in red_alive) or "  (none)"
+
+    blue_destroyed = [u for u in all_units if u.is_destroyed and u.side.value == "blue"]
+    red_destroyed = [u for u in all_units if u.is_destroyed and u.side.value == "red"]
+
+    scenario_desc = scenario.description or "No description"
+    mission = ""
+    if scenario.objectives and isinstance(scenario.objectives, dict):
+        mission = scenario.objectives.get("mission", "") or ""
+
+    prompt = f"""You are an AI referee for a tactical military exercise. Evaluate whether victory conditions have been met.
+
+## Scenario
+Title: {scenario.title}
+Description: {scenario_desc}
+Mission: {mission}
+Current Turn: {tick}
+Game Time: {game_time.isoformat() if game_time else 'unknown'}
+
+## Blue Forces (alive: {len(blue_alive)}, destroyed: {len(blue_destroyed)}):
+{blue_summary}
+
+## Red Forces (alive: {len(red_alive)}, destroyed: {len(red_destroyed)}):
+{red_summary}
+
+## Victory Conditions
+
+BLUE wins if: {victory_blue_cond or 'Not specified'}
+RED wins if: {victory_red_cond or 'Not specified'}
+
+## Instructions
+Evaluate the current game state against the victory conditions.
+- Consider unit positions, strength, destroyed units, and current tasks.
+- Be conservative — only declare a winner if the condition is CLEARLY and FULLY met.
+- If a condition says "all enemy units eliminated", ALL enemy units must be destroyed (strength=0 or is_destroyed).
+- If a condition references a location/grid area, check if the required units are actually at that position.
+- If neither condition is met yet, set winner to null.
+
+Respond with ONLY a valid JSON object:
+{{"winner": "blue" | "red" | null, "summary": "one-line description", "detail": "brief explanation"}}
+"""
+
+    try:
+        from backend.config import settings
+        if not settings.OPENAI_API_KEY:
+            return None
+
+        from openai import AsyncOpenAI
+        import json
+
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        response = await client.chat.completions.create(
+            model=settings.OPENAI_MODEL_NANO or "gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+            max_tokens=200,
+        )
+
+        raw = response.choices[0].message.content
+        if not raw:
+            return None
+
+        result = json.loads(raw)
+        winner = result.get("winner")
+        if winner and winner in ("blue", "red"):
+            logger.info("AI Referee: %s wins! %s", winner, result.get("summary", ""))
+            return result
+        return None
+
+    except Exception as e:
+        logger.warning("Victory condition evaluation failed: %s", e)
+        return None
+
+

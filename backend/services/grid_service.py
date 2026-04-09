@@ -271,6 +271,13 @@ class GridService:
             return self._make_top_label(col, row)
         return None
 
+    def is_point_inside_grid(self, lat: float, lon: float) -> bool:
+        """Check if a geographic point falls within the grid boundaries."""
+        ux, uy = self._geo_to_local(lat, lon)
+        col = int(ux // self._square_size)
+        row = int(uy // self._square_size)
+        return 0 <= col < self._columns and 0 <= row < self._rows
+
     def point_to_snail(self, lat: float, lon: float, depth: int = 3) -> str | None:
         """Geographic point → snail address at given depth."""
         depth = min(depth, self._max_depth)

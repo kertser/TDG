@@ -418,6 +418,7 @@ class AdminSessionCreate(BaseModel):
 class AdminSessionUpdate(BaseModel):
     name: str | None = None
     current_time: str | None = None  # ISO datetime string for operation start time
+    settings: dict | None = None     # Session settings (turn_limit, etc.)
 
 
 @router.post("/sessions")
@@ -470,6 +471,11 @@ async def admin_update_session(session_id: uuid.UUID, body: AdminSessionUpdate, 
             session.current_time = datetime.fromisoformat(body.current_time.replace('Z', '+00:00'))
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="Invalid datetime format")
+    if body.settings is not None:
+        # Merge with existing settings (don't overwrite other keys)
+        existing = session.settings or {}
+        existing.update(body.settings)
+        session.settings = existing
     await db.flush()
 
     # Resolve scenario title for response

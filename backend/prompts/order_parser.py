@@ -23,7 +23,17 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
    - Target unit(s) referenced by name or callsign
    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, **disengage** (break contact and seek cover), halt, regroup, report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
-   - Speed preference (slow = cautious/tactical, fast = rapid movement)
+   - **Speed preference**: "slow" = cautious/tactical/stealthy movement; "fast" = rapid/urgent movement
+     - Slow indicators (EN): slow, careful, cautious, stealth, tactical, sneak, quietly, covertly, low profile
+     - Slow indicators (RU): медленно, осторожно, скрытно, тихо, крадучись, тактически, аккуратно, не спеша, перебежками, ползком, незаметно, потихоньку
+     - Fast indicators (EN): fast, rapid, quick, urgent, rush, sprint, hurry, double time, ASAP, on the double, forced march, full speed
+     - Fast indicators (RU): быстро, срочно, немедленно, бегом, марш-бросок, рывком, стремительно, ускоренно, галопом, на рысях, форсированным маршем, полным ходом, мигом
+   - **Formation**: if mentioned, extract the formation type:
+     - column (колонна, походный, гуськом, в затылок, друг за другом)
+     - line (цепь, развёрнутый, шеренга, пеленг, рассредоточиться, боевая линия)
+     - wedge (клин, клином, боевой порядок)
+     - vee (уступ), echelon_left (уступ влево), echelon_right (уступ вправо)
+     - diamond (ромб), box (каре), staggered (рассредоточенная колонна), herringbone (ёлочка), dispersed (рассыпной)
    - Engagement rules if stated
    - Urgency level
    - Stated purpose/objective
@@ -109,7 +119,7 @@ You MUST respond with a valid JSON object matching this exact schema:
     }}
   ],
   "speed": "slow" | "fast" | null,
-  "formation": null,
+  "formation": "column" | "line" | "wedge" | "vee" | "echelon_left" | "echelon_right" | "diamond" | "box" | "staggered" | "herringbone" | "dispersed" | null,
   "engagement_rules": "fire_at_will" | "hold_fire" | "return_fire_only" | null,
   "urgency": "routine" | "priority" | "immediate" | "flash" | null,
   "purpose": "stated objective or null",
@@ -378,6 +388,66 @@ PARSED:
   "engagement_rules": null,
   "urgency": "immediate",
   "purpose": "break contact and seek cover",
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Первый взвод, выдвигайтесь медленно и осторожно в B6-3, движение цепью."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Первый взвод"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "B6-3", "ref_type": "snail", "normalized": "B6-3"}],
+  "speed": "slow",
+  "formation": "line",
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "2nd Platoon, form wedge and advance rapidly to C4-5!"
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["2nd Platoon"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "C4-5", "ref_type": "snail", "normalized": "C4-5"}],
+  "speed": "fast",
+  "formation": "wedge",
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Второй взвод, быстро выдвигайтесь в B8 колонной!"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Второй взвод"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "B8", "ref_type": "grid", "normalized": "B8"}],
+  "speed": "fast",
+  "formation": "column",
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": null,
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []

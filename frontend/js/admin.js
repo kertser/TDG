@@ -831,6 +831,7 @@ const KAdmin = (() => {
                 const sc = await resp.json();
                 _setVal('wizard-session-name', sc.title || 'New Session');
                 _setVal('wizard-turn-interval', 1);
+                _setVal('wizard-turn-limit', sc.objectives?.turn_limit || 0);
                 const infoEl = document.getElementById('wizard-scenario-info');
                 if (infoEl) {
                     const unitCount = ((sc.initial_units?.blue || []).length + (sc.initial_units?.red || []).length);
@@ -963,6 +964,7 @@ const KAdmin = (() => {
 
         const name = document.getElementById('wizard-session-name')?.value?.trim();
         const interval = parseInt(document.getElementById('wizard-turn-interval')?.value) || 1;
+        const turnLimit = parseInt(document.getElementById('wizard-turn-limit')?.value) || 0;
         const opDatetime = document.getElementById('wizard-operation-datetime')?.value || '';
 
         const statusEl = document.getElementById('wizard-create-status');
@@ -998,6 +1000,15 @@ const KAdmin = (() => {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ tick_interval: interval * 60 }),
+                });
+            }
+
+            // 3a. Save turn limit to session settings
+            if (turnLimit > 0) {
+                await fetch(`/api/admin/sessions/${sessionData.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ settings: { turn_limit: turnLimit } }),
                 });
             }
 

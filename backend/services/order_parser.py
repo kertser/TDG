@@ -191,6 +191,14 @@ class OrderParser:
                 raw_json = json.loads(raw_content)
                 parsed = ParsedOrderData.model_validate(raw_json)
 
+                # Normalize formation values (LLM may return non-canonical names)
+                if parsed.formation:
+                    FORMATION_NORMALIZE = {
+                        "staggered_column": "staggered",
+                        "echelon": "echelon_right",
+                    }
+                    parsed.formation = FORMATION_NORMALIZE.get(parsed.formation, parsed.formation)
+
                 logger.info(
                     "OrderParser[%s]: classified=%s lang=%s conf=%.2f (attempt %d)",
                     model, parsed.classification.value,
@@ -225,10 +233,10 @@ class OrderParser:
         command_kw_en = ["move", "advance", "attack", "defend", "hold", "observe", "withdraw",
                          "retreat", "support", "halt", "stop", "flank", "engage", "fire at",
                          "fire on", "fire mission", "shoot", "disengage", "break contact"]
-        command_kw_ru = ["выдвигай", "двигай", "атак", "оборон", "удержи", "наблюда", "отход",
+        command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
-                         "выйти из боя", "выйди из боя", "отцепи"]
+                         "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -256,7 +264,8 @@ class OrderParser:
             if any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
                                                  "огонь по", "огонь на", "открыть огонь", "стреляй"]):
                 order_type = "fire"
-            elif any(kw in text_lower for kw in ["move", "advance", "выдвигай", "двигай", "обход"]):
+            elif any(kw in text_lower for kw in ["move", "advance", "form ", "выдвигай", "двигай",
+                                                     "движен", "марш", "обход", "перестрои", "построение"]):
                 order_type = "move"
             elif any(kw in text_lower for kw in ["attack", "engage", "атак"]):
                 order_type = "attack"
@@ -365,12 +374,87 @@ class OrderParser:
             sender_ref = sender_match.group(1).strip()
 
         from backend.schemas.order import LocationRefRaw
-        # Speed detection
+        # Speed detection — comprehensive EN/RU
         speed = None
-        if any(kw in text_lower for kw in ["slow", "careful", "cautious", "медленн", "осторожн", "скрытно"]):
+        # Slow/cautious patterns
+        slow_kw = [
+            "slow", "careful", "cautious", "stealth", "stealthy", "quiet", "sneak",
+            "tactical movement", "slow and careful", "carefully", "move slow",
+            "cautiously", "silently", "covertly", "low profile",
+            "медленн", "осторожн", "скрытно", "тихо", "крадучись", "без шума",
+            "тактическ", "аккуратн", "не спеша", "осмотрительн",
+            "перебежк", "ползком", "незаметн", "потихоньку",
+            "с осторожн", "без лишнего шума", "скрытн",
+        ]
+        # Fast/rapid patterns
+        fast_kw = [
+            "fast", "rapid", "quick", "urgent", "rush", "sprint", "hurry", "double time",
+            "move fast", "quickly", "asap", "full speed", "at speed",
+            "at the double", "on the double", "forced march", "move out now",
+            "срочно", "быстр", "немедленно", "бегом", "марш-бросок",
+            "рывк", "скорее", "живее", "на скорости", "стремительн",
+            "максимальн", "ускоренн", "галопом", "на рысях",
+            "форсированн", "полным ходом", "мигом", "давай давай",
+        ]
+        if any(kw in text_lower for kw in slow_kw):
             speed = "slow"
-        elif any(kw in text_lower for kw in ["fast", "rapid", "quick", "urgent", "срочно", "быстр", "немедленно"]):
+        elif any(kw in text_lower for kw in fast_kw):
             speed = "fast"
+
+        # ── Formation detection ─────────────────────────────────
+        formation = None
+        formation_map = {
+            # English
+            "column": "column", "single file": "column", "file": "column",
+            "march column": "column", "road march": "column",
+            "line": "line", "skirmish line": "line", "assault line": "line",
+            "firing line": "line", "extended line": "line", "on line": "line",
+            "abreast": "line",
+            "wedge": "wedge", "vee": "vee", "v formation": "vee",
+            "arrowhead": "wedge",
+            "echelon left": "echelon_left", "echelon right": "echelon_right",
+            "diamond": "diamond", "box": "box", "staggered column": "staggered",
+            "staggered": "staggered",
+            "herringbone": "herringbone",
+            # Russian
+            "колонн": "column", "походн": "column", "гуськом": "column",
+            "в затылок": "column", "друг за другом": "column",
+            "цепь": "line", "цепью": "line", "развернут": "line", "в линию": "line",
+            "шеренг": "line", "в шеренг": "line", "пеленг": "line",
+            "рассредоточ": "line", "стрелковая цепь": "line",
+            "боевая линия": "line",
+            "клин": "wedge", "клином": "wedge",
+            "уступ влево": "echelon_left", "уступом влево": "echelon_left",
+            "уступ вправо": "echelon_right", "уступом вправо": "echelon_right",
+            "уступ": "echelon_right",  # default echelon direction
+            "ромб": "diamond", "ромбом": "diamond",
+            "каре": "box",
+            "ёлочк": "herringbone", "елочк": "herringbone",
+            "боевой порядок": "wedge",  # generic "combat formation" → default wedge
+        }
+        # Check formation patterns (check longer patterns first)
+        for pattern, form_name in sorted(formation_map.items(), key=lambda x: -len(x[0])):
+            if pattern in text_lower:
+                formation = form_name
+                break
+
+        # Also look for explicit formation commands
+        import re as _re
+        form_cmd = _re.search(
+            r'(?:form|formation|adopt|form up|go to|switch to|'
+            r'построение|движение|двигаться|перестрои|принять|'
+            r'в порядке|боевой порядок|марш\w*\s*порядок)\s*[:=]?\s*'
+            r'(column|line|wedge|vee|diamond|echelon|herringbone|staggered|box|abreast|'
+            r'колонн\w*|цеп\w*|клин\w*|уступ\w*|ромб\w*|каре|'
+            r'шеренг\w*|пеленг\w*|походн\w*)',
+            text_lower,
+        )
+        if form_cmd and not formation:
+            matched_form = form_cmd.group(1).strip()
+            for pattern, form_name in formation_map.items():
+                if pattern in matched_form:
+                    formation = form_name
+                    break
 
         # Engagement rules
         engagement_rules = None
@@ -389,10 +473,11 @@ class OrderParser:
             order_type=order_type,
             location_refs=[LocationRefRaw(**lr) for lr in location_refs],
             speed=speed,
+            formation=formation,
             engagement_rules=engagement_rules,
             confidence=self._compute_keyword_confidence(
                 classification, order_type, location_refs,
-                target_unit_refs, speed, engagement_rules,
+                target_unit_refs, speed, engagement_rules, formation,
             ),
             ambiguities=["Parsed by keyword fallback — no LLM"],
         )
@@ -405,6 +490,7 @@ class OrderParser:
         target_unit_refs: list[str],
         speed: str | None,
         engagement_rules: str | None,
+        formation: str | None = None,
     ) -> float:
         """
         Compute confidence score for keyword-parsed result.
@@ -446,6 +532,8 @@ class OrderParser:
             if speed:
                 conf += 0.03
             if engagement_rules:
+                conf += 0.03
+            if formation:
                 conf += 0.03
 
         return min(conf, 0.95)

@@ -494,6 +494,19 @@ const KScenarioBuilder = (() => {
 
         const initial_units = { blue, red, red_agents: [] };
 
+        // Game rules: turn limit, mission, victory conditions
+        const turnLimit = parseInt(document.getElementById('sb-turn-limit')?.value) || 0;
+        const mission = (document.getElementById('sb-scenario-mission')?.value || '').trim();
+        const victoryBlue = (document.getElementById('sb-victory-blue')?.value || '').trim();
+        const victoryRed = (document.getElementById('sb-victory-red')?.value || '').trim();
+
+        const objectives = {
+            turn_limit: turnLimit,
+            mission: mission || null,
+            victory_blue: victoryBlue || null,
+            victory_red: victoryRed || null,
+        };
+
         const body = {
             title,
             description: description || null,
@@ -502,6 +515,7 @@ const KScenarioBuilder = (() => {
             map_zoom: _map.getZoom(),
             grid_settings,
             initial_units,
+            objectives,
         };
 
         try {
@@ -618,6 +632,17 @@ const KScenarioBuilder = (() => {
             const descEl = document.getElementById('sb-scenario-desc');
             if (titleEl) titleEl.value = s.title || '';
             if (descEl) descEl.value = s.description || '';
+
+            // Fill game rules from objectives
+            if (s.objectives) {
+                _setVal('sb-turn-limit', s.objectives.turn_limit || 0);
+                const missionEl = document.getElementById('sb-scenario-mission');
+                if (missionEl) missionEl.value = s.objectives.mission || '';
+                const vbEl = document.getElementById('sb-victory-blue');
+                if (vbEl) vbEl.value = s.objectives.victory_blue || '';
+                const vrEl = document.getElementById('sb-victory-red');
+                if (vrEl) vrEl.value = s.objectives.victory_red || '';
+            }
 
             // Fill grid settings
             if (s.grid_settings) {

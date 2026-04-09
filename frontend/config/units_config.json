@@ -51,6 +51,7 @@
         { "key": "staggered", "label": "Staggered", "icon": "⋮" },
         { "key": "box", "label": "Box", "icon": "▢" },
         { "key": "diamond", "label": "Diamond", "icon": "◇" },
+        { "key": "herringbone", "label": "Herringbone", "icon": "⋈" },
         { "key": "dispersed", "label": "Dispersed", "icon": "·:·" }
     ],
 
