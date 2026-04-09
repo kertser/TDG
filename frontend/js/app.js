@@ -119,6 +119,9 @@
         // Load events
         try { await KEvents.load(sessionId, token); } catch (err) { console.warn('Events load error:', err); }
 
+        // Load reports
+        try { await KReports.load(sessionId, token); } catch (err) { console.warn('Reports load error:', err); }
+
         // Connect WebSocket
         KWebSocket.connect(sessionId, token);
 
@@ -174,7 +177,8 @@
         });
 
         KWebSocket.on('report_new', (data) => {
-            KGameLog.addEntry(`[${data.channel}] ${data.text}`, 'report');
+            KGameLog.addEntry('[' + (data.channel || 'report').toUpperCase() + '] ' + (data.text || ''), 'report');
+            KReports.addReport(data);
         });
 
         KWebSocket.on('map_object_created', (data) => {
@@ -199,6 +203,8 @@
             try { KOrders.refreshMeta(); } catch(e) {}
             // Update turn button badge
             try { KSessionUI.updateTurnBadge(); } catch(e) {}
+            // Reload events for the new tick
+            try { KEvents.load(sessionId, token); } catch(e) {}
         });
 
         KGameLog.addEntry('Connected to session', 'info');

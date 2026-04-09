@@ -435,5 +435,15 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
             only_side=msg_side,
         )
 
+    # Broadcast reports (SPOTREPs, SHELREPs, SITREPs, INTSUMs, CASREPs)
+    tick_reports = result.get("reports", [])
+    for rpt in tick_reports:
+        rpt_side = rpt.get("to_side", "blue")
+        await ws_manager.broadcast(
+            session_id,
+            {"type": "report_new", "data": rpt},
+            only_side=rpt_side,
+        )
+
     return result
 

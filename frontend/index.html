@@ -66,6 +66,7 @@
             <div id="sidebar-tabs">
                 <button class="tab-btn active" data-tab="session-tab">Session</button>
                 <button class="tab-btn" data-tab="events-tab">Events</button>
+                <button class="tab-btn" data-tab="reports-tab">Reports</button>
                 <button class="tab-btn" data-tab="coc-tab">CoC</button>
                 <button class="tab-btn" data-tab="log-tab">Log</button>
             </div>
@@ -117,6 +118,19 @@
             <div id="events-tab" class="tab-panel">
                 <h3>Events</h3>
                 <div id="events-list" style="overflow-y:auto;flex:1;"></div>
+            </div>
+
+            <!-- Reports panel -->
+            <div id="reports-tab" class="tab-panel">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                    <h3 style="flex:1;margin:0;">Reports</h3>
+                    <button id="export-reports-btn" class="log-export-btn" title="Export reports as text file">
+                        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>
+                        <span>Export</span>
+                    </button>
+                </div>
+                <div id="reports-filter-bar" class="reports-filter-bar"></div>
+                <div id="reports-list" style="overflow-y:auto;flex:1;"></div>
             </div>
 
             <!-- Game log panel -->

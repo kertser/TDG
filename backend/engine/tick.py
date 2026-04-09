@@ -345,17 +345,75 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         event_row = create_event(session_id, tick, game_time, evt_dict, vis)
         db.add(event_row)
 
-    # ── 10b. Generate radio chatter (idle requests + peer support) ──
-    from backend.engine.radio_chatter import (
-        generate_idle_radio_messages,
-        generate_peer_support_requests,
-    )
-    from backend.models.chat_message import ChatMessage
+    # ── 10b. Generate reports (SPOTREPs, SHELREPs, CASREPs, SITREPs, INTSUMs) ──
+    from backend.services.report_generator import generate_tick_reports
 
     # Determine language from scenario environment
     _lang = "ru"
     if scenario and scenario.environment:
         _lang = scenario.environment.get("language", "ru")
+
+    # Reload contacts for report generation
+    _contacts_result = await db.execute(
+        select(Contact).where(Contact.session_id == session_id)
+    )
+    _all_contacts = list(_contacts_result.scalars().all())
+
+    tick_reports = generate_tick_reports(
+        all_units=all_units,
+        contacts=_all_contacts,
+        tick=tick,
+        game_time=game_time,
+        tick_events=all_events,
+        under_fire=under_fire,
+        grid_service=grid_service,
+        lang=_lang,
+    )
+
+    report_broadcast = []
+    for rpt in tick_reports:
+        to_side_val = rpt.get("to_side", "blue")
+        try:
+            to_side_enum = ReportSide(to_side_val)
+        except ValueError:
+            to_side_enum = ReportSide.blue
+
+        from_uid = rpt.get("from_unit_id")
+        if from_uid and not isinstance(from_uid, uuid.UUID):
+            try:
+                from_uid = uuid.UUID(str(from_uid))
+            except (ValueError, AttributeError):
+                from_uid = None
+
+        report_row = Report(
+            session_id=session_id,
+            tick=tick,
+            game_timestamp=game_time,
+            channel=rpt["channel"],
+            from_unit_id=from_uid,
+            to_side=to_side_enum,
+            text=rpt["text"],
+            structured_data=rpt.get("structured_data"),
+        )
+        db.add(report_row)
+
+        report_broadcast.append({
+            "type": "report_new",
+            "channel": rpt["channel"],
+            "to_side": to_side_val,
+            "text": rpt["text"],
+            "tick": tick,
+            "from_unit_id": str(from_uid) if from_uid else None,
+            "structured_data": rpt.get("structured_data"),
+            "report_id": str(report_row.id),
+        })
+
+    # ── 10c. Generate radio chatter (idle requests + peer support) ──
+    from backend.engine.radio_chatter import (
+        generate_idle_radio_messages,
+        generate_peer_support_requests,
+    )
+    from backend.models.chat_message import ChatMessage
 
     idle_msgs = generate_idle_radio_messages(
         all_units, all_events, tick,
@@ -399,6 +457,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         "events_count": len(all_events),
         "units_alive": sum(1 for u in all_units if not u.is_destroyed),
         "radio_messages": radio_broadcast,
+        "reports": report_broadcast,
     }
 
 

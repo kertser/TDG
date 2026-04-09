@@ -791,6 +791,72 @@ button:hover { background: #1a5276; }
 .log-item.order { border-left-color: #2196f3; }
 .log-item.info { border-left-color: #607d8b; }
 
+/* ── Reports Panel ───────────────────────────── */
+.reports-filter-bar {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid rgba(79, 195, 247, 0.1);
+}
+.reports-filter-btn {
+    background: rgba(15, 52, 96, 0.3);
+    border: 1px solid rgba(79, 195, 247, 0.15);
+    border-bottom: 2px solid transparent;
+    border-radius: 4px;
+    color: #aaa;
+    font-size: 10px;
+    padding: 3px 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.reports-filter-btn:hover {
+    background: rgba(15, 52, 96, 0.5);
+    color: #e0e0e0;
+}
+.reports-filter-btn.active {
+    background: rgba(79, 195, 247, 0.15);
+    color: #4fc3f7;
+    border-color: rgba(79, 195, 247, 0.3);
+}
+.report-item {
+    padding: 6px 8px;
+    background: rgba(15, 20, 35, 0.6);
+    border-radius: 4px;
+    font-size: 12px;
+    border-left: 3px solid #555;
+    margin-bottom: 3px;
+    transition: background 0.15s;
+}
+.report-item:hover {
+    background: rgba(25, 35, 55, 0.8);
+}
+.report-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+}
+.report-channel {
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.report-tick {
+    font-size: 10px;
+    color: #777;
+}
+.report-text {
+    font-size: 11px;
+    color: #ccc;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 /* ── Orders Panel (enhanced) ─────────────────── */
 #orders-tab.active {
     flex-direction: column;
