@@ -56,6 +56,7 @@ class ResponseType(str, enum.Enum):
     wilco_fire = "wilco_fire"         # will comply — fire mission (artillery/mortar)
     wilco_disengage = "wilco_disengage"  # will comply — disengage/break contact
     unable = "unable"                 # cannot comply
+    unable_range = "unable_range"     # cannot comply — target beyond max fire range
     clarify = "clarify"              # request clarification
     status = "status"                # status report
     no_response = "no_response"      # comms down / destroyed

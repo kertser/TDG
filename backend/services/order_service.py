@@ -225,6 +225,43 @@ class OrderService:
                 **task,  # merge task fields into parsed_order for tick engine
             }
 
+        # ── Fire range validation for artillery/mortar units ──
+        # Check if fire-type orders target a location beyond the unit's weapon range.
+        # If so, prepare range info for the unit response.
+        fire_range_issues: dict[str, dict] = {}  # unit_id → range info dict
+        if task and parsed.order_type and parsed.order_type.value == "fire" and task.get("target_location"):
+            from backend.engine.combat import WEAPON_RANGE, ARTILLERY_TYPES
+            target_loc = task["target_location"]
+            tgt_lat = target_loc.get("lat")
+            tgt_lon = target_loc.get("lon")
+            if tgt_lat is not None and tgt_lon is not None:
+                for unit_dict in matched_units:
+                    if unit_dict.get("unit_type", "") not in ARTILLERY_TYPES:
+                        continue
+                    u_lat = unit_dict.get("lat")
+                    u_lon = unit_dict.get("lon")
+                    if u_lat is None or u_lon is None:
+                        continue
+                    weapon_range = WEAPON_RANGE.get(unit_dict["unit_type"], 5000)
+                    # Check capabilities for extended range
+                    caps = unit_dict.get("capabilities") or {}
+                    if caps.get("mortar_range_m"):
+                        weapon_range = max(weapon_range, caps["mortar_range_m"])
+                    dist_to_target = self._haversine_m(u_lat, u_lon, tgt_lat, tgt_lon)
+                    if dist_to_target > weapon_range:
+                        # Compute bearing from unit to target
+                        bearing_deg = self._bearing_deg(u_lat, u_lon, tgt_lat, tgt_lon)
+                        compass = self._bearing_to_compass(bearing_deg)
+                        # How far the unit needs to move to get in range
+                        deficit_m = dist_to_target - weapon_range
+                        fire_range_issues[unit_dict["id"]] = {
+                            "dist_to_target_m": round(dist_to_target),
+                            "weapon_range_m": weapon_range,
+                            "deficit_m": round(deficit_m),
+                            "bearing_deg": round(bearing_deg),
+                            "compass": compass,
+                        }
+
         # ── Check unit states & generate responses ────────
         all_ok = True
         for unit_dict in matched_units:
@@ -236,9 +273,41 @@ class OrderService:
             elif resp_type == ResponseType.unable:
                 all_ok = False
 
+            # ── Override: artillery out-of-range fire mission ──
+            range_info = fire_range_issues.get(unit_dict.get("id"))
+            if range_info and resp_type in (ResponseType.wilco_fire, ResponseType.wilco, ResponseType.ack):
+                resp_type = ResponseType.unable_range
+                reason = "out_of_range"
+                all_ok = False
+
             # Build situational awareness for status and command acknowledgments
             status_text = ""
-            if resp_type in (ResponseType.status, ResponseType.wilco, ResponseType.ack):
+            if resp_type == ResponseType.unable_range and range_info:
+                # Build range info text for the unit's response
+                lang = parsed.language.value
+                if lang == "ru":
+                    compass_ru = {
+                        "N": "С", "NNE": "ССВ", "NE": "СВ", "ENE": "ВСВ",
+                        "E": "В", "ESE": "ВЮВ", "SE": "ЮВ", "SSE": "ЮЮВ",
+                        "S": "Ю", "SSW": "ЮЮЗ", "SW": "ЮЗ", "WSW": "ЗЮЗ",
+                        "W": "З", "WNW": "ЗСЗ", "NW": "СЗ", "NNW": "ССЗ",
+                    }
+                    compass_dir = compass_ru.get(range_info["compass"], range_info["compass"])
+                    status_text = (
+                        f"Дистанция до цели {range_info['dist_to_target_m']}м, "
+                        f"макс. дальность {range_info['weapon_range_m']}м. "
+                        f"Направление {compass_dir} ({range_info['bearing_deg']}°), "
+                        f"необходимо выдвинуться минимум на {range_info['deficit_m']}м."
+                    )
+                else:
+                    status_text = (
+                        f"Distance to target {range_info['dist_to_target_m']}m, "
+                        f"max range {range_info['weapon_range_m']}m. "
+                        f"Bearing {range_info['compass']} ({range_info['bearing_deg']}°), "
+                        f"need to advance at least {range_info['deficit_m']}m."
+                    )
+            elif resp_type in (ResponseType.status, ResponseType.wilco, ResponseType.wilco_fire,
+                               ResponseType.wilco_disengage, ResponseType.ack):
                 situation = await self._build_unit_situation(
                     unit_dict, session_id, issuer_side, units_context,
                     db, grid_service,
@@ -265,7 +334,73 @@ class OrderService:
                 result.responses.append(resp)
 
         # ── Set order status ──────────────────────────────
-        if all_ok and task:
+        if fire_range_issues and len(fire_range_issues) == len(matched_units):
+            # ALL matched units out of range — auto-reposition + fire
+            # Build a compound move-to-range → fire phased task
+            from backend.engine.combat import DEFAULT_FIRE_SALVOS
+            first_uid = list(fire_range_issues.keys())[0]
+            range_info = fire_range_issues[first_uid]
+            first_unit = next(u for u in matched_units if u["id"] == first_uid)
+
+            # Compute advance position — move deficit + 100m safety margin
+            advance_dist = range_info["deficit_m"] + 100
+            u_lat, u_lon = first_unit["lat"], first_unit["lon"]
+            bearing = range_info["bearing_deg"]
+            adv_lat, adv_lon = self._destination_point(u_lat, u_lon, bearing, advance_dist)
+
+            # Resolve advance point to snail path if possible
+            adv_snail = None
+            if grid_service:
+                try:
+                    adv_snail = grid_service.point_to_snail(adv_lat, adv_lon, depth=2)
+                except Exception:
+                    pass
+
+            move_task = {
+                "type": "move",
+                "target_location": {"lat": adv_lat, "lon": adv_lon},
+                "speed": "fast",
+                "order_id": str(order.id),
+                "advance_to_fire": True,
+            }
+            if adv_snail:
+                move_task["target_snail"] = adv_snail
+
+            fire_task = {
+                "type": "fire",
+                "target_location": task["target_location"],
+                "order_id": str(order.id),
+                "salvos_remaining": task.get("salvos_remaining", DEFAULT_FIRE_SALVOS),
+            }
+            if task.get("target_snail"):
+                fire_task["target_snail"] = task["target_snail"]
+
+            phases = [
+                move_task,
+                {
+                    "condition": {"type": "task_completed"},
+                    "task": fire_task,
+                },
+            ]
+
+            order.parsed_order = {
+                **(order.parsed_order or {}),
+                "type": "move",
+                "order_type": "move",
+                "target_location": {"lat": adv_lat, "lon": adv_lon},
+                "speed": "fast",
+                "advance_to_fire": True,
+                "phases": phases,
+                **({"target_snail": adv_snail} if adv_snail else {}),
+            }
+            order.parsed_intent = {
+                **(order.parsed_intent or {}),
+                "advance_to_fire": True,
+                "range_details": fire_range_issues,
+            }
+            order.status = OrderStatus.validated
+            order.validated_at = datetime.now(timezone.utc)
+        elif all_ok and task:
             order.status = OrderStatus.validated
             order.validated_at = datetime.now(timezone.utc)
         elif task:
@@ -1215,6 +1350,58 @@ class OrderService:
                 pass
 
         return situation
+
+    # ── Geometry helpers ──────────────────────────────────
+
+    @staticmethod
+    def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Haversine distance in meters between two lat/lon points."""
+        import math
+        R = 6_371_000
+        rlat1, rlon1 = math.radians(lat1), math.radians(lon1)
+        rlat2, rlon2 = math.radians(lat2), math.radians(lon2)
+        dlat = rlat2 - rlat1
+        dlon = rlon2 - rlon1
+        a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+        return 2 * R * math.asin(math.sqrt(a))
+
+    @staticmethod
+    def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Initial bearing in degrees from (lat1,lon1) to (lat2,lon2)."""
+        import math
+        rlat1, rlat2 = math.radians(lat1), math.radians(lat2)
+        dlon = math.radians(lon2 - lon1)
+        x = math.sin(dlon) * math.cos(rlat2)
+        y = math.cos(rlat1) * math.sin(rlat2) - math.sin(rlat1) * math.cos(rlat2) * math.cos(dlon)
+        return math.degrees(math.atan2(x, y)) % 360
+
+    @staticmethod
+    def _destination_point(lat: float, lon: float, bearing_deg: float, distance_m: float) -> tuple[float, float]:
+        """Compute destination lat/lon given start point, bearing (degrees), and distance (meters)."""
+        import math
+        R = 6_371_000
+        d = distance_m / R
+        br = math.radians(bearing_deg)
+        lat1 = math.radians(lat)
+        lon1 = math.radians(lon)
+        lat2 = math.asin(
+            math.sin(lat1) * math.cos(d) + math.cos(lat1) * math.sin(d) * math.cos(br)
+        )
+        lon2 = lon1 + math.atan2(
+            math.sin(br) * math.sin(d) * math.cos(lat1),
+            math.cos(d) - math.sin(lat1) * math.sin(lat2),
+        )
+        return math.degrees(lat2), math.degrees(lon2)
+
+    @staticmethod
+    def _bearing_to_compass(bearing: float) -> str:
+        """Convert bearing in degrees to 16-point compass direction."""
+        directions = [
+            "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+        ]
+        idx = round(bearing / 22.5) % 16
+        return directions[idx]
 
 
 # Singleton

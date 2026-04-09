@@ -111,6 +111,9 @@ DANGER_CLOSE_RADIUS_M = 50.0
 # Blast radius for area fire (indirect fire at a location, not a specific unit)
 AREA_FIRE_BLAST_RADIUS_M = 150.0
 
+# Default number of salvos for fire missions (finite — not infinite)
+DEFAULT_FIRE_SALVOS = 3
+
 
 def _fire_intensity(damage: float) -> str:
     """Map damage value to a natural language fire intensity description."""
@@ -261,6 +264,8 @@ def process_combat(
                     tid = evt.get("target_unit_id")
                     if tid:
                         under_fire.add(tid)
+                # ── Salvo tracking: decrement and complete when done ──
+                _decrement_salvos(attacker, events)
                 continue  # Area fire processed, skip normal targeting
 
         target = None
@@ -456,7 +461,46 @@ def process_combat(
                 },
             })
 
+        # ── Salvo tracking for artillery targeted fire ──
+        if attacker.unit_type in ARTILLERY_TYPES and attacker.current_task:
+            _decrement_salvos(attacker, events)
+
     return events, under_fire
+
+
+def _decrement_salvos(unit, events: list[dict]) -> None:
+    """
+    Track salvo count for artillery fire tasks.
+
+    Each tick of firing decrements salvos_remaining by 1.
+    When it reaches 0, the fire task is cleared (mission complete).
+    Default salvos: DEFAULT_FIRE_SALVOS (3).
+    """
+    task = unit.current_task
+    if not task:
+        return
+
+    # Initialize salvos_remaining if not set
+    salvos = task.get("salvos_remaining")
+    if salvos is None:
+        salvos = task.get("salvos", DEFAULT_FIRE_SALVOS)
+        task["salvos_remaining"] = salvos
+
+    salvos -= 1
+    task["salvos_remaining"] = salvos
+    unit.current_task = task  # trigger ORM dirty
+
+    if salvos <= 0:
+        unit.current_task = None
+        events.append({
+            "event_type": "order_completed",
+            "actor_unit_id": unit.id,
+            "text_summary": f"{unit.name} fire mission complete — salvos expended",
+            "payload": {
+                "unit_id": str(unit.id),
+                "reason": "salvos_expended",
+            },
+        })
 
 
 def _process_area_fire(
@@ -780,6 +824,7 @@ def process_artillery_support(
                     "target_location": target_loc,
                     "target_unit_id": target_uid,
                     "support_for": str(unit.id),
+                    "salvos_remaining": DEFAULT_FIRE_SALVOS,
                 }
                 tasked_artillery.add(str(sib.id))
 

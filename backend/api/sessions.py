@@ -348,6 +348,11 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Commit tick changes BEFORE broadcasting / returning response.
+    # This ensures subsequent queries (e.g. pending-orders-count) see
+    # the updated order statuses immediately.
+    await db.commit()
+
     # Broadcast state update via WebSocket
     from backend.services.ws_manager import ws_manager
     from backend.services.visibility_service import get_visible_units, get_visible_contacts

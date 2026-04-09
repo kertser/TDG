@@ -385,6 +385,9 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     combat_events, under_fire = process_combat(all_units, terrain, map_objects_list)
     all_events.extend(combat_events)
 
+    # ── 5a. Mark completed orders from combat (fire salvos expended) ──
+    await _complete_orders_from_events(session_id, combat_events, db)
+
     # ── 5b. Remove contacts referencing destroyed units ────────
     destroyed_ids = {str(u.id) for u in all_units if u.is_destroyed}
     if destroyed_ids:
@@ -736,6 +739,10 @@ def _order_to_task(order: Order) -> dict | None:
             task["target_snail"] = target_snail
         if speed:
             task["speed"] = speed
+        # Add salvos for fire tasks (default 3 unless specified)
+        if task_type == "fire":
+            from backend.engine.combat import DEFAULT_FIRE_SALVOS
+            task["salvos_remaining"] = po.get("salvos", DEFAULT_FIRE_SALVOS)
         return task
 
     # Fallback: try to parse simple keywords from original text
@@ -746,7 +753,8 @@ def _order_to_task(order: Order) -> dict | None:
         if any(kw in text for kw in ["disengage", "break contact", "разорвать контакт", "выйти из боя"]):
             return {"type": "disengage", "order_id": str(order.id)}
         if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй"]):
-            return {"type": "fire", "order_id": str(order.id)}
+            from backend.engine.combat import DEFAULT_FIRE_SALVOS
+            return {"type": "fire", "order_id": str(order.id), "salvos_remaining": DEFAULT_FIRE_SALVOS}
         if "move" in text or "advance" in text:
             return {"type": "move", "order_id": str(order.id)}
         if "attack" in text or "engage" in text:

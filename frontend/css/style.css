@@ -3686,6 +3686,17 @@ button:hover { background: #1a5276; }
     box-shadow: 0 0 8px rgba(79, 195, 247, 0.3);
     animation: pick-pulse 1.2s ease-in-out infinite;
 }
+/* Cancel orders button — red/danger accent */
+.cmd-cancel-btn {
+    color: #ef5350;
+    background: rgba(239, 83, 80, 0.08);
+    border-color: rgba(239, 83, 80, 0.25);
+}
+.cmd-cancel-btn:hover {
+    color: #ff7043;
+    background: rgba(239, 83, 80, 0.18);
+    border-color: rgba(239, 83, 80, 0.45);
+}
 @keyframes pick-pulse {
     0%, 100% { box-shadow: 0 0 6px rgba(79, 195, 247, 0.2); }
     50% { box-shadow: 0 0 12px rgba(79, 195, 247, 0.5); }
@@ -4172,3 +4183,132 @@ button:hover { background: #1a5276; }
     30% { opacity: 0.2; }
     100% { opacity: 0; }
 }
+
+/* ── KDialogs – Themed modal dialogs ───────────── */
+.kdialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: kdialog-fadein 0.15s ease-out;
+}
+@keyframes kdialog-fadein {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+.kdialog {
+    background: #1e2a3a;
+    border: 1px solid rgba(79,195,247,0.25);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(79,195,247,0.08);
+    min-width: 280px;
+    max-width: 400px;
+    width: 90vw;
+    animation: kdialog-slidein 0.2s ease-out;
+    overflow: hidden;
+}
+@keyframes kdialog-slidein {
+    from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.kdialog.kdialog-dangerous {
+    border-color: rgba(239,83,80,0.35);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(239,83,80,0.1);
+}
+.kdialog-header {
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #b0bec5;
+    letter-spacing: 0.3px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: rgba(0,0,0,0.15);
+}
+.kdialog-dangerous .kdialog-header {
+    color: #ef9a9a;
+}
+.kdialog-body {
+    padding: 14px 16px;
+}
+.kdialog-message {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: #cfd8dc;
+    word-break: break-word;
+}
+.kdialog-input,
+.kdialog-select {
+    width: 100%;
+    margin-top: 10px;
+    padding: 7px 10px;
+    font-size: 12px;
+    background: #151e2c;
+    color: #e0e0e0;
+    border: 1px solid rgba(79,195,247,0.2);
+    border-radius: 5px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+.kdialog-input:focus,
+.kdialog-select:focus {
+    border-color: rgba(79,195,247,0.5);
+    box-shadow: 0 0 6px rgba(79,195,247,0.15);
+}
+.kdialog-footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px 12px;
+    justify-content: flex-end;
+    border-top: 1px solid rgba(255,255,255,0.05);
+    background: rgba(0,0,0,0.08);
+}
+.kdialog-btn {
+    padding: 6px 16px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.2px;
+}
+.kdialog-btn:focus-visible {
+    outline: 2px solid rgba(79,195,247,0.5);
+    outline-offset: 1px;
+}
+.kdialog-btn-cancel {
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.12);
+    color: #90a4ae;
+}
+.kdialog-btn-cancel:hover {
+    background: rgba(255,255,255,0.1);
+    color: #b0bec5;
+}
+.kdialog-btn-confirm,
+.kdialog-btn-ok {
+    background: rgba(79,195,247,0.15);
+    border-color: rgba(79,195,247,0.3);
+    color: #4fc3f7;
+}
+.kdialog-btn-confirm:hover,
+.kdialog-btn-ok:hover {
+    background: rgba(79,195,247,0.25);
+    border-color: rgba(79,195,247,0.45);
+    color: #81d4fa;
+}
+.kdialog-btn-danger {
+    background: rgba(239,83,80,0.15);
+    border-color: rgba(239,83,80,0.3);
+    color: #ef5350;
+}
+.kdialog-btn-danger:hover {
+    background: rgba(239,83,80,0.25);
+    border-color: rgba(239,83,80,0.45);
+    color: #ff7043;
+}
+

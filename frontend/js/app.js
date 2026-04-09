@@ -208,8 +208,12 @@
             try { KUnits.clearPendingOrders(); } catch(e) {}
             // Refresh command panel datetime
             try { KOrders.refreshMeta(); } catch(e) {}
-            // Update turn button badge
-            try { KSessionUI.updateTurnBadge(); } catch(e) {}
+            // Update turn button badge (delayed to allow DB commit to complete)
+            try {
+                const turnBtn = document.getElementById('turn-btn');
+                if (turnBtn) turnBtn.classList.remove('has-pending');
+                setTimeout(() => { try { KSessionUI.updateTurnBadge(); } catch(e) {} }, 1500);
+            } catch(e) {}
             // Reload events for the new tick
             try { KEvents.load(sessionId, token); } catch(e) {}
             // Show combat impact visual effects

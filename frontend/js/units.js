@@ -905,6 +905,10 @@ const KUnits = (() => {
                 const snail = u.current_task.target_snail;
                 taskStr += snail ? ` → ${snail} (${tLat}, ${tLon})` : ` → ${tLat}, ${tLon}`;
             }
+            // Show salvos remaining for fire tasks
+            if (u.current_task.type === 'fire' && u.current_task.salvos_remaining != null) {
+                taskStr += ` [${u.current_task.salvos_remaining} salvos]`;
+            }
             html += `<span style="font-size:10px;color:#ffd740;">📋 Task: ${taskStr}</span><br>`;
         }
 
@@ -1079,6 +1083,10 @@ const KUnits = (() => {
                 } else {
                     html += ` <span style="color:#aaa;">→ ${tLat}, ${tLon}</span>`;
                 }
+            }
+            // Show salvos remaining for fire tasks
+            if (taskType === 'fire' && u.current_task.salvos_remaining != null) {
+                html += ` <span style="color:#ff8a65;">[${u.current_task.salvos_remaining} salvos]</span>`;
             }
             html += `</div>`;
         }

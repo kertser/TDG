@@ -229,6 +229,12 @@ const KOrders = (() => {
             pickBtn.addEventListener('click', () => _togglePickMode());
         }
 
+        // ── Cancel all orders ──
+        const cancelOrdersBtn = document.getElementById('cancel-orders-btn');
+        if (cancelOrdersBtn) {
+            cancelOrdersBtn.addEventListener('click', () => _cancelUnitOrders());
+        }
+
         // ── Radio send ──
         const radioSendBtn = document.getElementById('radio-send-btn');
         const radioText = document.getElementById('radio-text');
@@ -607,6 +613,70 @@ const KOrders = (() => {
                 }
             }
         });
+    }
+
+    // ── Cancel Unit Orders ──
+    async function _cancelUnitOrders() {
+        if (!_sessionId || !_token) return;
+
+        const selectedIds = typeof KUnits !== 'undefined' ? KUnits.getSelectedIds() : [];
+        const isAll = selectedIds.length === 0;
+        const label = isAll ? 'ALL units on your side' : `${selectedIds.length} selected unit(s)`;
+
+        // Confirmation via themed dialog
+        const ok = await KDialogs.confirm(
+            `Cancel all orders for ${label}?\nUnits will halt and report awaiting orders.`,
+            {
+                title: '⊘ Cancel Orders',
+                dangerous: true,
+                confirmLabel: '⊘ Cancel Orders',
+                cancelLabel: 'Keep Orders',
+            }
+        );
+        if (!ok) return;
+
+        const cancelBtn = document.getElementById('cancel-orders-btn');
+        if (cancelBtn) cancelBtn.disabled = true;
+
+        try {
+            const resp = await fetch(`/api/sessions/${_sessionId}/cancel-unit-orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${_token}`,
+                },
+                body: JSON.stringify({
+                    unit_ids: isAll ? null : selectedIds,
+                }),
+            });
+            const result = await resp.json();
+
+            if (resp.ok) {
+                const msg = `Orders cancelled: ${result.cancelled_units} unit(s) halted, ${result.cancelled_orders} order(s) cancelled`;
+                KGameLog.addEntry(msg, 'info');
+
+                // Refresh units to show cleared tasks
+                if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                    KAdmin.refreshMapUnits();
+                } else if (typeof KUnits !== 'undefined') {
+                    KUnits.load(_sessionId, _token);
+                }
+
+                // Update turn badge
+                try { KSessionUI.updateTurnBadge(); } catch(e) {}
+
+                // Switch to radio to see unit responses
+                _switchToRadioUnits();
+            } else {
+                const msg = result.detail || 'Failed to cancel orders';
+                KGameLog.addEntry(`⚠ ${msg}`, 'info');
+            }
+        } catch (err) {
+            console.error('Cancel orders failed:', err);
+            KGameLog.addEntry('⚠ Cancel orders error', 'info');
+        } finally {
+            if (cancelBtn) cancelBtn.disabled = false;
+        }
     }
 
     // ── Order Submit ──

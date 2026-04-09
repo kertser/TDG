@@ -177,12 +177,19 @@ const KSessionUI = (() => {
                     // Refresh chain of command tree after turn
                     try { KAdmin.loadPublicCoC(); } catch(e) {}
 
-                    // Update pending orders badge
-                    _updateTurnBadge();
+                    // Clear badge immediately — orders have been executed.
+                    // Don't query server right away: the DB commit may not have
+                    // completed yet (FastAPI commits after response is sent).
+                    turnBtn.classList.remove('has-pending');
+
+                    // Delayed badge refresh to catch any remaining orders
+                    // (gives the DB transaction time to commit)
+                    setTimeout(() => _updateTurnBadge(), 1500);
                 } catch (err) {
                     console.error('Turn advance failed:', err);
                 } finally {
                     turnBtn.disabled = false;
+                    turnBtn.classList.remove('has-pending');
                     turnBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders';
                 }
             });

@@ -41,6 +41,11 @@ TEMPLATES_RU = {
         "{unit}, приём. Выполнение невозможно. {reason}",
         "Здесь {unit}. Отказ. {reason}",
     ],
+    "unable_range": [
+        "Здесь {unit}. Цель за пределами дальности. {status_text} Выдвигаюсь на огневую позицию.",
+        "{unit}, приём. Не достаю — {status_text} Начинаю выдвижение на позицию ближе к цели.",
+        "Здесь {unit}. Дальность недостаточна. {status_text} Перемещаюсь на огневой рубеж.",
+    ],
     "clarify": [
         "Здесь {unit}. Не понял приказ. Уточните!",
         "{unit}, приём. Повторите приказ, не понял.",
@@ -91,6 +96,11 @@ TEMPLATES_EN = {
         "{unit} here. Cannot execute. {reason}",
         "This is {unit}. Negative. {reason}",
     ],
+    "unable_range": [
+        "This is {unit}. Target beyond maximum range. {status_text} Repositioning to firing position.",
+        "{unit} here. Out of range — {status_text} Moving to engagement range.",
+        "This is {unit}. Cannot engage from current position. {status_text} Advancing to firing position.",
+    ],
     "clarify": [
         "This is {unit}. Say again? Did not copy.",
         "{unit} here. Requesting clarification, over.",
@@ -118,6 +128,7 @@ UNABLE_REASONS_RU = {
     "morale_broken": "Потеряли боеспособность, отступаем!",
     "no_ammo": "Боеприпасы на нуле!",
     "heavy_casualties": "Тяжёлые потери, не в состоянии выполнить.",
+    "out_of_range": "",  # filled dynamically with distance/bearing info
 }
 
 UNABLE_REASONS_EN = {
@@ -125,6 +136,7 @@ UNABLE_REASONS_EN = {
     "morale_broken": "Lost combat capability, falling back!",
     "no_ammo": "Ammunition depleted!",
     "heavy_casualties": "Heavy casualties, unable to comply.",
+    "out_of_range": "",  # filled dynamically with distance/bearing info
 }
 
 

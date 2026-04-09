@@ -382,6 +382,163 @@ async def cancel_order(
     return {"id": str(order.id), "status": order.status.value}
 
 
+class CancelUnitsRequest(BaseModel):
+    unit_ids: list[str] | None = None  # None = all units on this side
+
+
+@router.post("/{session_id}/cancel-unit-orders")
+async def cancel_unit_orders(
+    session_id: uuid.UUID,
+    body: CancelUnitsRequest,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """
+    Cancel all active orders and clear current tasks for specified units
+    (or all units on the requester's side). Units report 'awaiting orders'
+    via radio.
+    """
+    from backend.models.unit import Unit
+    from backend.models.chat_message import ChatMessage
+    from backend.services.ws_manager import ws_manager
+    from datetime import datetime, timezone
+
+    side_val = participant.side.value
+    if side_val == "observer" or participant.role == "observer":
+        raise HTTPException(status_code=403, detail="Observers cannot cancel orders")
+
+    if side_val not in ("blue", "red"):
+        side_val = "blue"
+
+    # Load target units
+    query = select(Unit).where(
+        Unit.session_id == session_id,
+        Unit.is_destroyed == False,
+        Unit.side == side_val,
+    )
+    if body.unit_ids:
+        target_uuids = []
+        for uid_str in body.unit_ids:
+            try:
+                target_uuids.append(uuid.UUID(uid_str))
+            except ValueError:
+                continue
+        if target_uuids:
+            query = query.where(Unit.id.in_(target_uuids))
+
+    result = await db.execute(query)
+    units = list(result.scalars().all())
+
+    if not units:
+        return {"cancelled_units": 0, "cancelled_orders": 0}
+
+    unit_ids_set = {u.id for u in units}
+
+    # 1. Cancel all pending/validated/executing orders targeting these units
+    result_orders = await db.execute(
+        select(Order).where(
+            Order.session_id == session_id,
+            Order.status.in_([
+                OrderStatus.pending,
+                OrderStatus.validated,
+                OrderStatus.executing,
+            ]),
+            Order.issued_by_side == side_val,
+        )
+    )
+    orders = list(result_orders.scalars().all())
+
+    cancelled_count = 0
+    for order in orders:
+        if order.target_unit_ids:
+            # Cancel if any of the order's target units are in our set
+            order_targets = {uid for uid in order.target_unit_ids}
+            if order_targets & unit_ids_set:
+                order.status = OrderStatus.cancelled
+                cancelled_count += 1
+        elif not body.unit_ids:
+            # If cancelling all units and order has no specific targets, cancel it too
+            order.status = OrderStatus.cancelled
+            cancelled_count += 1
+
+    # 2. Clear current_task on all target units
+    cleared_units = []
+    for unit in units:
+        if unit.current_task is not None:
+            unit.current_task = None
+            cleared_units.append(unit)
+
+    # 3. Generate radio messages — units report "awaiting orders"
+    now = datetime.now(timezone.utc)
+    radio_broadcast = []
+
+    # Resolve grid references for unit positions
+    grid_service = None
+    try:
+        from backend.models.grid import GridDefinition
+        from backend.services.grid_service import GridService
+        gd_result = await db.execute(
+            select(GridDefinition).where(GridDefinition.session_id == session_id)
+        )
+        gd = gd_result.scalar_one_or_none()
+        if gd:
+            grid_service = GridService(gd)
+    except Exception:
+        pass
+
+    for unit in cleared_units:
+        # Get grid reference
+        grid_ref = ""
+        if grid_service and unit.position:
+            try:
+                from geoalchemy2.shape import to_shape
+                pt = to_shape(unit.position)
+                snail = grid_service.point_to_snail(pt.y, pt.x, depth=2)
+                if snail:
+                    grid_ref = f", кв. {snail}" if True else f", grid {snail}"
+            except Exception:
+                pass
+
+        msg_text = f"📻 {unit.name}: приказы отменены, ожидаю указаний{grid_ref}"
+
+        chat = ChatMessage(
+            session_id=session_id,
+            sender_name=f"📻 {unit.name}",
+            side=side_val,
+            recipient="all",
+            text=msg_text,
+            created_at=now,
+        )
+        db.add(chat)
+
+        radio_broadcast.append({
+            "sender_id": "",
+            "sender_name": f"📻 {unit.name}",
+            "text": msg_text,
+            "recipient": "all",
+            "side": side_val,
+            "timestamp": now.isoformat(),
+            "is_unit_response": True,
+            "response_type": "sitrep",
+        })
+
+    await db.flush()
+
+    # 4. Broadcast radio messages via WebSocket
+    for msg in radio_broadcast:
+        await ws_manager.broadcast(
+            session_id,
+            {"type": "chat_message", "data": msg},
+            only_side=side_val,
+        )
+
+    return {
+        "cancelled_units": len(cleared_units),
+        "cancelled_orders": cancelled_count,
+        "total_units": len(units),
+    }
+
+
 @router.get("/{session_id}/chat")
 async def list_chat_messages(
     session_id: uuid.UUID,
