@@ -368,8 +368,8 @@ class OrderService:
         if parsed.engagement_rules:
             task["engagement_rules"] = parsed.engagement_rules
 
-        # For commands that don't need a location (halt, regroup, report_status)
-        if parsed.order_type.value in ("halt", "regroup", "report_status"):
+        # For commands that don't need a location (halt, regroup, report_status, disengage)
+        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage"):
             return task
 
         # Commands that need a location but don't have one — still valid for

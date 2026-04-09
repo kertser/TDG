@@ -20,6 +20,95 @@ from backend.engine.terrain import TerrainService
 from backend.engine.map_objects import MAP_OBJECT_DEFS
 
 
+# Terrain types that provide meaningful cover (protection > 1.0)
+COVER_TERRAIN_TYPES = {"forest", "urban", "scrub", "orchard", "mountain"}
+
+# Search radius in degrees (~500m at mid-latitudes)
+COVER_SEARCH_RADIUS_DEG = 0.005
+
+
+def _find_nearest_cover(
+    cur_lat: float,
+    cur_lon: float,
+    terrain: TerrainService,
+) -> tuple[float, float] | None:
+    """
+    Find the nearest terrain cell that provides good cover.
+
+    Searches nearby terrain cells (from the TerrainService's cell DB)
+    for cover terrain types (forest, urban, scrub, orchard, mountain).
+    Returns (lat, lon) of best cover position, or None if not found.
+    """
+    if not terrain._cells or not terrain._grid:
+        # No cell data — try moving away from current position toward
+        # best terrain based on protection factor at nearby sample points
+        return _sample_cover_position(cur_lat, cur_lon, terrain)
+
+    # Search through known terrain cells for the nearest cover
+    best_dist = float("inf")
+    best_pos = None
+
+    for snail_path, terrain_type in terrain._cells.items():
+        if terrain_type not in COVER_TERRAIN_TYPES:
+            continue
+
+        # Get centroid of this cell via grid service
+        cell_lat, cell_lon = None, None
+        try:
+            center = terrain._grid.snail_to_center(snail_path)
+            if center:
+                cell_lon, cell_lat = center.x, center.y
+        except Exception:
+            continue
+
+        if cell_lat is None or cell_lon is None:
+            continue
+
+        dist = _distance_m(cur_lat, cur_lon, cell_lat, cell_lon)
+        # Only consider cells within ~800m
+        if dist < best_dist and dist < 800:
+            best_dist = dist
+            best_pos = (cell_lat, cell_lon)
+
+    # If no cell-based cover found within 800m, sample positions
+    if best_pos is None:
+        return _sample_cover_position(cur_lat, cur_lon, terrain)
+
+    return best_pos
+
+
+def _sample_cover_position(
+    cur_lat: float,
+    cur_lon: float,
+    terrain: TerrainService,
+) -> tuple[float, float] | None:
+    """
+    Sample 8 directions around current position (at 200m, 400m) and pick
+    the one with the best protection factor.
+    """
+    best_protection = 0.0
+    best_pos = None
+
+    for dist_m in (200, 400):
+        for angle_deg in range(0, 360, 45):
+            angle_rad = math.radians(angle_deg)
+            dlat = dist_m * math.cos(angle_rad) / METERS_PER_DEG_LAT
+            dlon = dist_m * math.sin(angle_rad) / METERS_PER_DEG_LON_AT_48
+            sample_lat = cur_lat + dlat
+            sample_lon = cur_lon + dlon
+            prot = terrain.protection_factor(sample_lon, sample_lat)
+            if prot > best_protection:
+                best_protection = prot
+                best_pos = (sample_lat, sample_lon)
+
+    # Only return if we found something significantly better than current
+    cur_prot = terrain.protection_factor(cur_lon, cur_lat)
+    if best_pos and best_protection > cur_prot + 0.15:
+        return best_pos
+
+    return None
+
+
 # Approximate meters per degree at mid-latitudes
 METERS_PER_DEG_LAT = 111_320.0
 METERS_PER_DEG_LON_AT_48 = 74_000.0
@@ -372,13 +461,37 @@ def process_movement(
             continue
 
         task_type = task.get("type", "")
-        if task_type not in ("move", "attack", "advance", "engage", "fire"):
+        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage"):
             continue
 
         # Indirect fire units (artillery/mortar) with "fire" task should NOT move
         # toward the target — they fire from their current position.
         if task_type == "fire" and unit.unit_type in INDIRECT_FIRE_UNIT_TYPES:
             continue
+
+        # ── Disengage: find nearest covered position if not yet assigned ──
+        if task_type == "disengage" and not task.get("target_location"):
+            if unit.position is None:
+                continue
+            try:
+                pt = to_shape(unit.position)
+                cur_lon, cur_lat = pt.x, pt.y
+            except Exception:
+                continue
+            cover_target = _find_nearest_cover(cur_lat, cur_lon, terrain)
+            if cover_target:
+                task["target_location"] = {"lat": cover_target[0], "lon": cover_target[1]}
+                unit.current_task = task  # mark dirty
+            else:
+                # No cover found nearby — stay put and defend
+                unit.current_task = {"type": "defend", "order_id": task.get("order_id")}
+                events.append({
+                    "event_type": "order_completed",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} disengaged, no cover found — holding position",
+                    "payload": {},
+                })
+                continue
 
         target = task.get("target_location")
         if not target:
@@ -485,6 +598,15 @@ def process_movement(
                     "event_type": "order_completed",
                     "actor_unit_id": unit.id,
                     "text_summary": f"{unit.name} arrived at destination",
+                    "payload": {"lat": new_lat, "lon": new_lon},
+                })
+            elif task_type == "disengage":
+                # Arrived at cover — switch to defend
+                unit.current_task = {"type": "defend", "order_id": task.get("order_id")}
+                events.append({
+                    "event_type": "order_completed",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} disengaged and reached cover",
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
         else:

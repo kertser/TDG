@@ -1474,23 +1474,72 @@ const KUnits = (() => {
     // ══════════════════════════════════════════════════
     // ── Fire Smoke ───────────────────────────────────
 
+    let _smokePending = null; // unit waiting for smoke target click
+
     async function _fireSmoke(u) {
-        // Select the unit and pre-fill the orders panel with a smoke command.
-        // The order will be processed through the normal pipeline on the next tick.
-        _selectUnit(u.id, false);
-        const textarea = document.getElementById('order-text');
-        if (textarea) {
-            textarea.value = `${u.name}: fire smoke at `;
-            textarea.focus();
-            // Place cursor at the end so user can type target coords/snail
-            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        // Start map-click target selection for smoke fire.
+        // When user clicks the map, call the smoke API directly.
+        _smokePending = u;
+        document.body.style.cursor = 'crosshair';
+        KGameLog.addEntry(`Select smoke target location for ${u.name}…`, 'info');
+
+        function _onSmokeClick(e) {
+            _map.off('click', _onSmokeClick);
+            document.removeEventListener('keydown', _onEscSmoke);
+            _map.off('contextmenu', _cancelSmoke);
+            document.body.style.cursor = '';
+            if (!_smokePending) return;
+            const unit = _smokePending;
+            _smokePending = null;
+
+            const lat = e.latlng.lat;
+            const lon = e.latlng.lng;
+            const token = KSessionUI.getToken();
+            const sessionId = KSessionUI.getSessionId();
+            if (!token || !sessionId) return;
+
+            fetch(`/api/sessions/${sessionId}/units/${unit.id}/fire-smoke`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    target_lat: lat,
+                    target_lon: lon,
+                    radius_m: 100,
+                    duration_ticks: 3,
+                }),
+            }).then(resp => {
+                if (resp.ok) {
+                    KGameLog.addEntry(`${unit.name} firing smoke`, 'info');
+                    // Reload map objects to show the new smoke
+                    try { KMapObjects.load(sessionId, token); } catch(e2) {}
+                } else {
+                    resp.json().then(d => {
+                        KGameLog.addEntry(`Smoke failed: ${d.detail || 'unknown error'}`, 'warning');
+                    }).catch(() => {
+                        KGameLog.addEntry(`Smoke fire failed`, 'warning');
+                    });
+                }
+            }).catch(err => {
+                KGameLog.addEntry(`Smoke fire error: ${err.message}`, 'warning');
+            });
         }
-        // Expand the command panel so the user sees the order
-        const panel = document.getElementById('command-panel');
-        if (panel) panel.classList.add('expanded');
-        // Switch to orders tab
-        const ordersTab = document.querySelector('[data-cmd-tab="cmd-orders"]');
-        if (ordersTab) ordersTab.click();
+
+        _map.once('click', _onSmokeClick);
+
+        // Cancel on right-click or Escape
+        function _cancelSmoke() {
+            _map.off('click', _onSmokeClick);
+            document.body.style.cursor = '';
+            _smokePending = null;
+            document.removeEventListener('keydown', _onEscSmoke);
+            _map.off('contextmenu', _cancelSmoke);
+        }
+        function _onEscSmoke(ev) { if (ev.key === 'Escape') _cancelSmoke(); }
+        document.addEventListener('keydown', _onEscSmoke);
+        _map.once('contextmenu', _cancelSmoke);
     }
 
     // ══════════════════════════════════════════════════
@@ -1668,7 +1717,7 @@ const KUnits = (() => {
             const target = _extractTarget(u);
             if (target) {
                 const taskType = u.current_task && u.current_task.type;
-                const isMoving = taskType && ['move', 'attack', 'advance', 'retreat', 'withdraw'].includes(taskType);
+                const isMoving = taskType && ['move', 'attack', 'advance', 'retreat', 'withdraw', 'disengage'].includes(taskType);
                 const isEngaging = taskType && ['engage', 'fire'].includes(taskType);
                 if (isMoving || isEngaging) {
                     const from = L.latLng(u.lat, u.lon);

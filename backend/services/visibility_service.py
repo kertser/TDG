@@ -24,6 +24,37 @@ from backend.models.contact import Contact
 from backend.models.session import SessionParticipant
 
 
+# Unit types with trained concealment abilities (mirrors detection.py)
+_CONCEALMENT_UNIT_TYPES = {
+    "recon_team", "recon_section", "sniper_team", "observation_post",
+    "engineer_recon_team",
+}
+
+
+def _is_concealed_unit(unit: Unit) -> bool:
+    """Check if a unit is in concealment mode (mirrors detection.py logic).
+
+    A unit is concealed when:
+    - It is a concealment-capable type (recon, sniper, observation post)
+    - It is NOT actively moving, attacking, or disengaging
+    - Its morale is reasonable (above 0.25)
+    """
+    if unit.unit_type not in _CONCEALMENT_UNIT_TYPES:
+        return False
+
+    task = unit.current_task
+    if task:
+        task_type = task.get("type", "")
+        if task_type in ("move", "advance", "attack", "engage", "fire", "disengage"):
+            return False
+
+    morale = unit.morale or 1.0
+    if morale < 0.25:
+        return False
+
+    return True
+
+
 def _serialize_unit(unit: Unit) -> dict:
     """Serialize a Unit ORM object to a dict with lat/lon extracted from PostGIS."""
     lat, lon = None, None
@@ -82,7 +113,7 @@ def _compute_unit_status(unit: Unit) -> str:
             return "engaging"
         if task_type in ("move", "advance"):
             return "moving"
-        if task_type in ("retreat", "withdraw"):
+        if task_type in ("retreat", "withdraw", "disengage"):
             return "retreating"
         if task_type in ("defend", "hold"):
             return "defending"
@@ -368,18 +399,29 @@ async def _filter_by_los(
         except Exception:
             continue
 
+        # ── Concealment check: concealed recon/sniper/OP units use severely
+        # reduced detection range, matching the tick engine's detection.py logic.
+        enemy_concealed = _is_concealed_unit(enemy)
+
         has_any_los = False
         for obs_lon, obs_lat, det_range, eye_h in own_positions:
             # Apply terrain visibility factor to detection range
             # (matches the tick engine's process_detection formula)
             terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
-            effective_range = det_range * terrain_vis
 
-            # Apply height advantage bonus to effective range
-            height_bonus = terrain.detection_height_bonus(
-                obs_lon, obs_lat, e_lon, e_lat
-            )
-            effective_range *= height_bonus
+            if enemy_concealed:
+                # Concealed units: max 300m range, further reduced by terrain at
+                # target position. Matches CONCEALMENT_MAX_RANGE_M in detection.py.
+                target_terrain_vis = terrain.visibility_factor(e_lon, e_lat)
+                effective_range = 300.0 * target_terrain_vis  # forest=120m, open=300m
+            else:
+                effective_range = det_range * terrain_vis
+
+                # Apply height advantage bonus to effective range
+                height_bonus = terrain.detection_height_bonus(
+                    obs_lon, obs_lat, e_lon, e_lat
+                )
+                effective_range *= height_bonus
 
             dlat = (e_lat - obs_lat) * 111320.0
             dlon = (e_lon - obs_lon) * 74000.0

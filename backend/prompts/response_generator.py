@@ -30,6 +30,12 @@ TEMPLATES_RU = {
         "Здесь {unit}. Так точно, расчёт к бою. {status_text}",
         "{unit} принял. Огонь по готовности. {status_text}",
     ],
+    "wilco_disengage": [
+        "Здесь {unit}. Принял, разрываем контакт! {status_text}",
+        "{unit}, приём. Выходим из боя, ищем укрытие. {status_text}",
+        "Здесь {unit}. Так точно, отрываемся от противника. {status_text}",
+        "{unit} принял. Прекращаем огонь, уходим в укрытие. {status_text}",
+    ],
     "unable": [
         "Здесь {unit}. Не могу выполнить! {reason}",
         "{unit}, приём. Выполнение невозможно. {reason}",
@@ -73,6 +79,12 @@ TEMPLATES_EN = {
         "{unit}, copy. Target received, standing by to fire. {status_text}",
         "This is {unit}. Fire mission received, crew ready. {status_text}",
         "{unit}, shot out. Firing for effect. {status_text}",
+    ],
+    "wilco_disengage": [
+        "This is {unit}. Roger, breaking contact! {status_text}",
+        "{unit}, copy. Disengaging, seeking cover. {status_text}",
+        "This is {unit}. Wilco, pulling back to covered position. {status_text}",
+        "{unit}, breaking contact now. Moving to cover. {status_text}",
     ],
     "unable": [
         "This is {unit}. Unable to comply! {reason}",

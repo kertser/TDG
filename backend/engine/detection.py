@@ -5,6 +5,10 @@ Uses formulas from AGENTS.MD Section 8.3:
   detection_range_effective = base_detection_range × terrain_visibility × weather_mod
   detection_probability = base_prob × (1 - distance/range) × posture_mod × recon_bonus
   Deterministic hash for reproducibility.
+
+Recon concealment: stationary recon/sniper/observation units in concealment
+mode are extremely difficult to detect. They can only be found by chance,
+from short range, modified by terrain, weather, and day/night cycle.
 """
 
 from __future__ import annotations
@@ -39,6 +43,45 @@ UNIT_EYE_HEIGHTS: dict[str, float] = {
 }
 DEFAULT_EYE_HEIGHT = 2.0
 
+# Unit types that have trained concealment abilities (recon, snipers, observation posts)
+CONCEALMENT_UNIT_TYPES = {
+    "recon_team", "recon_section", "sniper_team", "observation_post",
+    "engineer_recon_team",
+}
+
+# Maximum detection range against a concealed recon unit (meters).
+# Beyond this, they are effectively invisible. Terrain/weather/night further reduce this.
+CONCEALMENT_MAX_RANGE_M = 300.0
+
+# Base detection probability against a concealed unit (very low)
+CONCEALMENT_BASE_PROB = 0.10
+
+
+def _is_concealed(target) -> bool:
+    """Check if a unit is in concealment mode.
+
+    A unit is concealed when:
+    - It is a concealment-capable type (recon, sniper, observation post)
+    - It is NOT actively moving, attacking, or disengaging
+    - Its morale is reasonable (above 0.25 — panicked units can't maintain concealment)
+    """
+    if target.unit_type not in CONCEALMENT_UNIT_TYPES:
+        return False
+
+    task = target.current_task
+    if task:
+        task_type = task.get("type", "")
+        # Moving, attacking, or disengaging breaks concealment
+        if task_type in ("move", "advance", "attack", "engage", "fire", "disengage"):
+            return False
+
+    # Broken morale = can't maintain concealment
+    morale = target.morale or 1.0
+    if morale < 0.25:
+        return False
+
+    return True
+
 
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlat = (lat2 - lat1) * METERS_PER_DEG_LAT
@@ -59,6 +102,8 @@ def _posture_modifier(target_task: dict | None) -> float:
     task_type = target_task.get("type", "")
     if task_type in ("move", "advance", "attack"):
         return 1.0  # moving
+    elif task_type == "disengage":
+        return 0.5  # breaking contact — trying to stay low while moving
     elif task_type in ("defend", "dig_in"):
         return 0.3  # dug in
     return 0.6  # stationary
@@ -160,6 +205,65 @@ def process_detection(
                     tgt_lon, tgt_lat = tgt_pt.x, tgt_pt.y
                 except Exception:
                     continue
+
+                # ── Check if target is a concealed recon unit ──
+                target_concealed = _is_concealed(target)
+
+                if target_concealed:
+                    # Concealed recon: severely limited detection range
+                    # Base max range modified by terrain, weather, and night
+                    target_terrain_vis = terrain.visibility_factor(tgt_lon, tgt_lat)
+                    concealment_range = (
+                        CONCEALMENT_MAX_RANGE_M
+                        * target_terrain_vis      # forest=0.4 → 120m, open=1.0 → 300m
+                        * weather_visibility_mod   # rain → even shorter
+                        * obs_night_mod            # night → very short
+                    )
+
+                    dist = _distance_m(obs_lat, obs_lon, tgt_lat, tgt_lon)
+                    if dist > concealment_range:
+                        continue  # too far to detect a concealed unit
+
+                    # LOS check
+                    if los_service is not None:
+                        if not los_service.has_los(obs_lon, obs_lat, tgt_lon, tgt_lat,
+                                                   eye_height=observer_eye_h):
+                            continue
+
+                    # Very low probability: distance factor, terrain, weather, morale
+                    distance_factor = max(0.0, 1.0 - dist / concealment_range)
+                    # Recon observers are slightly better at finding hidden units
+                    observer_skill = 1.3 if is_recon else 1.0
+
+                    prob = (
+                        CONCEALMENT_BASE_PROB
+                        * distance_factor
+                        * target_terrain_vis   # harder in dense terrain (counterintuitive: visible terrain = easier to spot)
+                        * observer_skill
+                    )
+                    # Smoke still applies
+                    if _is_in_smoke(tgt_lat, tgt_lon, map_objects):
+                        prob *= 0.05
+                    prob = min(prob, 0.25)  # cap at 25% — concealed units are HARD to find
+
+                    roll = _deterministic_roll(tick, observer.id, target.id)
+                    if roll < prob:
+                        accuracy = max(80.0, dist * 0.1 + (1.0 - prob) * 300.0)
+                        new_contacts.append({
+                            "observing_side": obs_side,
+                            "observing_unit_id": observer.id,
+                            "target_unit_id": target.id,
+                            "estimated_type": target.unit_type,
+                            "estimated_size": None,
+                            "lat": tgt_lat,
+                            "lon": tgt_lon,
+                            "location_accuracy_m": accuracy,
+                            "confidence": prob,
+                            "source": "recon" if is_recon else "visual",
+                        })
+                    continue  # skip normal detection logic for concealed units
+
+                # ── Normal (non-concealed) detection logic ──
 
                 # Apply height advantage to effective range for this pair
                 pair_height_bonus = terrain.detection_height_bonus(

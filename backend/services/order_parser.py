@@ -224,10 +224,11 @@ class OrderParser:
         # Classification keywords
         command_kw_en = ["move", "advance", "attack", "defend", "hold", "observe", "withdraw",
                          "retreat", "support", "halt", "stop", "flank", "engage", "fire at",
-                         "fire on", "fire mission", "shoot"]
+                         "fire on", "fire mission", "shoot", "disengage", "break contact"]
         command_kw_ru = ["выдвигай", "двигай", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
-                         "открыть огонь", "стреляй"]
+                         "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
+                         "выйти из боя", "выйди из боя", "отцепи"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -263,6 +264,10 @@ class OrderParser:
                 order_type = "defend"
             elif any(kw in text_lower for kw in ["observe", "наблюда"]):
                 order_type = "observe"
+            elif any(kw in text_lower for kw in ["disengage", "break contact", "разорвать контакт",
+                                                   "разорви контакт", "выйти из боя", "выйди из боя",
+                                                   "отцепи"]):
+                order_type = "disengage"
             elif any(kw in text_lower for kw in ["withdraw", "retreat", "отход", "отступ"]):
                 order_type = "withdraw"
             elif any(kw in text_lower for kw in ["halt", "stop", "стой", "стоп"]):

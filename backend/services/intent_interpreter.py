@@ -29,6 +29,7 @@ _IMPLIED_TASKS = {
     "support": ["coordinate fires with supported element", "maintain ammunition supply"],
     "fire": ["compute fire solution", "observe effects on target", "adjust fire as needed"],
     "withdraw": ["maintain contact until disengaged", "establish rally point", "report clear"],
+    "disengage": ["break contact immediately", "seek nearest covered position", "suppress enemy during withdrawal", "report clear"],
     "halt": ["establish local security", "report status"],
     "regroup": ["consolidate personnel", "redistribute ammunition", "report readiness"],
     "report_status": ["assess unit condition", "count personnel and equipment"],
@@ -213,6 +214,10 @@ class IntentInterpreter:
                 return "delay"
             return "withdraw"
 
+        # ── DISENGAGE orders ──
+        if order_type == "disengage":
+            return "disengage"
+
         # ── Simple mappings ──
         simple = {
             "halt": "halt",
@@ -245,6 +250,7 @@ class IntentInterpreter:
             "deliberate_defense": "prepare deliberate defense",
             "delay": "slow enemy advance while withdrawing",
             "withdraw": "disengage and withdraw to new position",
+            "disengage": "break contact and seek covered position",
             "regroup": "consolidate and reorganize",
             "halt": "halt movement, establish security",
         }
@@ -256,7 +262,7 @@ class IntentInterpreter:
             return "high"
         if urgency == "priority":
             return "high"
-        if order_type in ("attack", "withdraw"):
+        if order_type in ("attack", "withdraw", "disengage"):
             return "high"
         if engagement == "fire_at_will":
             return "high"

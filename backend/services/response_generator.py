@@ -126,6 +126,10 @@ class ResponseGenerator:
             )
             if is_fire_unit:
                 return ResponseType.wilco_fire, None
+            # Disengage order → use disengage-specific response
+            order_type = parsed.order_type.value if parsed.order_type else ""
+            if order_type == "disengage":
+                return ResponseType.wilco_disengage, None
             return ResponseType.wilco, None
 
         return ResponseType.ack, None
@@ -159,6 +163,7 @@ class ResponseGenerator:
         "move": "марш", "attack": "атака", "engage": "огневой контакт",
         "fire": "огонь", "defend": "оборона", "observe": "наблюдение",
         "halt": "остановка", "retreat": "отход", "withdraw": "отступление",
+        "disengage": "разрыв контакта",
         "advance": "выдвижение", "dig_in": "окапывание", "support": "поддержка",
     }
 

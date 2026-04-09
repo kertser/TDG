@@ -39,6 +39,7 @@ class OrderType(str, enum.Enum):
     observe = "observe"
     support = "support"
     withdraw = "withdraw"
+    disengage = "disengage"
     halt = "halt"
     regroup = "regroup"
     report_status = "report_status"
@@ -53,6 +54,7 @@ class ResponseType(str, enum.Enum):
     ack = "ack"                       # acknowledgment
     wilco = "wilco"                   # will comply
     wilco_fire = "wilco_fire"         # will comply — fire mission (artillery/mortar)
+    wilco_disengage = "wilco_disengage"  # will comply — disengage/break contact
     unable = "unable"                 # cannot comply
     clarify = "clarify"              # request clarification
     status = "status"                # status report

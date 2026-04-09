@@ -87,23 +87,78 @@ const KOrders = (() => {
         let _hoverTimer = null;
         const HOVER_LEAVE_DELAY = 500; // ms delay before collapsing after mouse leaves
 
+        let _collapsingUntil = 0; // timestamp: ignore mouseenter during collapse cooldown
+        let _topZoneHandler = null; // mousemove handler for buffer zone above panel
+
+        function _collapsePanel() {
+            if (panel.classList.contains('expanded')) return;
+            panel.classList.remove('hovered');
+            _collapsingUntil = Date.now() + 400;
+            const focused = panel.querySelector(':focus');
+            if (focused) focused.blur();
+        }
+
+        function _stopTopZoneMonitor() {
+            if (_topZoneHandler) {
+                document.removeEventListener('mousemove', _topZoneHandler);
+                _topZoneHandler = null;
+            }
+        }
+
+        function _startTopZoneMonitor() {
+            // When mouse leaves from the top edge of the expanded panel, track
+            // mouse position: keep panel open while cursor stays within a buffer
+            // zone above the panel. Collapse when cursor moves away.
+            _stopTopZoneMonitor();
+            const ZONE_PX = 60; // invisible buffer height above the panel
+
+            _topZoneHandler = (e) => {
+                const rect = panel.getBoundingClientRect();
+                const inZone = (
+                    e.clientY >= rect.top - ZONE_PX &&
+                    e.clientY <= rect.bottom &&
+                    e.clientX >= rect.left - 20 &&
+                    e.clientX <= rect.right + 20
+                );
+                if (inZone) return; // still in the zone — keep open
+                _stopTopZoneMonitor();
+                _collapsePanel();
+            };
+            document.addEventListener('mousemove', _topZoneHandler);
+            // Safety: auto-remove monitor after 8s
+            setTimeout(() => {
+                if (_topZoneHandler) { _stopTopZoneMonitor(); _collapsePanel(); }
+            }, 8000);
+        }
+
         panel.addEventListener('mouseenter', () => {
+            // During collapse cooldown, ignore mouseenter to break oscillation cycle
+            if (Date.now() < _collapsingUntil) return;
             if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null; }
             if (_pickCollapseTimer) { clearTimeout(_pickCollapseTimer); _pickCollapseTimer = null; }
+            _stopTopZoneMonitor(); // cancel any active top-zone tracking
             panel.classList.add('hovered');
             _scrollRadioToBottom();
         });
 
-        panel.addEventListener('mouseleave', () => {
+        panel.addEventListener('mouseleave', (e) => {
             if (panel.classList.contains('expanded')) return; // pinned — never auto-collapse
             if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null; }
+
+            // Determine if mouse left from the top edge (into the zone the panel
+            // grows into when expanded). If so, track mouse in a buffer zone
+            // instead of collapsing — prevents the expand/collapse oscillation.
+            const rect = panel.getBoundingClientRect();
+            const leftFromTop = e.clientY <= rect.top + 20;
+
+            if (leftFromTop) {
+                _startTopZoneMonitor();
+                return; // don't collapse yet — monitor will handle it
+            }
+
             _hoverTimer = setTimeout(() => {
                 _hoverTimer = null;
-                if (panel.classList.contains('expanded')) return;
-                panel.classList.remove('hovered');
-                // Blur focused elements to release focus trap
-                const focused = panel.querySelector(':focus');
-                if (focused) focused.blur();
+                _collapsePanel();
             }, HOVER_LEAVE_DELAY);
         });
 

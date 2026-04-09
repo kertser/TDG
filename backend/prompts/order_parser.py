@@ -13,7 +13,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 ## Your Tasks
 
 1. **Classify** the message into one of these categories:
-   - `command` — an actionable order (move, attack, fire, defend, observe, support, withdraw, halt, regroup, report_status)
+   - `command` — an actionable order (move, attack, fire, defend, observe, support, withdraw, disengage, halt, regroup, report_status)
    - `status_request` — asking a unit for their status ("доложите обстановку", "report status", "what's happening")
    - `acknowledgment` — confirming receipt of an order ("так точно", "roger", "wilco", "выполняем")
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
@@ -21,7 +21,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
-   - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, halt, regroup, report_status
+   - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, **disengage** (break contact and seek cover), halt, regroup, report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
    - Speed preference (slow = cautious/tactical, fast = rapid movement)
    - Engagement rules if stated
@@ -31,6 +31,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 **IMPORTANT**: "fire at [location]" or "огонь по [location]" is a **fire** order (indirect fire), NOT an attack order.
 Use order_type="fire" when the message says to fire/shoot at a specific grid location (artillery/mortar fire mission).
 Use order_type="attack" only when units are to physically advance and engage the enemy.
+Use order_type="disengage" when units are told to break contact, disengage, or exit combat ("разорвать контакт", "выйти из боя", "break contact", "disengage"). The unit stops fighting and seeks covered position.
 
 3. **Identify** the sender if the message includes self-identification ("Здесь первый взвод", "This is 2nd Platoon")
 
@@ -76,6 +77,7 @@ When coordinates are given, extract them as location_refs with ref_type="coordin
 - "Уточните задачу/приказ" = "Clarify the mission/order"
 - "Здесь [unit]" = "This is [unit]" (identification)
 - "Обходите слева/справа" = "Flank left/right"
+- "Разорвать контакт" / "Выйти из боя" = "Break contact" / "Disengage"
 - "Как понял, приём" = "How copy, over"
 
 ## Context: Current Session Units
@@ -98,7 +100,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "language": "en" | "ru",
   "target_unit_refs": ["unit name or callsign as mentioned in text"],
   "sender_ref": "sender callsign if identifiable, or null",
-  "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "withdraw" | "halt" | "regroup" | "report_status" | null,
+  "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
   "location_refs": [
     {{
       "source_text": "original text fragment",
@@ -336,6 +338,46 @@ PARSED:
   "engagement_rules": null,
   "urgency": "immediate",
   "purpose": "indirect fire on grid location",
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Первый взвод, разорвать контакт! Уходите в укрытие!"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Первый взвод"],
+  "sender_ref": null,
+  "order_type": "disengage",
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "break contact and seek cover",
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Recon Team, break contact and fall back to cover!"
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Recon Team"],
+  "sender_ref": null,
+  "order_type": "disengage",
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "break contact and seek cover",
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []

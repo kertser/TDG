@@ -219,12 +219,14 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     map_objects_list = list(mo_result.scalars().all())
 
     # ── 1c. Process smoke decay ────────────────────────────
+    smoke_updated = []  # smoke MapObjects whose state changed this tick
     for obj in map_objects_list:
         if obj.object_type == "smoke" and obj.is_active:
             props = obj.properties or {}
             ticks_remaining = props.get("ticks_remaining", 0) - 1
             if ticks_remaining <= 0:
                 obj.is_active = False
+                smoke_updated.append(obj)
                 all_events.append({
                     "event_type": "smoke_dissipated",
                     "text_summary": f"Smoke screen dissipated at {obj.label or 'position'}",
@@ -234,6 +236,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 new_props = dict(props)
                 new_props["ticks_remaining"] = ticks_remaining
                 obj.properties = new_props
+                smoke_updated.append(obj)
 
     # ── 1d. Compute weather & night modifiers (used by movement + detection) ──
     weather_mod = 1.0
@@ -357,6 +360,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 attacking_map.setdefault(str(tid), []).append(str(u.id))
 
     # Units being attacked that don't have a combat task → auto-engage nearest attacker
+    # (Skip disengaging units — they are breaking contact on purpose)
     for u in all_units:
         if u.is_destroyed:
             continue
@@ -366,6 +370,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         task = u.current_task
         if task and task.get("type") in ("attack", "engage", "fire"):
             continue  # already fighting
+        if task and task.get("type") == "disengage":
+            continue  # disengaging — do NOT return fire
         # Find the nearest attacker
         attacker_ids = attacking_map[uid_str]
         if attacker_ids:
@@ -548,6 +554,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         "radio_messages": radio_broadcast,
         "reports": report_broadcast,
         "_raw_events": all_events,  # for combat impact visualization
+        "_smoke_updated": smoke_updated,  # smoke MapObjects whose state changed
     }
 
 
@@ -637,6 +644,22 @@ async def _process_orders(
                 "text_summary": f"{unit.name} halts",
                 "payload": {"order_id": str(order.id), "task": task},
             })
+        elif task_type == "disengage":
+            # Disengage: stop all combat, seek nearest covered position
+            # Set fast speed for withdrawal
+            speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+            unit.move_speed_mps = speeds.get("fast", speeds.get("slow", 3.0))
+            unit.current_task = {
+                "type": "disengage",
+                "order_id": str(order.id),
+                "disengaging": True,
+            }
+            events.append({
+                "event_type": "order_issued",
+                "actor_unit_id": unit_uuid,
+                "text_summary": f"{unit.name} disengaging, breaking contact",
+                "payload": {"order_id": str(order.id), "task": task},
+            })
         else:
             # Assign the task
             unit.current_task = task
@@ -720,6 +743,8 @@ def _order_to_task(order: Order) -> dict | None:
         text = order.original_text.lower()
         if "halt" in text or "stop" in text:
             return {"type": "halt", "order_id": str(order.id)}
+        if any(kw in text for kw in ["disengage", "break contact", "разорвать контакт", "выйти из боя"]):
+            return {"type": "disengage", "order_id": str(order.id)}
         if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй"]):
             return {"type": "fire", "order_id": str(order.id)}
         if "move" in text or "advance" in text:
