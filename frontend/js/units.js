@@ -613,6 +613,8 @@ const KUnits = (() => {
             marker.on('contextmenu', (e) => {
                 L.DomEvent.stopPropagation(e);
                 L.DomEvent.preventDefault(e);
+                // Also stop native DOM event so document-level listeners don't close the menu
+                if (e.originalEvent) e.originalEvent.stopPropagation();
                 _showUnitContextMenu(u, e.originalEvent);
             });
 
@@ -1006,6 +1008,7 @@ const KUnits = (() => {
     }
 
     let _unitCtxMenuEl = null;
+    let _menuOpenTime = 0;  // timestamp when menu was last opened (guards against same-event close)
 
     function _createUnitContextMenu() {
         if (_unitCtxMenuEl) return _unitCtxMenuEl;
@@ -1026,9 +1029,10 @@ const KUnits = (() => {
         });
         // Also close on right-click outside (new context menu replaces old)
         document.addEventListener('contextmenu', (e) => {
+            // Guard: don't close if the menu was just opened in the same event cycle
+            if (Date.now() - _menuOpenTime < 200) return;
             if (!div.contains(e.target) && div.style.display !== 'none') {
-                // Small delay to allow the new context menu handler to fire first
-                setTimeout(() => _closeUnitContextMenu(), 50);
+                _closeUnitContextMenu();
             }
         });
 
@@ -1049,6 +1053,7 @@ const KUnits = (() => {
     }
 
     function _showUnitContextMenu(u, e) {
+        _menuOpenTime = Date.now();
         const menu = _createUnitContextMenu();
         const canSel = _canSelect(u);
         const canAsgn = _canAssign(u);

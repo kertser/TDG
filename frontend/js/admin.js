@@ -225,14 +225,6 @@ const KAdmin = (() => {
         // Toggle visibility
         if (win.style.display === 'none' || !win.style.display) {
             win.style.display = 'flex';
-            // Try to restore admin unlock from sessionStorage
-            if (!_adminUnlocked) {
-                try {
-                    if (sessionStorage.getItem('admin_unlocked') === '1') {
-                        _applyAdminUnlock();
-                    }
-                } catch(e) {}
-            }
             // Apply locked class if not yet unlocked
             if (!_adminUnlocked) {
                 win.classList.add('admin-locked');
@@ -321,8 +313,6 @@ const KAdmin = (() => {
             if (resp.ok) {
                 _applyAdminUnlock();
                 pw.value = '';
-                // Remember admin unlock for this browser session
-                try { sessionStorage.setItem('admin_unlocked', '1'); } catch(e) {}
             } else {
                 const data = await resp.json().catch(() => ({}));
                 await KDialogs.alert(data.detail || 'Incorrect password');
