@@ -720,6 +720,8 @@ def _order_to_task(order: Order) -> dict | None:
         text = order.original_text.lower()
         if "halt" in text or "stop" in text:
             return {"type": "halt", "order_id": str(order.id)}
+        if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй"]):
+            return {"type": "fire", "order_id": str(order.id)}
         if "move" in text or "advance" in text:
             return {"type": "move", "order_id": str(order.id)}
         if "attack" in text or "engage" in text:

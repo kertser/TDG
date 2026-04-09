@@ -165,8 +165,39 @@ const KReports = (() => {
         render();
     }
 
-    function exportReports() {
+    async function exportReports() {
         if (allReports.length === 0) return;
+
+        // Lazy-load SheetJS if not available
+        if (typeof XLSX === 'undefined') {
+            await new Promise((resolve) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+                s.onload = () => resolve(true);
+                s.onerror = () => resolve(false);
+                document.head.appendChild(s);
+            });
+        }
+
+        // Use Excel if SheetJS is available, otherwise fallback to text
+        if (typeof XLSX !== 'undefined') {
+            const wb = XLSX.utils.book_new();
+            const rows = allReports.sort((a, b) => (a.tick || 0) - (b.tick || 0)).map(r => ({
+                'Turn': r.tick != null ? r.tick : '',
+                'Game Time': r.game_timestamp ? _fmtDT(r.game_timestamp) : (r.created_at ? _fmtDT(r.created_at) : ''),
+                'Channel': (CHANNEL_LABELS[r.channel] || r.channel || '').toUpperCase(),
+                'Side': r.to_side || '',
+                'Report Text': r.text || '',
+            }));
+            const ws = XLSX.utils.json_to_sheet(rows);
+            ws['!cols'] = [{ wch: 6 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 80 }];
+            XLSX.utils.book_append_sheet(wb, ws, 'Reports');
+            const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            XLSX.writeFile(wb, `TDG_Reports_${dateStr}.xlsx`);
+            return;
+        }
+
+        // Fallback: text export
         const lines = allReports.map(r => {
             const ch = (CHANNEL_LABELS[r.channel] || r.channel || '').padEnd(10);
             return '[Turn ' + String(r.tick).padStart(3) + '] [' + ch + '] ' + r.text;
@@ -181,6 +212,20 @@ const KReports = (() => {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    function _fmtDT(isoStr) {
+        if (!isoStr) return '';
+        try {
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return isoStr;
+            return d.toLocaleString([], {
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit',
+            });
+        } catch {
+            return isoStr;
+        }
     }
 
     function _escHtml(s) {

@@ -424,13 +424,14 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
     combat_impacts = []
     for evt_dict in result.get("_raw_events", []):
         etype = evt_dict.get("event_type", "")
-        if etype in ("combat", "unit_destroyed"):
+        if etype in ("combat", "unit_destroyed", "artillery_support"):
             payload = evt_dict.get("payload", {})
             if payload.get("target_lat") and payload.get("target_lon"):
                 combat_impacts.append({
                     "type": etype,
                     "lat": payload["target_lat"],
                     "lon": payload["target_lon"],
+                    "is_artillery": payload.get("is_artillery", etype == "artillery_support"),
                 })
 
     await ws_manager.broadcast(

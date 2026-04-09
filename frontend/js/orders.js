@@ -27,6 +27,9 @@ const KOrders = (() => {
         catch { /* ignore */ }
     }
 
+    let _initialized = false;  // guard against duplicate event listener attachment
+    let _hoverTimer = null;    // shared hover timer (module-level for cross-function access)
+
     function init(sessionId, token) {
         _sessionId = sessionId;
         _token = token;
@@ -37,6 +40,30 @@ const KOrders = (() => {
         const panel = document.getElementById('command-panel');
         if (panel) panel.style.display = '';
 
+        // ── Only attach DOM event listeners once ──
+        if (!_initialized) {
+            _initialized = true;
+            _initDOMListeners(panel);
+        }
+
+        // Update meta info
+        _updateMeta();
+
+        // Load participants for radio
+        _loadParticipants();
+
+        // Load existing orders
+        _loadOrders();
+
+        // Load chat history from server
+        _loadChatHistory();
+
+        // Render initial radio state
+        _renderRadioMessages();
+    }
+
+    /** One-time DOM event listener setup (called only on first init). */
+    function _initDOMListeners(panel) {
         // ── Tab switching inside command panel ──
         document.querySelectorAll('.cmd-tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -56,44 +83,28 @@ const KOrders = (() => {
         });
 
         // ── Auto-scroll radio messages when panel becomes visible (hover/expand) ──
-        // ── Hover zone with margin: collapse only when mouse moves 30px+ away for 800ms ──
-        let _collapseTimer = null;
-        const HOVER_MARGIN = 30;   // px beyond panel edge before collapse starts
-        const COLLAPSE_DELAY = 800; // ms after leaving margin zone
-
-        function _isMouseNearPanel(e) {
-            const rect = panel.getBoundingClientRect();
-            return (
-                e.clientX >= rect.left - HOVER_MARGIN &&
-                e.clientX <= rect.right + HOVER_MARGIN &&
-                e.clientY >= rect.top - HOVER_MARGIN &&
-                e.clientY <= rect.bottom + HOVER_MARGIN
-            );
-        }
-
-        document.addEventListener('mousemove', (e) => {
-            if (panel.classList.contains('expanded')) return; // pinned
-            if (panel.style.display === 'none') return;
-
-            if (_isMouseNearPanel(e)) {
-                // Mouse inside margin zone — cancel any pending collapse
-                if (_collapseTimer) { clearTimeout(_collapseTimer); _collapseTimer = null; }
-            } else {
-                // Mouse outside margin zone — start collapse countdown
-                if (!_collapseTimer) {
-                    _collapseTimer = setTimeout(() => {
-                        _collapseTimer = null;
-                        if (panel.classList.contains('expanded')) return;
-                        const focused = panel.querySelector(':focus');
-                        if (focused) focused.blur();
-                    }, COLLAPSE_DELAY);
-                }
-            }
-        });
+        // ── JS-managed .hovered class with delay (replaces instant CSS :hover) ──
+        let _hoverTimer = null;
+        const HOVER_LEAVE_DELAY = 500; // ms delay before collapsing after mouse leaves
 
         panel.addEventListener('mouseenter', () => {
-            if (_collapseTimer) { clearTimeout(_collapseTimer); _collapseTimer = null; }
+            if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null; }
+            if (_pickCollapseTimer) { clearTimeout(_pickCollapseTimer); _pickCollapseTimer = null; }
+            panel.classList.add('hovered');
             _scrollRadioToBottom();
+        });
+
+        panel.addEventListener('mouseleave', () => {
+            if (panel.classList.contains('expanded')) return; // pinned — never auto-collapse
+            if (_hoverTimer) { clearTimeout(_hoverTimer); _hoverTimer = null; }
+            _hoverTimer = setTimeout(() => {
+                _hoverTimer = null;
+                if (panel.classList.contains('expanded')) return;
+                panel.classList.remove('hovered');
+                // Blur focused elements to release focus trap
+                const focused = panel.querySelector(':focus');
+                if (focused) focused.blur();
+            }, HOVER_LEAVE_DELAY);
         });
 
         // ── Pin / unpin toggle (auto-collapse vs stay-open) ──
@@ -157,6 +168,12 @@ const KOrders = (() => {
             });
         }
 
+        // ── Pick coordinates from map ──
+        const pickBtn = document.getElementById('pick-coords-btn');
+        if (pickBtn) {
+            pickBtn.addEventListener('click', () => _togglePickMode());
+        }
+
         // ── Radio send ──
         const radioSendBtn = document.getElementById('radio-send-btn');
         const radioText = document.getElementById('radio-text');
@@ -192,6 +209,139 @@ const KOrders = (() => {
     function _autoResize(ta) {
         ta.style.height = 'auto';
         ta.style.height = Math.min(ta.scrollHeight, 400) + 'px';
+    }
+
+    // ── Pick Coordinates from Map ──
+    let _pickingActive = false;
+    let _pickMapHandler = null;
+    let _pickCollapseTimer = null; // safety timer to collapse panel after pick
+
+    function _togglePickMode() {
+        const pickBtn = document.getElementById('pick-coords-btn');
+        const map = typeof KMap !== 'undefined' ? KMap.getMap() : null;
+        if (!map) return;
+
+        if (_pickingActive) {
+            _deactivatePick(map, pickBtn);
+        } else {
+            _activatePick(map, pickBtn);
+        }
+    }
+
+    function _activatePick(map, pickBtn) {
+        _pickingActive = true;
+        if (pickBtn) pickBtn.classList.add('active');
+        document.body.classList.add('map-picking');
+
+        _pickMapHandler = async (e) => {
+            const lat = e.latlng.lat;
+            const lon = e.latlng.lng;
+
+            // Resolve snail grid reference
+            let snailRef = null;
+            if (typeof KGrid !== 'undefined' && KGrid.getSnailAtPoint) {
+                const result = await KGrid.getSnailAtPoint(lat, lon, 2);
+                if (result && result.snail_path) {
+                    snailRef = result.snail_path;
+                }
+            }
+
+            // Build the text to insert: prefer snail, fallback to coords
+            let insertText;
+            if (snailRef) {
+                insertText = snailRef;
+            } else {
+                insertText = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+            }
+
+            // Insert at cursor position in the order textarea
+            const textArea = document.getElementById('order-text');
+            if (textArea) {
+                const start = textArea.selectionStart || 0;
+                const end = textArea.selectionEnd || 0;
+                const before = textArea.value.substring(0, start);
+                const after = textArea.value.substring(end);
+                // Add space padding if needed
+                const needSpaceBefore = before.length > 0 && !before.endsWith(' ') && !before.endsWith('\n');
+                const needSpaceAfter = after.length > 0 && !after.startsWith(' ') && !after.startsWith('\n');
+                const padded = (needSpaceBefore ? ' ' : '') + insertText + (needSpaceAfter ? ' ' : '');
+                textArea.value = before + padded + after;
+                // Move cursor to after inserted text
+                const newPos = start + padded.length;
+                textArea.setSelectionRange(newPos, newPos);
+                textArea.focus();
+            }
+
+            // Show a brief marker at the picked location
+            _showPickMarker(lat, lon, snailRef || insertText);
+
+            // Deactivate pick mode
+            _deactivatePick(map, pickBtn);
+
+            // Re-expand the command panel briefly so user sees the inserted text,
+            // then auto-collapse after a delay if mouse doesn't enter the panel.
+            const panel = document.getElementById('command-panel');
+            if (panel) {
+                panel.classList.add('hovered');
+                // Clear any existing safety timer
+                if (_pickCollapseTimer) { clearTimeout(_pickCollapseTimer); _pickCollapseTimer = null; }
+                // Set safety timer: collapse after 3s unless mouse enters the panel
+                _pickCollapseTimer = setTimeout(() => {
+                    _pickCollapseTimer = null;
+                    // Only collapse if panel is not pinned and mouse isn't hovering
+                    if (!panel.classList.contains('expanded') && !panel.matches(':hover')) {
+                        panel.classList.remove('hovered');
+                        const focused = panel.querySelector(':focus');
+                        if (focused) focused.blur();
+                    }
+                }, 3000);
+            }
+        };
+
+        map.once('click', _pickMapHandler);
+
+        // ESC to cancel
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                _deactivatePick(map, pickBtn);
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+        // Store ref to clean up
+        _pickMapHandler._escHandler = escHandler;
+    }
+
+    function _deactivatePick(map, pickBtn) {
+        _pickingActive = false;
+        if (pickBtn) pickBtn.classList.remove('active');
+        document.body.classList.remove('map-picking');
+        if (_pickMapHandler) {
+            map.off('click', _pickMapHandler);
+            if (_pickMapHandler._escHandler) {
+                document.removeEventListener('keydown', _pickMapHandler._escHandler);
+            }
+            _pickMapHandler = null;
+        }
+    }
+
+    function _showPickMarker(lat, lon, label) {
+        if (typeof L === 'undefined' || typeof KMap === 'undefined') return;
+        const map = KMap.getMap();
+        if (!map) return;
+        const marker = L.circleMarker([lat, lon], {
+            radius: 7, color: '#4fc3f7', fillColor: '#4fc3f7',
+            fillOpacity: 0.4, weight: 2,
+        }).addTo(map);
+        if (label) {
+            marker.bindTooltip(label, {
+                permanent: true, direction: 'top',
+                className: 'location-tooltip',
+                offset: [0, -8],
+            });
+        }
+        // Remove after 5 seconds
+        setTimeout(() => { map.removeLayer(marker); }, 5000);
     }
 
     /** Initialize top-edge resize handle for the command panel. */

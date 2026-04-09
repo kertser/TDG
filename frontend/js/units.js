@@ -377,12 +377,17 @@ const KUnits = (() => {
                 _map.removeLayer(_selectRect);
                 _selectRect = null;
             } else if (_selectStartPt && !_isSelecting && selectedUnitIds.size > 0) {
-                const dx = e.clientX - _selectStartPt.x;
-                const dy = e.clientY - _selectStartPt.y;
-                if (Math.abs(dx) < SELECT_THRESHOLD && Math.abs(dy) < SELECT_THRESHOLD) {
-                    selectedUnitIds.clear();
-                    _drawSelectionOverlays();
-                    _updateSelectionUI();
+                // Don't deselect units during coordinate picking mode
+                if (document.body.classList.contains('map-picking')) {
+                    // Picking coordinates — preserve current selection
+                } else {
+                    const dx = e.clientX - _selectStartPt.x;
+                    const dy = e.clientY - _selectStartPt.y;
+                    if (Math.abs(dx) < SELECT_THRESHOLD && Math.abs(dy) < SELECT_THRESHOLD) {
+                        selectedUnitIds.clear();
+                        _drawSelectionOverlays();
+                        _updateSelectionUI();
+                    }
                 }
             }
 

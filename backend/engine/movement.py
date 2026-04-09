@@ -24,6 +24,12 @@ from backend.engine.map_objects import MAP_OBJECT_DEFS
 METERS_PER_DEG_LAT = 111_320.0
 METERS_PER_DEG_LON_AT_48 = 74_000.0
 
+# Unit types that fire indirectly (should NOT advance toward fire target)
+INDIRECT_FIRE_UNIT_TYPES = {
+    "artillery_battery", "artillery_platoon",
+    "mortar_section", "mortar_team",
+}
+
 # Unit types considered "vehicles" for obstacle passability
 VEHICLE_UNIT_TYPES = {
     "tank_company", "tank_platoon", "tank_section",
@@ -367,6 +373,11 @@ def process_movement(
 
         task_type = task.get("type", "")
         if task_type not in ("move", "attack", "advance", "engage", "fire"):
+            continue
+
+        # Indirect fire units (artillery/mortar) with "fire" task should NOT move
+        # toward the target — they fire from their current position.
+        if task_type == "fire" and unit.unit_type in INDIRECT_FIRE_UNIT_TYPES:
             continue
 
         target = task.get("target_location")

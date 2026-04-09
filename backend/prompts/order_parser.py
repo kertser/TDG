@@ -13,7 +13,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 ## Your Tasks
 
 1. **Classify** the message into one of these categories:
-   - `command` — an actionable order (move, attack, defend, observe, support, withdraw, halt, regroup, report_status)
+   - `command` — an actionable order (move, attack, fire, defend, observe, support, withdraw, halt, regroup, report_status)
    - `status_request` — asking a unit for their status ("доложите обстановку", "report status", "what's happening")
    - `acknowledgment` — confirming receipt of an order ("так точно", "roger", "wilco", "выполняем")
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
@@ -21,12 +21,16 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
-   - Order type (move, attack, defend, observe, support, withdraw, halt, regroup, report_status)
+   - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, halt, regroup, report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
    - Speed preference (slow = cautious/tactical, fast = rapid movement)
    - Engagement rules if stated
    - Urgency level
    - Stated purpose/objective
+
+**IMPORTANT**: "fire at [location]" or "огонь по [location]" is a **fire** order (indirect fire), NOT an attack order.
+Use order_type="fire" when the message says to fire/shoot at a specific grid location (artillery/mortar fire mission).
+Use order_type="attack" only when units are to physically advance and engage the enemy.
 
 3. **Identify** the sender if the message includes self-identification ("Здесь первый взвод", "This is 2nd Platoon")
 
@@ -94,7 +98,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "language": "en" | "ru",
   "target_unit_refs": ["unit name or callsign as mentioned in text"],
   "sender_ref": "sender callsign if identifiable, or null",
-  "order_type": "move" | "attack" | "defend" | "observe" | "support" | "withdraw" | "halt" | "regroup" | "report_status" | null,
+  "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "withdraw" | "halt" | "regroup" | "report_status" | null,
   "location_refs": [
     {{
       "source_text": "original text fragment",
@@ -294,6 +298,46 @@ PARSED:
   "purpose": "set up observation post",
   "report_text": null,
   "confidence": 0.90,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Mortar Section, fire at F8-8-3"
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Mortar Section"],
+  "sender_ref": null,
+  "order_type": "fire",
+  "location_refs": [{"source_text": "F8-8-3", "ref_type": "snail", "normalized": "F8-8-3"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "indirect fire on grid location",
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Миномётная секция, огонь по квадрату B4 улитка 7!"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Миномётная секция"],
+  "sender_ref": null,
+  "order_type": "fire",
+  "location_refs": [{"source_text": "квадрату B4 улитка 7", "ref_type": "snail", "normalized": "B4-7"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "indirect fire on grid location",
+  "report_text": null,
+  "confidence": 0.95,
   "ambiguities": []
 }
 

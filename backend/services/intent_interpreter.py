@@ -27,6 +27,7 @@ _IMPLIED_TASKS = {
     "defend": ["improve positions", "establish observation posts", "prepare fire plan"],
     "observe": ["maintain concealment", "report all contacts", "avoid engagement"],
     "support": ["coordinate fires with supported element", "maintain ammunition supply"],
+    "fire": ["compute fire solution", "observe effects on target", "adjust fire as needed"],
     "withdraw": ["maintain contact until disengaged", "establish rally point", "report clear"],
     "halt": ["establish local security", "report status"],
     "regroup": ["consolidate personnel", "redistribute ammunition", "report readiness"],
@@ -169,6 +170,10 @@ class IntentInterpreter:
 
             # Default move
             return "movement_to_contact"
+
+        # ── FIRE orders (indirect fire at location) ──
+        if order_type == "fire":
+            return "support_by_fire"
 
         # ── ATTACK orders ──
         if order_type == "attack":

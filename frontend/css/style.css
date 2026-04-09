@@ -46,7 +46,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     content: '';
     position: absolute;
     inset: 0;
-    background: url('/static/banner.svg') repeat-x left center;
+    background: url('/static/banner.svg') no-repeat left center;
     background-size: auto 40px;
     pointer-events: none;
     z-index: 0;
@@ -125,7 +125,7 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
 
 /* ── Execute Orders Button (topbar) ────────── */
 .topbar-orders-complete-btn {
-    padding: 4px 14px;
+    padding: 4px 11px;
     font-size: 12px;
     font-weight: 700;
     border-radius: 4px;
@@ -3569,7 +3569,7 @@ button:hover { background: #1a5276; }
     transition: none !important;
 }
 /* Expand to full width on hover or when pinned */
-#command-panel:hover,
+#command-panel.hovered,
 #command-panel.expanded {
     width: clamp(700px, 62vw, 1000px);
 }
@@ -3583,7 +3583,7 @@ button:hover { background: #1a5276; }
     transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
 }
 /* On hover or when pinned (.expanded) → show at full maximized size */
-#command-panel:hover .cmd-tab-panel.active,
+#command-panel.hovered .cmd-tab-panel.active,
 #command-panel.expanded .cmd-tab-panel.active {
     max-height: var(--cmd-panel-height, 50vh);
     height: var(--cmd-panel-height, 320px);
@@ -3596,16 +3596,16 @@ button:hover { background: #1a5276; }
     flex-direction: column;
 }
 /* Prevent collapsed panel from blocking elements behind it */
-#command-panel:not(:hover):not(.expanded) {
+#command-panel:not(.hovered):not(.expanded) {
     pointer-events: none;
 }
-#command-panel:not(:hover):not(.expanded) #command-panel-header,
-#command-panel:not(:hover):not(.expanded) #command-panel-header * {
+#command-panel:not(.hovered):not(.expanded) #command-panel-header,
+#command-panel:not(.hovered):not(.expanded) #command-panel-header * {
     pointer-events: auto;
 }
 /* Hide meta badges and toggle when collapsed (only show tabs) */
-#command-panel:not(:hover):not(.expanded) .cmd-meta,
-#command-panel:not(:hover):not(.expanded) .cmd-toggle-btn {
+#command-panel:not(.hovered):not(.expanded) .cmd-meta,
+#command-panel:not(.hovered):not(.expanded) .cmd-toggle-btn {
     display: none;
 }
 /* Radio messages container sizing */
@@ -3644,8 +3644,55 @@ button:hover { background: #1a5276; }
     resize: none;
 }
 #command-panel .cmd-input-row .cmd-send-btn {
-    align-self: flex-start;
-    margin-top: 9px;
+    align-self: center;
+}
+/* Action buttons column (pick coords + submit) */
+.cmd-input-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-self: stretch;
+    justify-content: flex-start;
+    padding-top: 4px;
+}
+/* Pick-coordinates button */
+.cmd-action-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(79, 195, 247, 0.08);
+    border: 1px solid rgba(79, 195, 247, 0.25);
+    border-radius: 6px;
+    color: #4fc3f7;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+.cmd-action-btn svg {
+    display: block;
+    flex-shrink: 0;
+}
+.cmd-action-btn:hover {
+    background: rgba(79, 195, 247, 0.15);
+    border-color: rgba(79, 195, 247, 0.4);
+    color: #81d4fa;
+}
+.cmd-action-btn.active {
+    background: rgba(79, 195, 247, 0.2);
+    border-color: rgba(79, 195, 247, 0.5);
+    color: #4fc3f7;
+    box-shadow: 0 0 8px rgba(79, 195, 247, 0.3);
+    animation: pick-pulse 1.2s ease-in-out infinite;
+}
+@keyframes pick-pulse {
+    0%, 100% { box-shadow: 0 0 6px rgba(79, 195, 247, 0.2); }
+    50% { box-shadow: 0 0 12px rgba(79, 195, 247, 0.5); }
+}
+/* Map crosshair cursor during coordinate picking */
+.map-picking, .map-picking .leaflet-container {
+    cursor: crosshair !important;
 }
 
 /* ── Radio Channel Toggle ─────────────────────── */

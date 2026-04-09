@@ -108,12 +108,12 @@ class ResponseGenerator:
 
         # Check ammo
         ammo = unit.get("ammo", 1.0)
-        if ammo <= 0 and parsed.order_type and parsed.order_type.value in ("attack",):
+        if ammo <= 0 and parsed.order_type and parsed.order_type.value in ("attack", "fire"):
             return ResponseType.unable, "no_ammo"
 
         # Heavy casualties
         strength = unit.get("strength", 1.0)
-        if strength < 0.25 and parsed.order_type and parsed.order_type.value in ("attack", "move"):
+        if strength < 0.25 and parsed.order_type and parsed.order_type.value in ("attack", "fire", "move"):
             return ResponseType.unable, "heavy_casualties"
 
         # Normal acknowledgment

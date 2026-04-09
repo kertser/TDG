@@ -220,20 +220,21 @@ const KMapObjects = (() => {
                 _objects = await resp.json();
                 render();
 
-                // Trigger immediate LOS-based discovery check (non-blocking).
-                // If any objects are newly discovered, reload to get updated flags.
-                fetch(`/api/sessions/${sessionId}/map-objects/discover`, {
-                    method: 'POST', headers,
-                }).then(r => r.json()).then(data => {
-                    if (data.discovered_count > 0) {
-                        // Re-fetch objects with updated discovery flags
-                        fetch(`/api/sessions/${sessionId}/map-objects`, { headers })
-                            .then(r => r.json()).then(objs => {
-                                _objects = objs;
-                                render();
-                            }).catch(() => {});
-                    }
-                }).catch(() => {});
+                // Trigger LOS-based discovery check — deferred to avoid blocking
+                // initial map load (this endpoint is expensive: builds terrain + LOS service).
+                setTimeout(() => {
+                    fetch(`/api/sessions/${sessionId}/map-objects/discover`, {
+                        method: 'POST', headers,
+                    }).then(r => r.json()).then(data => {
+                        if (data.discovered_count > 0) {
+                            fetch(`/api/sessions/${sessionId}/map-objects`, { headers })
+                                .then(r => r.json()).then(objs => {
+                                    _objects = objs;
+                                    render();
+                                }).catch(() => {});
+                        }
+                    }).catch(() => {});
+                }, 2000);
             }
         } catch (e) { console.warn('Failed to load map objects:', e); }
     }
@@ -1192,12 +1193,14 @@ const KMapObjects = (() => {
      * @param {string} type - 'artillery' | 'combat' | 'smoke_impact'
      * @param {number} durationMs - how long the effect lasts (default 25000ms = 25s)
      */
-    function showImpact(lat, lon, type = 'artillery', durationMs = 25000) {
+    function showImpact(lat, lon, type = 'artillery', durationMs = null) {
         const layer = _ensureImpactLayer();
         if (!layer || !_map) return;
 
         const isArtillery = type === 'artillery';
-        const baseRadius = isArtillery ? 80 : 40;
+        // Artillery: 30s splash, regular combat: 15s
+        if (durationMs === null) durationMs = isArtillery ? 30000 : 15000;
+        const baseRadius = isArtillery ? 100 : 40;
         const color = isArtillery ? '#FF6600' : '#FF4444';
         const coreColor = isArtillery ? '#FFD700' : '#FF8800';
 
@@ -1208,7 +1211,7 @@ const KMapObjects = (() => {
             weight: 2,
             opacity: 0.9,
             fillColor: '#FFFFFF',
-            fillOpacity: 0.7,
+            fillOpacity: 0.8,
             interactive: false,
             className: 'impact-flash',
         });
@@ -1220,7 +1223,7 @@ const KMapObjects = (() => {
             weight: 2,
             opacity: 0.8,
             fillColor: color,
-            fillOpacity: 0.35,
+            fillOpacity: isArtillery ? 0.45 : 0.35,
             interactive: false,
             className: 'impact-blast',
         });
@@ -1238,13 +1241,13 @@ const KMapObjects = (() => {
             className: 'impact-shockwave',
         });
 
-        // Debris/smoke cloud (lingers longer)
+        // Debris/smoke cloud (lingers for the full duration)
         const smoke = L.circle([lat, lon], {
-            radius: baseRadius * 1.2,
+            radius: isArtillery ? baseRadius * 1.5 : baseRadius * 1.2,
             color: 'transparent',
             weight: 0,
-            fillColor: '#555',
-            fillOpacity: 0.25,
+            fillColor: isArtillery ? '#443322' : '#555',
+            fillOpacity: isArtillery ? 0.35 : 0.25,
             interactive: false,
             className: 'impact-smoke',
         });
@@ -1259,22 +1262,24 @@ const KMapObjects = (() => {
             try { layer.removeLayer(flash); } catch(e) {}
         }, 2000);
 
-        // Phase 2 (2-8s): blast circle fades
+        // Phase 2: blast circle fades (artillery lingers longer)
+        const blastFadeStart = isArtillery ? 5000 : 3000;
+        const blastRemove = isArtillery ? 12000 : 8000;
         setTimeout(() => {
             try {
-                blast.setStyle({ opacity: 0.3, fillOpacity: 0.12 });
+                blast.setStyle({ opacity: 0.3, fillOpacity: isArtillery ? 0.2 : 0.12 });
                 shockwave.setStyle({ opacity: 0.15 });
             } catch(e) {}
-        }, 3000);
+        }, blastFadeStart);
 
         setTimeout(() => {
             try { layer.removeLayer(blast); } catch(e) {}
             try { layer.removeLayer(shockwave); } catch(e) {}
-        }, 8000);
+        }, blastRemove);
 
-        // Phase 3 (8s-end): smoke lingers then fades
+        // Phase 3: smoke/debris lingers then fades
         setTimeout(() => {
-            try { smoke.setStyle({ fillOpacity: 0.1 }); } catch(e) {}
+            try { smoke.setStyle({ fillOpacity: isArtillery ? 0.15 : 0.1 }); } catch(e) {}
         }, durationMs * 0.6);
 
         // Final cleanup
@@ -1291,12 +1296,13 @@ const KMapObjects = (() => {
         if (!events || !Array.isArray(events)) return;
         for (const evt of events) {
             const payload = evt.payload || {};
-            if (evt.event_type === 'combat' || evt.event_type === 'unit_destroyed') {
+            if (evt.event_type === 'combat' || evt.event_type === 'unit_destroyed' || evt.event_type === 'artillery_support') {
                 // Show impact at target location
                 const lat = payload.target_lat || payload.lat;
                 const lon = payload.target_lon || payload.lon;
                 if (lat && lon) {
-                    showImpact(lat, lon, evt.event_type === 'unit_destroyed' ? 'artillery' : 'combat');
+                    const isArty = evt.event_type === 'unit_destroyed' || evt.event_type === 'artillery_support' || payload.is_artillery;
+                    showImpact(lat, lon, isArty ? 'artillery' : 'combat');
                 }
             }
         }

@@ -23,7 +23,7 @@
         <div style="flex:1;"></div>
 
         <!-- Execute Orders (advance turn) — visible only to commanders -->
-        <button id="turn-btn" class="topbar-orders-complete-btn" style="display:none;" title="Submit your orders and advance to the next turn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders</button>
+        <button id="turn-btn" class="topbar-orders-complete-btn" style="display:none;" title="Submit your orders and advance to the next turn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders</button>
 
         <!-- Rules button -->
         <button id="rules-topbar-btn" class="topbar-text-btn" title="Rules &amp; Instructions">📖 Rules</button>
@@ -124,9 +124,9 @@
             <div id="reports-tab" class="tab-panel">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
                     <h3 style="flex:1;margin:0;">Reports</h3>
-                    <button id="export-reports-btn" class="log-export-btn" title="Export reports as text file">
+                    <button id="export-reports-btn" class="log-export-btn" title="Export reports as Excel file">
                         <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>
-                        <span>Export</span>
+                        <span>Excel</span>
                     </button>
                 </div>
                 <div id="reports-filter-bar" class="reports-filter-bar"></div>
@@ -137,9 +137,9 @@
             <div id="log-tab" class="tab-panel">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
                     <h3 style="flex:1;margin:0;">Game Log</h3>
-                    <button id="export-log-btn" class="log-export-btn" title="Export log as text file">
+                    <button id="export-log-btn" class="log-export-btn" title="Export full game log as Excel file">
                         <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>
-                        <span>Export</span>
+                        <span>Excel</span>
                     </button>
                 </div>
                 <div id="game-log"></div>
@@ -189,9 +189,14 @@
             </div>
             <div class="cmd-input-row">
                 <textarea id="order-text" class="cmd-textarea" placeholder="Type your order… (Ctrl+Enter to send)" rows="3"></textarea>
-                <button id="submit-order-btn" class="cmd-send-btn" title="Issue Order (Ctrl+Enter)">
-                    <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 8L6 14L15 2" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </button>
+                <div class="cmd-input-actions">
+                    <button id="pick-coords-btn" class="cmd-action-btn" title="Pick coordinates from map (click map to insert grid reference)">
+                        <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="4.5" stroke="currentColor" stroke-width="1.6" fill="none"/><line x1="8" y1="0.5" x2="8" y2="4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="8" y1="11.5" x2="8" y2="15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="0.5" y1="8" x2="4.5" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="11.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>
+                    </button>
+                    <button id="submit-order-btn" class="cmd-send-btn" title="Issue Order (Ctrl+Enter)">
+                        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 8L6 14L15 2" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
             </div>
         </div>
 

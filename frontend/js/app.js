@@ -39,7 +39,7 @@
         // Deactivate scenario builder if active (prevents double grid/units)
         try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
 
-        // Load grid overlay
+        // Load grid overlay first (needed for map centering)
         try {
             await KGrid.load(map, sessionId);
             KGrid.setupMouseTracker(map);
@@ -71,56 +71,55 @@
             console.warn('Grid center error:', err);
         }
 
-        // Fetch session data to initialize game clock
-        try {
-            const sessResp = await fetch(`/api/sessions/${sessionId}`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
-            if (sessResp.ok) {
-                const sessData = await sessResp.json();
-                KMap.setGameTime(sessData.tick || 0, sessData.current_time || null);
-            }
-        } catch (err) {
-            console.warn('Failed to fetch session for clock:', err);
-        }
-
-        // Load units — use god-view-aware refresh if admin god view is active
-        try {
-            if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
-                await KAdmin.refreshMapUnits();
-            } else {
-                await KUnits.load(sessionId, token);
-            }
-        } catch (err) { console.warn('Units load error:', err); }
-
-        // Load contacts
-        try { await KContacts.load(sessionId, token); } catch (err) { console.warn('Contacts load error:', err); }
-
-        // Setup overlays for this session
+        // Setup overlays session context (needed before loadFromServer)
         KOverlays.setSession(sessionId, token);
-        try { await KOverlays.loadFromServer(); } catch (err) { console.warn('Overlays load error:', err); }
 
-        // Load terrain overlay (if analyzed) — non-blocking, don't hold up WS/events
+        // Initialize orders panel (sync DOM setup, its internal fetches are fire-and-forget)
+        try { KOrders.init(sessionId, token); } catch (err) { console.warn('Orders init error:', err); }
+
+        // Fire off non-blocking loads (terrain, map objects) — don't await
         try {
             KTerrain.setSession(sessionId);
-            KTerrain.load(sessionId, token);  // intentionally not awaited
+            KTerrain.load(sessionId, token);
         } catch (err) { console.warn('Terrain load error:', err); }
 
-        // Load map objects (obstacles, structures)
         try {
             KMapObjects.setSession(sessionId);
             KMapObjects.loadDefinitions(sessionId);
             KMapObjects.load(sessionId, token);
         } catch (err) { console.warn('Map objects load error:', err); }
 
-        // Initialize orders panel
-        try { KOrders.init(sessionId, token); } catch (err) { console.warn('Orders init error:', err); }
+        // ── Parallel data loading ─────────────────────────
+        // All of these are independent — run them concurrently
+        const sessPromise = fetch(`/api/sessions/${sessionId}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+        }).then(r => r.ok ? r.json() : null).catch(() => null);
 
-        // Load events
-        try { await KEvents.load(sessionId, token); } catch (err) { console.warn('Events load error:', err); }
+        const unitsPromise = (async () => {
+            if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                await KAdmin.refreshMapUnits();
+            } else {
+                await KUnits.load(sessionId, token);
+            }
+        })().catch(err => console.warn('Units load error:', err));
 
-        // Load reports
-        try { await KReports.load(sessionId, token); } catch (err) { console.warn('Reports load error:', err); }
+        const results = await Promise.all([
+            sessPromise,
+            unitsPromise,
+            KContacts.load(sessionId, token).catch(err => console.warn('Contacts load error:', err)),
+            KOverlays.loadFromServer().catch(err => console.warn('Overlays load error:', err)),
+            KEvents.load(sessionId, token).catch(err => console.warn('Events load error:', err)),
+            KReports.load(sessionId, token).catch(err => console.warn('Reports load error:', err)),
+        ]);
+
+        // Apply session data (from parallel fetch)
+        const sessData = results[0];
+        if (sessData) {
+            KMap.setGameTime(sessData.tick || 0, sessData.current_time || null);
+        }
+
+        // Update command panel meta (game time) now that clock is set
+        try { KOrders.refreshMeta(); } catch(e) {}
 
         // Connect WebSocket
         KWebSocket.connect(sessionId, token);
@@ -216,7 +215,10 @@
             // Show combat impact visual effects
             if (data.combat_impacts && Array.isArray(data.combat_impacts)) {
                 for (const imp of data.combat_impacts) {
-                    const impactType = imp.type === 'unit_destroyed' ? 'artillery' : 'combat';
+                    let impactType;
+                    if (imp.type === 'unit_destroyed') impactType = 'artillery';
+                    else if (imp.is_artillery) impactType = 'artillery';
+                    else impactType = 'combat';
                     try { KMapObjects.showImpact(imp.lat, imp.lon, impactType); } catch(e) {}
                 }
             }

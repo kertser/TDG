@@ -108,6 +108,9 @@ DAMAGE_SCALAR = 0.02  # ~2% strength loss per tick under sustained fire
 # Danger-close radius (meters) — artillery ceases fire if friendlies are this close to target
 DANGER_CLOSE_RADIUS_M = 50.0
 
+# Blast radius for area fire (indirect fire at a location, not a specific unit)
+AREA_FIRE_BLAST_RADIUS_M = 150.0
+
 
 def _fire_intensity(damage: float) -> str:
     """Map damage value to a natural language fire intensity description."""
@@ -244,6 +247,21 @@ def process_combat(
         atk_pos = _get_position(attacker)
         if atk_pos is None:
             continue
+
+        # ── Area fire: indirect fire at a location (no specific target unit) ──
+        # Artillery/mortar with "fire" task and target_location but no target_unit_id
+        if task_type == "fire" and target_location and not target_id:
+            if attacker.unit_type in ARTILLERY_TYPES:
+                area_evts = _process_area_fire(
+                    attacker, atk_pos, target_location, all_units, terrain, map_objects or [],
+                )
+                events.extend(area_evts)
+                # Mark any hit units as under fire
+                for evt in area_evts:
+                    tid = evt.get("target_unit_id")
+                    if tid:
+                        under_fire.add(tid)
+                continue  # Area fire processed, skip normal targeting
 
         target = None
         if target_id:
@@ -416,6 +434,7 @@ def process_combat(
             # Natural language combat description
             fire_desc = _fire_intensity(damage)
             strength_desc = _strength_category(target.strength)
+            is_arty = attacker.unit_type in ARTILLERY_TYPES
             events.append({
                 "event_type": "combat",
                 "actor_unit_id": attacker.id,
@@ -433,10 +452,207 @@ def process_combat(
                     "distance_m": round(dist, 1),
                     "target_lat": tgt_pos[0],
                     "target_lon": tgt_pos[1],
+                    "is_artillery": is_arty,
                 },
             })
 
     return events, under_fire
+
+
+def _process_area_fire(
+    attacker,
+    atk_pos: tuple[float, float],
+    target_location: dict,
+    all_units: list,
+    terrain: TerrainService,
+    map_objects: list,
+) -> list[dict]:
+    """
+    Process indirect area fire at a location (no specific target unit).
+
+    Artillery/mortar fires at a grid square — deals damage to any enemy units
+    within the blast radius of the target location. Also generates impact
+    visual effects even if no enemy is hit.
+
+    Returns list of event dicts.
+    """
+    events = []
+    target_lat = target_location.get("lat")
+    target_lon = target_location.get("lon")
+    if target_lat is None or target_lon is None:
+        return events
+
+    # Check range
+    dist_to_target = _distance_m(atk_pos[0], atk_pos[1], target_lat, target_lon)
+    weapon_range = WEAPON_RANGE.get(attacker.unit_type, 5000)
+    caps = attacker.capabilities or {}
+    if caps.get("mortar_range_m"):
+        weapon_range = max(weapon_range, caps["mortar_range_m"])
+
+    if dist_to_target > weapon_range:
+        # Out of range — generate event but don't fire
+        events.append({
+            "event_type": "fire_out_of_range",
+            "actor_unit_id": attacker.id,
+            "text_summary": f"{attacker.name} — target out of range ({dist_to_target:.0f}m, max {weapon_range}m)",
+            "payload": {
+                "attacker": str(attacker.id),
+                "distance_m": round(dist_to_target, 1),
+                "weapon_range_m": weapon_range,
+            },
+        })
+        return events
+
+    # Check ammo
+    ammo = attacker.ammo or 1.0
+    if ammo <= 0:
+        return events
+
+    # Danger-close check: don't fire if friendly forces within danger close radius of target
+    attacker_side = attacker.side.value if hasattr(attacker.side, 'value') else str(attacker.side)
+    for u in all_units:
+        if u.is_destroyed or u.id == attacker.id:
+            continue
+        u_side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+        if u_side != attacker_side:
+            continue
+        u_pos = _get_position(u)
+        if u_pos is None:
+            continue
+        d_friendly = _distance_m(u_pos[0], u_pos[1], target_lat, target_lon)
+        if d_friendly <= DANGER_CLOSE_RADIUS_M:
+            attacker.current_task = None
+            events.append({
+                "event_type": "ceasefire_friendly",
+                "actor_unit_id": attacker.id,
+                "text_summary": f"{attacker.name} ceasing fire — friendly forces within danger close range of target",
+                "payload": {
+                    "attacker": str(attacker.id),
+                    "reason": "danger_close",
+                    "target_lat": target_lat,
+                    "target_lon": target_lon,
+                },
+            })
+            return events
+
+    # Calculate fire effectiveness
+    base_fp = BASE_FIREPOWER.get(attacker.unit_type, 20)
+    strength = attacker.strength or 1.0
+    suppression = attacker.suppression or 0.0
+
+    fire_effectiveness = (
+        base_fp
+        * strength
+        * _ammo_factor(ammo)
+        * (1.0 - suppression)
+    )
+
+    # Find enemy units within blast radius of the target location
+    hit_any = False
+    for target in all_units:
+        if target.is_destroyed:
+            continue
+        t_side = target.side.value if hasattr(target.side, 'value') else str(target.side)
+        if t_side == attacker_side:
+            continue  # Same side — don't hit friendlies
+
+        tgt_pos = _get_position(target)
+        if tgt_pos is None:
+            continue
+
+        dist_to_blast = _distance_m(tgt_pos[0], tgt_pos[1], target_lat, target_lon)
+        if dist_to_blast > AREA_FIRE_BLAST_RADIUS_M:
+            continue
+
+        # Damage falls off with distance from blast center
+        proximity_factor = max(0.2, 1.0 - (dist_to_blast / AREA_FIRE_BLAST_RADIUS_M))
+
+        # Target protection
+        tgt_terrain = terrain.protection_factor(tgt_pos[1], tgt_pos[0])
+        tgt_task = target.current_task or {}
+        dig_in_level = tgt_task.get("dig_in_level", 0)
+        if tgt_task.get("type") in ("defend", "dig_in"):
+            tgt_protection = min(2.5, tgt_terrain * (1.0 + 0.2 * dig_in_level))
+        else:
+            tgt_protection = tgt_terrain
+
+        # Protection from map objects
+        if map_objects:
+            obj_protection = _get_protection_from_objects(tgt_pos[0], tgt_pos[1], map_objects)
+            if obj_protection > tgt_protection:
+                tgt_protection = obj_protection
+
+        # Apply area damage (reduced by proximity and protection)
+        damage = fire_effectiveness * DAMAGE_SCALAR * proximity_factor / tgt_protection
+        target.strength = max(0.0, (target.strength or 1.0) - damage)
+
+        # Apply suppression (area fire is very suppressive)
+        suppression_inflicted = fire_effectiveness * 0.04 * proximity_factor
+        target.suppression = min(1.0, (target.suppression or 0.0) + suppression_inflicted)
+
+        hit_any = True
+
+        if target.strength <= 0.01:
+            target.is_destroyed = True
+            target.current_task = None
+            events.append({
+                "event_type": "unit_destroyed",
+                "actor_unit_id": attacker.id,
+                "target_unit_id": target.id,
+                "text_summary": f"{attacker.name} destroyed {target.name} with indirect fire",
+                "payload": {
+                    "attacker": str(attacker.id),
+                    "target": str(target.id),
+                    "target_lat": tgt_pos[0],
+                    "target_lon": tgt_pos[1],
+                    "is_artillery": True,
+                },
+            })
+        else:
+            fire_desc = _fire_intensity(damage)
+            strength_desc = _strength_category(target.strength)
+            events.append({
+                "event_type": "combat",
+                "actor_unit_id": attacker.id,
+                "target_unit_id": target.id,
+                "text_summary": (
+                    f"{attacker.name} area fire on {target.name} — "
+                    f"{fire_desc}, target {strength_desc}"
+                ),
+                "payload": {
+                    "attacker": str(attacker.id),
+                    "target": str(target.id),
+                    "damage": round(damage, 4),
+                    "suppression": round(suppression_inflicted, 4),
+                    "target_strength": round(target.strength, 4),
+                    "distance_m": round(dist_to_blast, 1),
+                    "target_lat": target_lat,
+                    "target_lon": target_lon,
+                    "is_artillery": True,
+                    "area_fire": True,
+                },
+            })
+
+    # Always generate an impact event for visual effects,
+    # even if no enemy was directly hit
+    events.append({
+        "event_type": "combat",
+        "actor_unit_id": attacker.id,
+        "text_summary": (
+            f"{attacker.name} firing at grid location"
+            + (f" — {len([e for e in events if e.get('target_unit_id')])} enemies in blast zone" if hit_any else " — area suppression")
+        ),
+        "payload": {
+            "attacker": str(attacker.id),
+            "target_lat": target_lat,
+            "target_lon": target_lon,
+            "is_artillery": True,
+            "area_fire": True,
+            "hit_enemies": hit_any,
+        },
+    })
+
+    return events
 
 
 # ── Artillery unit types that can provide fire support ──

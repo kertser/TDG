@@ -34,6 +34,7 @@ class OrderType(str, enum.Enum):
     """Tactical order types the engine can execute."""
     move = "move"
     attack = "attack"
+    fire = "fire"
     defend = "defend"
     observe = "observe"
     support = "support"

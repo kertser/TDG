@@ -223,9 +223,11 @@ class OrderParser:
 
         # Classification keywords
         command_kw_en = ["move", "advance", "attack", "defend", "hold", "observe", "withdraw",
-                         "retreat", "support", "halt", "stop", "flank", "engage"]
+                         "retreat", "support", "halt", "stop", "flank", "engage", "fire at",
+                         "fire on", "fire mission", "shoot"]
         command_kw_ru = ["выдвигай", "двигай", "атак", "оборон", "удержи", "наблюда", "отход",
-                         "отступ", "поддерж", "стой", "стоп", "обход", "огонь"]
+                         "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
+                         "открыть огонь", "стреляй"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -249,10 +251,13 @@ class OrderParser:
             classification = MessageClassification.status_report
         elif any(kw in text_lower for kw in command_kw_en + command_kw_ru):
             classification = MessageClassification.command
-            # Determine order type
-            if any(kw in text_lower for kw in ["move", "advance", "выдвигай", "двигай", "обход"]):
+            # Determine order type — check fire BEFORE attack to avoid "fire" matching "engage"
+            if any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
+                                                 "огонь по", "огонь на", "открыть огонь", "стреляй"]):
+                order_type = "fire"
+            elif any(kw in text_lower for kw in ["move", "advance", "выдвигай", "двигай", "обход"]):
                 order_type = "move"
-            elif any(kw in text_lower for kw in ["attack", "engage", "атак", "огонь"]):
+            elif any(kw in text_lower for kw in ["attack", "engage", "атак"]):
                 order_type = "attack"
             elif any(kw in text_lower for kw in ["defend", "hold", "оборон", "удержи"]):
                 order_type = "defend"

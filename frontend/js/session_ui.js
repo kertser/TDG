@@ -183,7 +183,7 @@ const KSessionUI = (() => {
                     console.error('Turn advance failed:', err);
                 } finally {
                     turnBtn.disabled = false;
-                    turnBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders';
+                    turnBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders';
                 }
             });
         }
@@ -470,40 +470,31 @@ const KSessionUI = (() => {
         const displayName = (sessionData && sessionData.name) || sessionId.substring(0, 8) + '...';
         document.getElementById('session-info').textContent = `📋 ${displayName}`;
 
-        // Fetch user's role in this session
-        try {
-            const roleResp = await fetch(`/api/sessions/${sessionId}/my-role`, {
-                headers: { 'Authorization': `Bearer ${currentToken}` },
-            });
-            if (roleResp.ok) {
-                const roleData = await roleResp.json();
-                _currentRole = roleData.role;
-                _currentSide = roleData.side;
-                _canAdvanceTurn = roleData.can_advance_turn;
-            } else {
-                // Fallback: assume commander
-                _currentRole = 'commander';
-                _currentSide = 'blue';
-                _canAdvanceTurn = true;
-            }
-        } catch {
+        // Fetch role + session data in parallel (they're independent)
+        const authHeaders = { 'Authorization': `Bearer ${currentToken}` };
+        const [roleData, sessInfo] = await Promise.all([
+            fetch(`/api/sessions/${sessionId}/my-role`, { headers: authHeaders })
+                .then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`/api/sessions/${sessionId}`, { headers: authHeaders })
+                .then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+
+        if (roleData) {
+            _currentRole = roleData.role;
+            _currentSide = roleData.side;
+            _canAdvanceTurn = roleData.can_advance_turn;
+        } else {
             _currentRole = 'commander';
+            _currentSide = 'blue';
             _canAdvanceTurn = true;
         }
 
-        // Fetch scenario description
-        try {
-            const sessResp = await fetch(`/api/sessions/${sessionId}`, {
-                headers: { 'Authorization': `Bearer ${currentToken}` },
-            });
-            if (sessResp.ok) {
-                const sessData = await sessResp.json();
-                _scenarioTitle = sessData.scenario_title || sessData.name;
-                _scenarioDescription = sessData.scenario_description;
-                _scenarioEnvironment = sessData.scenario_environment || null;
-                _scenarioObjectives = sessData.scenario_objectives || null;
-            }
-        } catch {}
+        if (sessInfo) {
+            _scenarioTitle = sessInfo.scenario_title || sessInfo.name;
+            _scenarioDescription = sessInfo.scenario_description;
+            _scenarioEnvironment = sessInfo.scenario_environment || null;
+            _scenarioObjectives = sessInfo.scenario_objectives || null;
+        }
 
         // Show session control buttons based on status AND role
         const startBtn = document.getElementById('start-session-btn');
@@ -684,7 +675,7 @@ const KSessionUI = (() => {
         const turnBtn = document.getElementById('turn-btn');
         if (!turnBtn || !currentSessionId || !currentToken) return;
 
-        const svgIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>';
+        const svgIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>';
 
         try {
             // Use local count from KUnits pending orders
