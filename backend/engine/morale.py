@@ -109,6 +109,38 @@ def process_morale(
         else:
             delta += 0.01  # slow recovery when safe
 
+        # ── Unit rest/recovery (strength + morale boost when idle & safe) ──
+        task = unit.current_task
+        is_resting = (
+            unit.id not in under_fire
+            and (not task or task.get("type") in ("defend", None))
+        )
+        if is_resting:
+            # Track rest ticks
+            caps = unit.capabilities or {}
+            rest_ticks = caps.get("rest_ticks", 0) + 1
+            new_caps = dict(caps)
+            new_caps["rest_ticks"] = rest_ticks
+            unit.capabilities = new_caps
+
+            # Recover strength (not full personnel — represents reorganization/treatment)
+            if strength < 1.0:
+                if rest_ticks >= 5:
+                    unit.strength = min(1.0, strength + 0.008)  # boosted recovery
+                else:
+                    unit.strength = min(1.0, strength + 0.003)  # slow recovery
+
+            # Boosted morale recovery while resting
+            if rest_ticks >= 5:
+                delta += 0.01  # additional morale recovery
+        else:
+            # Reset rest counter when doing things
+            caps = unit.capabilities or {}
+            if caps.get("rest_ticks", 0) > 0:
+                new_caps = dict(caps)
+                new_caps["rest_ticks"] = 0
+                unit.capabilities = new_caps
+
         # Mutual support: friendly units nearby
         unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
         unit_pos = positions.get(unit.id)
@@ -132,7 +164,6 @@ def process_morale(
                         break  # one bonus per tick
 
         # ── Long march fatigue → morale erosion ──
-        task = unit.current_task
         if task and task.get("type") in ("move", "advance"):
             march_ticks = task.get("march_ticks", 0) + 1
             task["march_ticks"] = march_ticks

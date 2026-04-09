@@ -32,6 +32,7 @@ from backend.models.unit import Unit
 from backend.models.order import Order, OrderStatus
 from backend.models.contact import Contact
 from backend.models.event import Event
+from backend.models.report import Report, ReportSide
 from backend.models.terrain_cell import TerrainCell
 from backend.models.elevation_cell import ElevationCell
 from backend.models.grid import GridDefinition
@@ -217,12 +218,79 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     )
     map_objects_list = list(mo_result.scalars().all())
 
+    # ── 1c. Process smoke decay ────────────────────────────
+    for obj in map_objects_list:
+        if obj.object_type == "smoke" and obj.is_active:
+            props = obj.properties or {}
+            ticks_remaining = props.get("ticks_remaining", 0) - 1
+            if ticks_remaining <= 0:
+                obj.is_active = False
+                all_events.append({
+                    "event_type": "smoke_dissipated",
+                    "text_summary": f"Smoke screen dissipated at {obj.label or 'position'}",
+                    "payload": {"object_id": str(obj.id)},
+                })
+            else:
+                new_props = dict(props)
+                new_props["ticks_remaining"] = ticks_remaining
+                obj.properties = new_props
+
+    # ── 1d. Compute weather & night modifiers (used by movement + detection) ──
+    weather_mod = 1.0
+    weather_movement_mod = 1.0
+    night_mod = 1.0
+    if scenario and scenario.environment:
+        vis_km = scenario.environment.get("visibility_km", 5.0)
+        weather_mod = min(1.0, vis_km / 5.0)
+
+        # Weather effects on movement and visibility
+        weather_type = scenario.environment.get("weather", "clear")
+        precipitation = scenario.environment.get("precipitation", "none")
+        if weather_type in ("rain", "rainy"):
+            weather_mod *= 0.7
+            weather_movement_mod *= 0.8  # mud
+        elif weather_type in ("heavy_rain", "storm"):
+            weather_mod *= 0.4
+            weather_movement_mod *= 0.6  # heavy mud
+        elif weather_type == "fog":
+            weather_mod *= 0.3
+            weather_movement_mod *= 0.95
+        elif weather_type == "snow":
+            weather_mod *= 0.6
+            weather_movement_mod *= 0.7
+        if precipitation == "rain":
+            weather_mod *= 0.85
+            weather_movement_mod *= 0.9
+        elif precipitation == "heavy_rain":
+            weather_mod *= 0.5
+            weather_movement_mod *= 0.7
+        elif precipitation == "snow":
+            weather_mod *= 0.7
+            weather_movement_mod *= 0.75
+
+    # Night-time effects on visibility
+    if game_time:
+        hour = game_time.hour
+        if 21 <= hour or hour < 5:
+            # Night: heavy visibility reduction
+            night_mod = 0.3
+        elif 5 <= hour < 7 or 19 <= hour < 21:
+            # Dawn/dusk: moderate visibility reduction
+            night_mod = 0.6
+
+    # Combine weather and night modifiers for detection
+    combined_visibility_mod = weather_mod * night_mod
+
     # ── 2. Execute movement (with obstacle effects) ──────────
-    movement_events = process_movement(all_units, tick_duration, terrain, map_objects_list)
+    movement_events = process_movement(all_units, tick_duration, terrain, map_objects_list, weather_movement_mod=weather_movement_mod)
     all_events.extend(movement_events)
 
     # ── 2a. Mark completed orders from movement arrivals ──────
     await _complete_orders_from_events(session_id, movement_events, db)
+
+    # ── 2a2. Process conditional/phased orders (order_queue) ──
+    cond_events = _process_conditional_orders(all_units, terrain, grid_service)
+    all_events.extend(cond_events)
 
     # ── 2b. Process engineering tasks ─────────────────────────
     new_map_objects: list = []
@@ -237,14 +305,11 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     blue_units = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
 
-    weather_mod = 1.0
-    if scenario and scenario.environment:
-        vis_km = scenario.environment.get("visibility_km", 5.0)
-        weather_mod = min(1.0, vis_km / 5.0)
-
     new_contacts_data = process_detection(
-        blue_units, red_units, tick, terrain, weather_mod,
+        blue_units, red_units, tick, terrain, combined_visibility_mod,
         los_service=los_service,
+        map_objects=map_objects_list,
+        night_mod=night_mod,
     )
 
     # Upsert contacts
@@ -271,7 +336,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     arty_events = process_artillery_support(all_units, terrain)
     all_events.extend(arty_events)
 
-    # ── 4c. Automatic return fire: units being attacked fire back ──
+    # ── 4c. Defensive posture / dig-in progression ─────────────
+    from backend.engine.defense import process_defense
+    defense_events = process_defense(all_units, map_objects_list)
+    all_events.extend(defense_events)
+
+    # ── 4d. Automatic return fire: units being attacked fire back ──
     # Identify units with attack/engage/fire tasks targeting specific units
     attacking_map = {}  # target_id → [attacker_ids]
     for u in all_units:
@@ -412,6 +482,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     from backend.engine.radio_chatter import (
         generate_idle_radio_messages,
         generate_peer_support_requests,
+        generate_casualty_radio_messages,
     )
     from backend.models.chat_message import ChatMessage
 
@@ -423,8 +494,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         all_units, under_fire, tick,
         grid_service=grid_service, language=_lang,
     )
+    casualty_msgs = generate_casualty_radio_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang,
+    )
 
-    radio_messages = idle_msgs + peer_msgs
+    radio_messages = idle_msgs + peer_msgs + casualty_msgs
     radio_broadcast = []
     for msg in radio_messages:
         chat = ChatMessage(
@@ -558,10 +633,20 @@ async def _process_orders(
                 if speed_label in speeds:
                     unit.move_speed_mps = speeds[speed_label]
 
+            # Handle phased/conditional orders: if order has "phases",
+            # store subsequent phases in unit.order_queue
+            phases = task.get("phases") or (order.parsed_order or {}).get("phases")
+            if phases and isinstance(phases, list) and len(phases) > 1:
+                # First phase is already the current task
+                # Store remaining phases as conditional order queue
+                unit.order_queue = phases[1:]
+
             events.append({
                 "event_type": "order_issued",
                 "actor_unit_id": unit_uuid,
-                "text_summary": f"{unit.name} received order: {task_type}",
+                "text_summary": f"{unit.name} received order: {task_type}" + (
+                    f" ({len(phases) - 1} conditional follow-up)" if phases and len(phases) > 1 else ""
+                ),
                 "payload": {"order_id": str(order.id), "task": task},
             })
 
@@ -872,3 +957,65 @@ def _process_object_discovery(
     return events
 
 
+def _process_conditional_orders(
+    all_units: list,
+    terrain,
+    grid_service,
+) -> list[dict]:
+    """
+    Check each unit's order_queue for conditional triggers.
+    If condition is met, pop the entry and assign the task.
+
+    Supported conditions:
+      - task_completed: unit has no current_task (previous task finished)
+      - location_reached: unit is at the specified snail_path
+    """
+    events = []
+
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        queue = unit.order_queue
+        if not queue or not isinstance(queue, list) or len(queue) == 0:
+            continue
+
+        entry = queue[0]
+        condition = entry.get("condition", {})
+        cond_type = condition.get("type", "task_completed")
+        met = False
+
+        if cond_type == "task_completed":
+            # Trigger when unit has no current task
+            met = unit.current_task is None
+
+        elif cond_type == "location_reached":
+            # Trigger when unit is at the specified snail path
+            target_snail = condition.get("snail_path", "")
+            if target_snail and grid_service and unit.position is not None:
+                try:
+                    from geoalchemy2.shape import to_shape
+                    pt = to_shape(unit.position)
+                    current_snail = grid_service.point_to_snail(pt.y, pt.x, depth=target_snail.count("-"))
+                    if current_snail and current_snail == target_snail:
+                        met = True
+                except Exception:
+                    pass
+
+        if met:
+            task = entry.get("task")
+            if task:
+                unit.current_task = task
+                events.append({
+                    "event_type": "conditional_order_activated",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name}: conditional order triggered — {task.get('type', 'unknown')}",
+                    "payload": {
+                        "condition": condition,
+                        "task": task,
+                    },
+                })
+            # Pop the entry from the queue
+            new_queue = queue[1:]
+            unit.order_queue = new_queue if new_queue else None
+
+    return events

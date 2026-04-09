@@ -105,6 +105,9 @@ WEAPON_RANGE = {
 
 DAMAGE_SCALAR = 0.02  # ~2% strength loss per tick under sustained fire
 
+# Danger-close radius (meters) — artillery ceases fire if friendlies are this close to target
+DANGER_CLOSE_RADIUS_M = 50.0
+
 
 def _fire_intensity(damage: float) -> str:
     """Map damage value to a natural language fire intensity description."""
@@ -306,6 +309,38 @@ def process_combat(
                 attacker.current_task = task
             continue  # Will move toward target via movement engine
 
+        # ── Danger-close check: artillery/mortar ceases fire if friendly nearby ──
+        if attacker.unit_type in ARTILLERY_TYPES:
+            attacker_side = attacker.side.value if hasattr(attacker.side, 'value') else str(attacker.side)
+            friendly_too_close = False
+            for u in all_units:
+                if u.is_destroyed or u.id == attacker.id:
+                    continue
+                u_side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+                if u_side != attacker_side:
+                    continue
+                u_pos = _get_position(u)
+                if u_pos is None:
+                    continue
+                d_to_target = _distance_m(u_pos[0], u_pos[1], tgt_pos[0], tgt_pos[1])
+                if d_to_target <= DANGER_CLOSE_RADIUS_M:
+                    friendly_too_close = True
+                    break
+            if friendly_too_close:
+                attacker.current_task = None
+                events.append({
+                    "event_type": "ceasefire_friendly",
+                    "actor_unit_id": attacker.id,
+                    "target_unit_id": target.id,
+                    "text_summary": f"{attacker.name} ceasing fire — friendly forces within danger close range of target",
+                    "payload": {
+                        "attacker": str(attacker.id),
+                        "target": str(target.id),
+                        "reason": "danger_close",
+                    },
+                })
+                continue
+
         # Calculate fire effectiveness
         base_fp = BASE_FIREPOWER.get(attacker.unit_type, 5)
         strength = attacker.strength or 1.0
@@ -325,8 +360,10 @@ def process_combat(
         # Target protection
         tgt_terrain = terrain.protection_factor(tgt_pos[1], tgt_pos[0])
         tgt_task = target.current_task or {}
-        if tgt_task.get("type") == "dig_in":
-            tgt_protection = 2.0
+        dig_in_level = tgt_task.get("dig_in_level", 0)
+        if tgt_task.get("type") in ("defend", "dig_in"):
+            # Graduated dig-in protection: base terrain + 0.2 per level, capped at 2.5
+            tgt_protection = min(2.5, tgt_terrain * (1.0 + 0.2 * dig_in_level))
         else:
             tgt_protection = tgt_terrain
 
@@ -350,12 +387,24 @@ def process_combat(
         if target.strength <= 0.01:
             target.is_destroyed = True
             target.current_task = None
+            # Collect all attackers that were engaging this target
+            involved_ids = [str(attacker.id)]
+            for u in all_units:
+                if u.is_destroyed or u.id == attacker.id:
+                    continue
+                u_task = u.current_task
+                if u_task and u_task.get("target_unit_id") == str(target.id):
+                    involved_ids.append(str(u.id))
             events.append({
                 "event_type": "unit_destroyed",
                 "actor_unit_id": attacker.id,
                 "target_unit_id": target.id,
                 "text_summary": f"{attacker.name} destroyed {target.name}",
-                "payload": {"attacker": str(attacker.id), "target": str(target.id)},
+                "payload": {
+                    "attacker": str(attacker.id),
+                    "target": str(target.id),
+                    "involved_unit_ids": involved_ids,
+                },
             })
         else:
             # Natural language combat description
@@ -481,6 +530,24 @@ def process_artillery_support(
                 weapon_range = WEAPON_RANGE.get(sib.unit_type, 5000)
                 dist = _distance_m(sib_pos[0], sib_pos[1], target_loc["lat"], target_loc["lon"])
                 if dist > weapon_range:
+                    continue
+
+                # Danger-close check: don't assign if friendly within 50m of target
+                friendly_danger = False
+                for fu in all_units:
+                    if fu.is_destroyed or fu.id == sib.id:
+                        continue
+                    fu_side = fu.side.value if hasattr(fu.side, 'value') else str(fu.side)
+                    if fu_side != unit_side:
+                        continue
+                    fu_pos = _get_position(fu)
+                    if fu_pos is None:
+                        continue
+                    d_friendly = _distance_m(fu_pos[0], fu_pos[1], target_loc["lat"], target_loc["lon"])
+                    if d_friendly <= DANGER_CLOSE_RADIUS_M:
+                        friendly_danger = True
+                        break
+                if friendly_danger:
                     continue
 
                 # Assign fire mission

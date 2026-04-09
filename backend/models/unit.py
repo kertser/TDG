@@ -73,6 +73,9 @@ class Unit(Base):
     current_task: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     capabilities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # Conditional/phased order queue — list of {condition: {...}, task: {...}}
+    order_queue: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # Movement & detection base stats
     move_speed_mps: Mapped[float] = mapped_column(Float, default=5.0)      # ~18 km/h
     detection_range_m: Mapped[float] = mapped_column(Float, default=2000.0) # 2 km

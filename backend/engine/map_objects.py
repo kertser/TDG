@@ -287,6 +287,25 @@ MAP_OBJECT_DEFS: dict[str, dict] = {
         "description": "Bridge — enables crossing over water obstacles",
         "color": "#757575",
     },
+    # ═══ SMOKE ════════════════════════════════════════════
+    "smoke": {
+        "category": "obstacle",
+        "geometry_type": "Polygon",
+        "movement_factor_infantry": 0.9,
+        "movement_factor_vehicle": 0.9,
+        "vehicle_passable": True,
+        "infantry_passable": True,
+        "damage_per_tick": 0.0,
+        "protection_bonus": 1.0,
+        "detection_bonus_m": 0,
+        "effect_radius_m": 100,
+        "visibility_factor": 0.1,       # drastically reduces visibility
+        "breach_ticks": 0,
+        "build_ticks": 0,
+        "description": "Smoke screen — drastically reduces visibility in area for ~3 minutes",
+        "color": "#888888",
+        "is_transient": True,           # expires after ticks_remaining
+    },
 }
 
 # Quick lookup helpers

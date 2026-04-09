@@ -102,7 +102,8 @@
         "det": 1800,
         "fire": 1200,
         "personnel": 35,
-        "eye_height": 2.8
+        "eye_height": 2.8,
+        "has_nvg": true
     },
     "mech_company": {
         "label": "Mech Infantry Co",
@@ -114,7 +115,8 @@
         "det": 1800,
         "fire": 1500,
         "personnel": 115,
-        "eye_height": 2.8
+        "eye_height": 2.8,
+        "has_nvg": true
     },
     "tank_platoon": {
         "label": "Tank Platoon",
@@ -126,7 +128,8 @@
         "det": 2000,
         "fire": 2000,
         "personnel": 16,
-        "eye_height": 3.0
+        "eye_height": 3.0,
+        "has_nvg": true
     },
     "tank_company": {
         "label": "Tank Company",
@@ -138,7 +141,8 @@
         "det": 2000,
         "fire": 2500,
         "personnel": 58,
-        "eye_height": 3.0
+        "eye_height": 3.0,
+        "has_nvg": true
     },
     "artillery_battery": {
         "label": "Artillery Battery",
@@ -211,7 +215,8 @@
         "det": 3000,
         "fire": 400,
         "personnel": 4,
-        "eye_height": 3.0
+        "eye_height": 3.0,
+        "has_nvg": true
     },
     "recon_section": {
         "label": "Recon Section",
@@ -223,7 +228,8 @@
         "det": 3000,
         "fire": 500,
         "personnel": 10,
-        "eye_height": 3.0
+        "eye_height": 3.0,
+        "has_nvg": true
     },
     "observation_post": {
         "label": "Observation Post",
@@ -235,7 +241,8 @@
         "det": 4000,
         "fire": 300,
         "personnel": 3,
-        "eye_height": 8.0
+        "eye_height": 8.0,
+        "has_nvg": true
     },
     "sniper_team": {
         "label": "Sniper Team",
@@ -247,7 +254,8 @@
         "det": 2500,
         "fire": 1000,
         "personnel": 2,
-        "eye_height": 2.5
+        "eye_height": 2.5,
+        "has_nvg": true
     },
     "engineer_platoon": {
         "label": "Engineer Platoon",

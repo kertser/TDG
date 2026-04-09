@@ -66,7 +66,6 @@ const KOrders = (() => {
             toggleBtn.addEventListener('click', () => {
                 const isExpanded = panel.classList.contains('expanded');
                 panel.classList.toggle('expanded', !isExpanded);
-                panel.classList.remove('collapsed');
                 toggleBtn.innerHTML = isExpanded
                     ? '<svg viewBox="0 0 16 16" width="10" height="10"><path d="M8 2L8 10M4 6L8 2L12 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
                     : '<svg viewBox="0 0 16 16" width="10" height="10"><path d="M3 4.5L8 1L13 4.5M3 8L8 4.5L13 8" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -74,23 +73,6 @@ const KOrders = (() => {
             });
         }
 
-        // ── Maximize / restore toggle ──
-        const maxBtn = document.getElementById('cmd-panel-maximize');
-        if (maxBtn) {
-            maxBtn.addEventListener('click', () => {
-                const isMax = panel.classList.contains('maximized');
-                panel.classList.toggle('maximized', !isMax);
-                // Don't add .expanded — let hover/auto-collapse work naturally
-                // If restoring from maximized, also clear expanded
-                if (isMax) {
-                    panel.classList.remove('expanded');
-                }
-                maxBtn.innerHTML = isMax
-                    ? '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" stroke-width="2" fill="none"/></svg>'
-                    : '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="1" y="5" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M5 5V3h8v8h-2" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
-                maxBtn.title = isMax ? 'Maximize panel' : 'Restore panel';
-            });
-        }
 
         // ── Radio channel sub-tabs ──
         document.querySelectorAll('.radio-ch-btn').forEach(btn => {
@@ -171,9 +153,7 @@ const KOrders = (() => {
 
     function _autoResize(ta) {
         ta.style.height = 'auto';
-        const panel = document.getElementById('command-panel');
-        const maxH = panel && panel.classList.contains('maximized') ? 400 : 120;
-        ta.style.height = Math.min(ta.scrollHeight, maxH) + 'px';
+        ta.style.height = Math.min(ta.scrollHeight, 400) + 'px';
     }
 
     /** Scroll the radio messages container to the bottom, with retries for CSS transitions. */

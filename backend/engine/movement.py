@@ -341,6 +341,7 @@ def process_movement(
     tick_duration_sec: int,
     terrain: TerrainService,
     map_objects: list | None = None,
+    weather_movement_mod: float = 1.0,
 ) -> list[dict]:
     """
     Process movement for all units with movement tasks.
@@ -438,10 +439,15 @@ def process_movement(
         if obstacle_factor <= 0.0:
             continue
 
+        # Slope factor
+        slope_factor = terrain.slope_movement_factor(cur_lon, cur_lat) if terrain else 1.0
+
         effective_speed = (
             base_speed
             * terrain_factor
             * obstacle_factor
+            * slope_factor
+            * weather_movement_mod
             * (1.0 - suppression * 0.7)
             * _morale_factor(morale)
         )

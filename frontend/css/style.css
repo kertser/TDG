@@ -2458,6 +2458,8 @@ button:hover { background: #1a5276; }
     border: 1px solid #0f3460;
     border-radius: 4px;
     outline: none;
+    margin-top: 6px;
+    box-sizing: border-box;
     cursor: pointer;
 }
 .admin-modal-select:focus {
@@ -3303,7 +3305,7 @@ button:hover { background: #1a5276; }
     border-radius: 6px !important;
     color: #e0e0e0 !important;
     font-size: 11px !important;
-    padding: 6px 10px !important;
+    font-weight: 600 !important;
     box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
 }
 .terrain-tooltip::before {
@@ -3511,13 +3513,13 @@ button:hover { background: #1a5276; }
 }
 
 /* ── Bottom Command Panel ─────────────────────── */
+/* Two states: collapsed (narrow tab bar) ↔ open (wide content). */
 #command-panel {
     position: fixed;
     bottom: 0;
-    /* Center relative to the map area (viewport minus sidebar), offset slightly right */
-    left: calc((100vw - 260px) / 2);
-    transform: translateX(-50%);
-    width: clamp(580px, 55vw, 860px);
+    left: 50%;
+    transform: translateX(calc(-50% - 130px));
+    width: clamp(280px, 22vw, 340px);
     z-index: 2000;
     background: rgba(11, 17, 34, 0.96);
     border: 1px solid rgba(79, 195, 247, 0.2);
@@ -3530,9 +3532,14 @@ button:hover { background: #1a5276; }
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     overflow: hidden;
-    transition: none;
+    transition: width 0.25s ease, transform 0.25s ease;
 }
-/* Auto-collapse: hide tab panels by default, show on hover or when .expanded */
+/* Expand to full width on hover or when pinned */
+#command-panel:hover,
+#command-panel.expanded {
+    width: clamp(660px, 60vw, 960px);
+}
+/* Default: tab panels hidden (collapsed/minimized) */
 #command-panel .cmd-tab-panel {
     max-height: 0;
     opacity: 0;
@@ -3541,21 +3548,18 @@ button:hover { background: #1a5276; }
     overflow: hidden;
     transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
 }
+/* On hover or when pinned (.expanded) → show at full maximized size */
 #command-panel:hover .cmd-tab-panel.active,
 #command-panel.expanded .cmd-tab-panel.active {
-    max-height: 300px;
+    max-height: 50vh;
+    height: 320px;
+    min-height: 200px;
     opacity: 1;
     padding-top: 8px;
     padding-bottom: 10px;
-    overflow: visible;
-}
-/* Collapsed override (manual toggle) */
-#command-panel.collapsed .cmd-tab-panel {
-    max-height: 0 !important;
-    opacity: 0 !important;
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-    overflow: hidden !important;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 /* Prevent collapsed panel from blocking elements behind it */
 #command-panel:not(:hover):not(.expanded) {
@@ -3565,41 +3569,27 @@ button:hover { background: #1a5276; }
 #command-panel:not(:hover):not(.expanded) #command-panel-header * {
     pointer-events: auto;
 }
-
-/* Maximized panel state */
-#command-panel.maximized {
-    width: clamp(660px, 60vw, 960px) !important;
-    left: calc((100vw - 260px) / 2) !important;
+/* Hide meta badges and toggle when collapsed (only show tabs) */
+#command-panel:not(:hover):not(.expanded) .cmd-meta,
+#command-panel:not(:hover):not(.expanded) .cmd-toggle-btn {
+    display: none;
 }
-/* Maximized + hover or pinned: show content at larger size */
-#command-panel.maximized:hover .cmd-tab-panel.active,
-#command-panel.maximized.expanded .cmd-tab-panel.active {
-    max-height: 50vh !important;
-    min-height: 200px;
-    opacity: 1 !important;
-    padding-top: 8px !important;
-    padding-bottom: 10px !important;
-    overflow-y: auto !important;
-}
-#command-panel.maximized .cmd-radio-messages {
+/* Radio messages container sizing */
+#command-panel .cmd-radio-messages {
     max-height: calc(50vh - 100px);
     min-height: 140px;
 }
-/* Let textarea and panels fill space when maximized */
-#command-panel.maximized .cmd-tab-panel.active {
-    display: flex;
-    flex-direction: column;
-}
-#command-panel.maximized .cmd-input-row {
+/* Textarea and input row fill space */
+#command-panel .cmd-input-row {
     flex: 1;
     align-items: stretch;
 }
-#command-panel.maximized .cmd-input-row .cmd-textarea {
+#command-panel .cmd-input-row .cmd-textarea {
     max-height: 35vh;
     min-height: 120px;
     flex: 1;
 }
-#command-panel.maximized .cmd-input-row .cmd-send-btn {
+#command-panel .cmd-input-row .cmd-send-btn {
     align-self: flex-start;
     margin-top: 9px;
 }
@@ -4024,151 +4014,11 @@ button:hover { background: #1a5276; }
     padding: 8px;
 }
 
-/* ═════════════════════════════════════════════════
-   KDialogs – Themed custom modal dialogs
-   ═════════════════════════════════════════════════ */
-.kdialog-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.60);
-    z-index: 20000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
+/* ── Smoke polygon animation ──────────────────────── */
+.smoke-polygon {
+    animation: smoke-pulse 3s ease-in-out infinite;
 }
-.kdialog {
-    background: #16213e;
-    border: 1px solid #0f3460;
-    border-radius: 8px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-    min-width: 300px;
-    max-width: 460px;
-    width: 90%;
-    overflow: hidden;
-    animation: kdialogIn 0.15s ease-out;
-}
-.kdialog.kdialog-dangerous {
-    border-color: #5a2020;
-}
-@keyframes kdialogIn {
-    from { transform: translateY(-16px) scale(0.97); opacity: 0; }
-    to   { transform: translateY(0) scale(1); opacity: 1; }
-}
-.kdialog-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    background: #0f1b38;
-    border-bottom: 1px solid #0f3460;
-    font-size: 13px;
-    font-weight: 700;
-    color: #ff9800;
-}
-.kdialog-dangerous .kdialog-header {
-    color: #ef5350;
-    background: #1a0a0a;
-    border-bottom-color: #5a2020;
-}
-.kdialog-body {
-    padding: 16px 14px;
-}
-.kdialog-message {
-    font-size: 12px;
-    color: #ccc;
-    line-height: 1.6;
-    margin-bottom: 8px;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-.kdialog-input {
-    width: 100%;
-    padding: 7px 10px;
-    font-size: 12px;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    outline: none;
-    margin-top: 6px;
-    box-sizing: border-box;
-}
-.kdialog-input:focus {
-    border-color: #4fc3f7;
-    box-shadow: 0 0 0 2px rgba(79, 195, 247, 0.15);
-}
-.kdialog-select {
-    width: 100%;
-    padding: 4px;
-    font-size: 12px;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    outline: none;
-    margin-top: 6px;
-    box-sizing: border-box;
-    cursor: pointer;
-}
-.kdialog-select:focus {
-    border-color: #4fc3f7;
-}
-.kdialog-select option {
-    padding: 4px 6px;
-    background: #1a1a2e;
-    color: #e0e0e0;
-}
-.kdialog-select option:checked {
-    background: #0f3460;
-    color: #4fc3f7;
-}
-.kdialog-footer {
-    display: flex;
-    gap: 6px;
-    padding: 10px 14px;
-    background: #0d1529;
-    border-top: 1px solid #0f3460;
-}
-.kdialog-btn {
-    flex: 1;
-    padding: 7px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-    text-align: center;
-}
-.kdialog-btn-cancel {
-    background: #1a1a2e;
-    color: #aaa;
-}
-.kdialog-btn-cancel:hover {
-    background: #252545;
-    color: #ccc;
-    border-color: #4a4a6a;
-}
-.kdialog-btn-ok,
-.kdialog-btn-confirm {
-    background: #0d3460;
-    color: #4fc3f7;
-    border-color: #1565c0;
-}
-.kdialog-btn-ok:hover,
-.kdialog-btn-confirm:hover {
-    background: #1565c0;
-    color: #fff;
-}
-.kdialog-btn-danger {
-    background: #5a1a1a;
-    color: #ef9a9a;
-    border-color: #8b2020;
-}
-.kdialog-btn-danger:hover {
-    background: #8b2020;
-    color: #fff;
-    border-color: #e53935;
+@keyframes smoke-pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 0.4; }
 }

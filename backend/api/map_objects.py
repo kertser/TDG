@@ -518,3 +518,104 @@ async def delete_all_map_objects(
     await db.commit()
     return {"status": "all_deleted", "count": len(objects)}
 
+
+class FireSmokeRequest(BaseModel):
+    target_lat: float
+    target_lon: float
+    radius_m: float = 100.0
+    duration_ticks: int = 3  # default 3 minutes
+
+
+@router.post("/{session_id}/units/{unit_id}/fire-smoke")
+async def fire_smoke(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    body: FireSmokeRequest,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """
+    Fire smoke rounds from an artillery/mortar unit.
+    Creates a transient smoke MapObject at the target location.
+    """
+    ARTILLERY_TYPES = {
+        "artillery_battery", "artillery_platoon",
+        "mortar_section", "mortar_team",
+    }
+
+    result = await db.execute(
+        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
+    )
+    unit = result.scalar_one_or_none()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    if unit.is_destroyed:
+        raise HTTPException(status_code=400, detail="Unit is destroyed")
+    if unit.unit_type not in ARTILLERY_TYPES:
+        raise HTTPException(status_code=400, detail="Only artillery/mortar units can fire smoke")
+
+    # Check ammo
+    if (unit.ammo or 0) < 0.05:
+        raise HTTPException(status_code=400, detail="Insufficient ammunition")
+
+    # Consume ammo for smoke round
+    unit.ammo = max(0.0, (unit.ammo or 1.0) - 0.02)
+
+    # Create circular smoke polygon
+    from shapely.geometry import Point as ShapelyPoint
+    from shapely.ops import transform as shapely_transform
+    import math
+
+    radius_deg = body.radius_m / 111320.0
+    center = ShapelyPoint(body.target_lon, body.target_lat)
+    smoke_poly = center.buffer(radius_deg, resolution=16)
+
+    smoke_obj = MapObject(
+        session_id=session_id,
+        side=ObjectSide.neutral,
+        object_type="smoke",
+        object_category=ObjectCategory.obstacle,
+        geometry=from_shape(smoke_poly, srid=4326),
+        properties={
+            "ticks_remaining": body.duration_ticks,
+            "radius_m": body.radius_m,
+            "fired_by": str(unit_id),
+        },
+        label=f"Smoke ({unit.name})",
+        is_active=True,
+        discovered_by_blue=True,
+        discovered_by_red=True,
+    )
+    db.add(smoke_obj)
+    await db.flush()
+    await db.refresh(smoke_obj)
+
+    # Serialize and broadcast
+    geom_geojson = None
+    try:
+        geom_geojson = shapely_mapping(to_shape(smoke_obj.geometry))
+    except Exception:
+        pass
+
+    obj_data = {
+        "id": str(smoke_obj.id),
+        "session_id": str(session_id),
+        "object_type": "smoke",
+        "object_category": "obstacle",
+        "side": "neutral",
+        "geometry": geom_geojson,
+        "label": smoke_obj.label,
+        "properties": smoke_obj.properties,
+        "is_active": True,
+        "discovered_by_blue": True,
+        "discovered_by_red": True,
+    }
+
+    await ws_manager.broadcast(session_id, {
+        "type": "map_object_created",
+        "data": obj_data,
+    })
+
+    await db.commit()
+    return obj_data
+

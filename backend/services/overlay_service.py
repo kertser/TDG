@@ -70,11 +70,10 @@ async def create_overlay(
 
     serialized = _serialize_overlay(overlay)
 
-    # Broadcast to session (only to same side + admin/observer)
+    # Broadcast to ALL session participants (overlays are shared across sides)
     await ws_manager.broadcast(
         session_id,
         {"type": "overlay_created", "data": serialized},
-        only_side=side,
     )
 
     return serialized
@@ -117,10 +116,10 @@ async def update_overlay(
 
     serialized = _serialize_overlay(overlay)
 
+    # Broadcast to ALL session participants
     await ws_manager.broadcast(
         session_id,
         {"type": "overlay_updated", "data": serialized},
-        only_side=overlay.side.value,
     )
 
     return serialized
@@ -142,15 +141,13 @@ async def delete_overlay(
     if overlay is None:
         return False
 
-    overlay_side = overlay.side.value
-
     await db.delete(overlay)
     await db.flush()
 
+    # Broadcast to ALL session participants
     await ws_manager.broadcast(
         session_id,
         {"type": "overlay_deleted", "data": {"overlay_id": str(overlay_id)}},
-        only_side=overlay_side,
     )
 
     return True
@@ -161,10 +158,9 @@ async def list_overlays(
     side: str | None = None,
     db: AsyncSession = None,
 ) -> list[dict]:
-    """List all overlays for a session, optionally filtered by side."""
+    """List all overlays for a session — all participants see all overlays."""
     query = select(PlanningOverlay).where(PlanningOverlay.session_id == session_id)
-    if side and side not in ("admin", "observer"):
-        query = query.where(PlanningOverlay.side.in_([side, "observer"]))
+    # No side filtering — overlays are shared across all participants
 
     result = await db.execute(query)
     return [_serialize_overlay(o) for o in result.scalars().all()]

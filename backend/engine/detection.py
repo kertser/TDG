@@ -64,6 +64,26 @@ def _posture_modifier(target_task: dict | None) -> float:
     return 0.6  # stationary
 
 
+def _is_in_smoke(lat: float, lon: float, map_objects: list | None) -> bool:
+    """Check if a point is inside an active smoke area."""
+    if not map_objects:
+        return False
+    for obj in map_objects:
+        if obj.object_type != "smoke" or not obj.is_active:
+            continue
+        if obj.geometry is None:
+            continue
+        try:
+            from shapely.geometry import Point as ShapelyPoint
+            shape = to_shape(obj.geometry)
+            pt = ShapelyPoint(lon, lat)
+            if shape.contains(pt) or shape.distance(pt) * 111320 < 10:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def process_detection(
     blue_units: list,
     red_units: list,
@@ -72,6 +92,8 @@ def process_detection(
     weather_visibility_mod: float = 1.0,
     existing_contacts: list | None = None,
     los_service=None,
+    map_objects: list | None = None,
+    night_mod: float = 1.0,
 ) -> list[dict]:
     """
     Run detection checks between opposing sides.
@@ -103,15 +125,28 @@ def process_detection(
             base_range = observer.detection_range_m or 1500.0
             terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
 
+            # Observer capabilities (used for NVG and recon checks)
+            capabilities = observer.capabilities or {}
+
             # Height advantage detection bonus
             height_bonus = 1.0
-            effective_range = base_range * terrain_vis * weather_visibility_mod
+
+            # Night vision: units with NVG get reduced night penalty
+            obs_night_mod = 1.0
+            if night_mod < 1.0:
+                has_nvg = capabilities.get("has_nvg", False) or capabilities.get("night_vision", False)
+                if has_nvg:
+                    # NVG reduces night penalty by ~50%
+                    obs_night_mod = 1.0 - (1.0 - night_mod) * 0.5
+                else:
+                    obs_night_mod = night_mod
+
+            effective_range = base_range * terrain_vis * weather_visibility_mod * obs_night_mod
 
             # Observer eye height depends on unit type (OP = 8m, tanks = 3m, infantry = 2m)
             observer_eye_h = UNIT_EYE_HEIGHTS.get(observer.unit_type, DEFAULT_EYE_HEIGHT)
 
             # Recon bonus
-            capabilities = observer.capabilities or {}
             is_recon = capabilities.get("is_recon", False)
             base_prob = 0.8 if is_recon else 0.6
             recon_bonus = 1.3 if is_recon else 1.0
@@ -152,7 +187,14 @@ def process_detection(
                 target_terrain_vis = terrain.visibility_factor(tgt_lon, tgt_lat)
                 target_concealment = 0.5 + 0.5 * target_terrain_vis
 
-                prob = base_prob * distance_factor * posture_mod * recon_bonus * target_concealment
+                # Smoke modifier: target or observer in smoke → near-zero detection
+                smoke_mod = 1.0
+                if _is_in_smoke(tgt_lat, tgt_lon, map_objects):
+                    smoke_mod *= 0.1
+                if _is_in_smoke(obs_lat, obs_lon, map_objects):
+                    smoke_mod *= 0.15
+
+                prob = base_prob * distance_factor * posture_mod * recon_bonus * target_concealment * smoke_mod
                 prob = min(prob, 0.95)  # cap at 95%
 
                 roll = _deterministic_roll(tick, observer.id, target.id)

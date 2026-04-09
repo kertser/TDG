@@ -1068,6 +1068,87 @@ async def get_pending_orders_count(
     return {"count": count}
 
 
+@router.post("/{session_id}/units/{unit_id}/disband")
+async def disband_unit(
+    session_id: uuid.UUID,
+    unit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    participant=Depends(get_session_participant),
+):
+    """
+    Disband (permanently remove) a unit. Re-parents children to the
+    disbanded unit's parent. Generates a unit_disbanded event.
+    """
+    side = participant.side.value
+    role = getattr(participant, 'role', None)
+    if side == 'observer' or role == 'observer':
+        raise HTTPException(status_code=403, detail="Observers cannot disband units")
+
+    result = await db.execute(
+        select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
+    )
+    unit = result.scalar_one_or_none()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    if unit.is_destroyed:
+        raise HTTPException(status_code=400, detail="Unit already destroyed")
+
+    unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+    if side not in ('admin',) and unit_side != side:
+        raise HTTPException(status_code=403, detail="Cannot disband units from other side")
+
+    # Re-parent children to this unit's parent
+    children_result = await db.execute(
+        select(Unit).where(
+            Unit.parent_unit_id == unit_id,
+            Unit.session_id == session_id,
+            Unit.is_destroyed == False,
+        )
+    )
+    for child in children_result.scalars().all():
+        child.parent_unit_id = unit.parent_unit_id
+
+    # Mark unit as destroyed (disbanded)
+    unit.is_destroyed = True
+    unit.current_task = None
+    unit.strength = 0.0
+
+    # Generate event
+    from backend.models.event import Event
+    from datetime import datetime, timezone
+    from backend.engine.events import create_event
+
+    session_result = await db.execute(
+        select(Session).where(Session.id == session_id)
+    )
+    session = session_result.scalar_one_or_none()
+    tick = session.tick if session else 0
+    game_time = session.current_time if session else datetime.now(timezone.utc)
+
+    from backend.models.session import Session
+    evt = create_event(session_id, tick, game_time, {
+        "event_type": "unit_disbanded",
+        "actor_unit_id": unit_id,
+        "text_summary": f"{unit.name} has been disbanded by command",
+        "payload": {"unit_id": str(unit_id), "unit_name": unit.name},
+    }, "all")
+    db.add(evt)
+
+    await db.flush()
+
+    # Broadcast via WebSocket
+    from backend.services.ws_manager import ws_manager
+    await ws_manager.broadcast(session_id, {
+        "type": "event_new",
+        "data": {
+            "event_type": "unit_disbanded",
+            "text_summary": f"{unit.name} has been disbanded by command",
+        },
+    })
+
+    return {"ok": True, "unit_id": str(unit_id), "unit_name": unit.name}
+
+
 @router.get("/{session_id}/contacts")
 async def get_contacts(
     session_id: uuid.UUID,

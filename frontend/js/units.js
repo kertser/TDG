@@ -981,6 +981,15 @@ const KUnits = (() => {
         if (_unitCtxMenuEl) _unitCtxMenuEl.style.display = 'none';
     }
 
+    /** Render a compact stat bar (STR/MOR/AMM/SUP) for the context menu info card. */
+    function _buildStatBar(label, pct, color) {
+        return `<div class="unit-stat-row">
+            <span class="unit-stat-label">${label}</span>
+            <div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${pct}%;background:${color};"></div></div>
+            <span class="unit-stat-value" style="color:${color};">${pct}%</span>
+        </div>`;
+    }
+
     function _showUnitContextMenu(u, e) {
         const menu = _createUnitContextMenu();
         const canSel = _canSelect(u);
@@ -1142,6 +1151,14 @@ const KUnits = (() => {
         if (_isAdminMode) {
             html += `<div class="ctx-item ctx-item-danger" data-action="delete">🗑 Delete Unit</div>`;
         }
+        if (canSel) {
+            html += `<div class="ctx-item ctx-item-danger" data-action="disband">⛔ Disband Unit</div>`;
+        }
+        // Fire Smoke — artillery/mortar units with ammo
+        const _smokeTypes = ['artillery_battery', 'artillery_platoon', 'mortar_section', 'mortar_team'];
+        if (canSel && _smokeTypes.includes(u.unit_type) && (u.ammo == null || u.ammo > 0)) {
+            html += `<div class="ctx-item" data-action="fire_smoke">🌫 Fire Smoke</div>`;
+        }
         if (canAsgn) {
             const assignLabel = isAssignedToMe ? '✕ Unassign me' : '+ Assign to me';
             html += `<div class="ctx-item" data-action="assign">${assignLabel}</div>`;
@@ -1180,18 +1197,15 @@ const KUnits = (() => {
                     _showMergePicker(u, e);
                 } else if (action === 'delete') {
                     _deleteUnit(u);
+                } else if (action === 'disband') {
+                    _disbandUnit(u);
+                } else if (action === 'fire_smoke') {
+                    _fireSmoke(u);
                 }
             });
         });
     }
 
-    function _buildStatBar(label, pct, color) {
-        return `<div class="unit-stat-row">
-            <span class="unit-stat-label">${label}</span>
-            <div class="unit-stat-bar"><div class="unit-stat-fill" style="width:${pct}%;background:${color};"></div></div>
-            <span class="unit-stat-value" style="color:${color};">${pct}%</span>
-        </div>`;
-    }
 
     async function _renameUnit(u) {
         const newName = await KDialogs.prompt('Rename unit:', u.name);
@@ -1423,36 +1437,55 @@ const KUnits = (() => {
     }
 
     // ══════════════════════════════════════════════════
-    // ── Split Unit ───────────────────────────────────
-    // ══════════════════════════════════════════════════
+    // ── Disband Unit ─────────────────────────────────
 
-    async function _splitUnit(u) {
-        const pctStr = await KDialogs.prompt(`Split "${u.name}" — what % goes to new unit? (10–90):`, '50');
-        if (!pctStr) return;
-        const pct = parseInt(pctStr);
-        if (isNaN(pct) || pct < 10 || pct > 90) { await KDialogs.alert('Enter a number between 10 and 90'); return; }
-        const ratio = pct / 100;
-
+    async function _disbandUnit(u) {
+        if (!await KDialogs.confirm(`Disband unit "${u.name}"? This unit will be permanently removed.`, {dangerous: true})) return;
         const token = KSessionUI.getToken();
         const sessionId = KSessionUI.getSessionId();
         if (!token || !sessionId) return;
 
         try {
-            const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/split`, {
+            const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/disband`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ ratio }),
+                headers: { 'Authorization': `Bearer ${token}` },
             });
             if (resp.ok) {
-                const data = await resp.json();
-                KGameLog.addEntry(`${u.name} split → ${data.original.name} + ${data.new_unit.name}`, 'info');
-                await load(sessionId, token);
+                selectedUnitIds.delete(u.id);
+                KGameLog.addEntry(`${u.name} disbanded`, 'info');
+                if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
+                    await KAdmin.refreshMapUnits();
+                } else {
+                    await load(sessionId, token);
+                }
                 try { KAdmin.loadPublicCoC(); } catch(e) {}
             } else {
                 const d = await resp.json().catch(() => ({}));
-                await KDialogs.alert(d.detail || 'Split failed');
+                await KDialogs.alert(d.detail || 'Disband failed');
             }
         } catch (err) { await KDialogs.alert(err.message); }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Fire Smoke ───────────────────────────────────
+
+    async function _fireSmoke(u) {
+        // Select the unit and pre-fill the orders panel with a smoke command.
+        // The order will be processed through the normal pipeline on the next tick.
+        _selectUnit(u.id, false);
+        const textarea = document.getElementById('order-text');
+        if (textarea) {
+            textarea.value = `${u.name}: fire smoke at `;
+            textarea.focus();
+            // Place cursor at the end so user can type target coords/snail
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+        // Expand the command panel so the user sees the order
+        const panel = document.getElementById('command-panel');
+        if (panel) panel.classList.add('expanded');
+        // Switch to orders tab
+        const ordersTab = document.querySelector('[data-cmd-tab="cmd-orders"]');
+        if (ordersTab) ordersTab.click();
     }
 
     // ══════════════════════════════════════════════════

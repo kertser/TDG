@@ -30,6 +30,13 @@
 20. [Radio Chatter & Reports](#20-radio-chatter--reports)
 21. [Red AI Doctrine & Behavior](#21-red-ai-doctrine--behavior)
 22. [Unit Type Reference Tables](#22-unit-type-reference-tables)
+23. [Defensive Posture & Dig-In](#23-defensive-posture--dig-in)
+24. [Rest & Recovery](#24-rest--recovery)
+25. [Smoke Screens](#25-smoke-screens)
+26. [Weather & Environment Effects](#26-weather--environment-effects)
+27. [Night-Time Operations](#27-night-time-operations)
+28. [Phased & Conditional Orders](#28-phased--conditional-orders)
+29. [Unit Disband](#29-unit-disband)
 
 ---
 
@@ -42,18 +49,22 @@ Each **tick** represents a configurable time step (default: **60 seconds** of ga
 | 0.5 | Red AI | Run Red AI agents (create orders for AI-controlled Red units) |
 | 1 | Orders | Process pending/validated orders → assign tasks to units |
 | 1b | Target Resolution | Units with attack/engage tasks but no target → find nearest known enemy contact |
-| 2 | Movement | Execute movement for all units with movement tasks |
+| 1c | Smoke Decay | Decrement active smoke screen timers; dissipate expired smoke |
+| 1d | Weather/Night | Compute weather and night visibility/movement modifiers from scenario environment |
+| 2 | Movement | Execute movement for all units with movement tasks (applies weather movement mod) |
 | 2a | Order Completion | Mark orders as completed when units arrive at destinations |
+| 2a2 | Conditional Orders | Check unit order queues for triggered conditions (task_completed, location_reached) |
 | 2b | Engineering | Process engineering tasks (breach, mine-lay, construct, bridge deploy) |
-| 3 | Detection | Execute detection checks between opposing sides (uses LOS) |
+| 3 | Detection | Execute detection checks between opposing sides (uses LOS, weather, night modifiers) |
 | 3b | Object Discovery | Check if units have LOS to undiscovered map objects |
 | 4 | Contact Decay | Mark stale contacts, expire old contacts |
 | 4b | Artillery Support | Auto-assign idle artillery to support attacking units in CoC |
-| 4c | Return Fire | Units under attack with no combat task auto-engage nearest attacker |
+| 4c | Defense | Process dig-in progression for units in defensive posture |
+| 4d | Return Fire | Units under attack with no combat task auto-engage nearest attacker |
 | 5 | Combat | Resolve combat — damage, suppression, destruction |
 | 5b | Contact Cleanup | Remove contacts referencing destroyed units |
 | 6 | Suppression Recovery | Recover suppression for units NOT under fire |
-| 7 | Morale | Update morale — suppression erosion, casualty effect, recovery, break check |
+| 7 | Morale | Update morale — suppression erosion, casualty effect, recovery, rest, break check |
 | 8 | Communications | Update comms status — degradation from suppression, recovery |
 | 9 | Ammo Consumption | Consume ammo for units that fired |
 | 9b | Structure Effects | Apply resupply, comms bonuses from structures |
@@ -71,11 +82,16 @@ Each **tick** represents a configurable time step (default: **60 seconds** of ga
 effective_speed = base_speed
                 × terrain_factor
                 × obstacle_factor
+                × slope_factor
+                × weather_movement_mod
                 × (1 - suppression × 0.7)
                 × morale_factor
 
 distance_this_tick = effective_speed × tick_duration_seconds
 ```
+
+- `slope_factor`: `max(0.2, 1.0 - slope_deg / 45)` — steep slopes dramatically slow movement.
+- `weather_movement_mod`: 1.0 clear, 0.8 rain, 0.6 heavy rain/storm, 0.95 fog, 0.7 snow. Stacks with precipitation.
 
 ### 2.2 Base Speed
 
@@ -1123,6 +1139,215 @@ Red AI operates with **limited information**:
 | `SITREP_INTERVAL` | 5 ticks | `report_generator.py` |
 | `INTSUM_INTERVAL` | 10 ticks | `report_generator.py` |
 | `DEFAULT_TICK_DURATION` | 60 seconds | `tick.py` |
+| `TICKS_PER_DIG_IN_LEVEL` | 3 ticks | `defense.py` |
+| `MAX_DIG_IN_LEVEL` | 5 | `defense.py` |
+| `REST_RECOVERY_SLOW` | +0.003 strength/tick | `morale.py` |
+| `REST_RECOVERY_FAST` | +0.008 strength/tick (after 5 ticks) | `morale.py` |
+| `SMOKE_DURATION` | 3 ticks | `map_objects.py` |
+| `SMOKE_AMMO_COST` | 0.05 | `map_objects.py` |
+| `SMOKE_VISIBILITY_FACTOR` | 0.1 | `map_objects.py` |
+| `DANGER_CLOSE_RADIUS` | 50m | `combat.py` |
+| `NIGHT_MOD_FULL` | 0.3 (21:00-05:00) | `tick.py` |
+| `NIGHT_MOD_TWILIGHT` | 0.6 (dawn/dusk) | `tick.py` |
+| `NVG_PENALTY_REDUCTION` | 50% | `detection.py` |
+
+---
+
+## 23. Defensive Posture & Dig-In
+
+Units ordered to **defend** gradually improve their defensive position over time.
+
+### 23.1 Dig-In Progression
+
+```
+Every 3 ticks of continuous defense → +1 dig-in level (max level 5)
+Maximum dig-in achieved after 15 ticks of uninterrupted defense
+```
+
+| Dig-In Level | Ticks Required | Protection Multiplier |
+|---|---|---|
+| 0 | 0 | terrain_protection × 1.0 |
+| 1 | 3 | terrain_protection × 1.2 |
+| 2 | 6 | terrain_protection × 1.4 |
+| 3 | 9 | terrain_protection × 1.6 |
+| 4 | 12 | terrain_protection × 1.8 |
+| 5 | 15 | terrain_protection × 2.0 (capped at 2.5) |
+
+### 23.2 Detection Penalty
+
+Dug-in units have a posture modifier of **0.3** (vs 0.6 stationary, 1.0 moving), making them very hard to detect.
+
+### 23.3 Interruption
+
+If a unit's task changes from "defend" to anything else, dig-in progress is **reset to zero**. Defending units should stay put.
+
+**Source:** `backend/engine/defense.py`
+
+---
+
+## 24. Rest & Recovery
+
+Units not in combat slowly recover strength and morale, representing reorganization and rest.
+
+### 24.1 Conditions for Rest
+
+- Unit has **no** combat task (not attack/engage/fire)
+- Unit is **not** under fire this tick
+- Strength is below 1.0
+
+### 24.2 Recovery Rates
+
+```
+First 5 rest ticks:   +0.003 strength per tick (slow reorganization)
+After 5 rest ticks:   +0.008 strength per tick (extended rest bonus)
+Morale recovery:      standard +0.01/tick when safe, boosted +0.02 after 5 ticks
+```
+
+Rest ticks are tracked in `unit.capabilities.rest_ticks` and reset to 0 whenever the unit enters combat.
+
+**Source:** `backend/engine/morale.py`
+
+---
+
+## 25. Smoke Screens
+
+Artillery and mortar units can deploy smoke screens to conceal movement and block detection.
+
+### 25.1 Smoke Deployment
+
+- **Eligible units:** `artillery_battery`, `artillery_platoon`, `mortar_section`, `mortar_team`
+- **API:** `POST /api/sessions/{id}/units/{uid}/fire-smoke` with `{lat, lon, radius_m}`
+- **Cost:** 0.05 ammo per smoke round
+- **Duration:** 3 ticks (~3 minutes of game time)
+- **Radius:** Configurable; default 100m
+
+### 25.2 Smoke Effects
+
+| Subsystem | Effect |
+|---|---|
+| **Detection** | Target in smoke: ×0.1 detection probability. Observer in smoke: ×0.15 probability. |
+| **Movement** | ×0.9 movement speed through smoke (minor slowdown) |
+| **Combat** | No direct modifier, but detection reduction means enemies are harder to engage |
+
+### 25.3 Smoke Decay
+
+Each tick, `ticks_remaining` decrements. When it reaches 0, the smoke MapObject is deactivated and a `smoke_dissipated` event is generated. The smoke polygon is removed from the map.
+
+**Source:** `backend/engine/map_objects.py` (definition), `backend/engine/detection.py` (`_is_in_smoke`), `backend/engine/tick.py` (decay), `backend/api/map_objects.py` (`fire_smoke` endpoint)
+
+---
+
+## 26. Weather & Environment Effects
+
+Scenario environment settings affect multiple game subsystems.
+
+### 26.1 Weather Types and Modifiers
+
+| Weather | Visibility Modifier | Movement Modifier |
+|---|---|---|
+| **Clear** | ×1.0 | ×1.0 |
+| **Rain** | ×0.7 | ×0.8 (mud) |
+| **Heavy Rain / Storm** | ×0.4 | ×0.6 (heavy mud) |
+| **Fog** | ×0.3 | ×0.95 |
+| **Snow** | ×0.6 | ×0.7 |
+
+### 26.2 Precipitation (stacks with weather)
+
+| Precipitation | Visibility Modifier | Movement Modifier |
+|---|---|---|
+| **None** | ×1.0 | ×1.0 |
+| **Rain** | ×0.85 | ×0.9 |
+| **Heavy Rain** | ×0.5 | ×0.7 |
+| **Snow** | ×0.7 | ×0.75 |
+
+### 26.3 Visibility Distance
+
+Base visibility is derived from `scenario.environment.visibility_km`:
+```
+weather_mod = min(1.0, visibility_km / 5.0) × weather_type_modifier × precipitation_modifier
+```
+
+**Source:** `backend/engine/tick.py` (weather calculation)
+
+---
+
+## 27. Night-Time Operations
+
+Game time determines day/night cycle, which significantly affects detection.
+
+### 27.1 Time-Based Visibility
+
+| Time Period | Night Modifier | Description |
+|---|---|---|
+| 07:00 – 19:00 | 1.0 | Full daylight |
+| 05:00 – 07:00 | 0.6 | Dawn — moderate visibility reduction |
+| 19:00 – 21:00 | 0.6 | Dusk — moderate visibility reduction |
+| 21:00 – 05:00 | 0.3 | Night — heavy visibility reduction |
+
+### 27.2 Night Vision
+
+Units with `capabilities.has_nvg` or `capabilities.night_vision` benefit from reduced night penalty:
+```
+nvg_night_mod = 1.0 - (1.0 - night_mod) × 0.5
+```
+Effectively, NVG halves the night penalty (e.g., 0.3 → 0.65 instead of 0.3).
+
+### 27.3 Combined Modifier
+
+Detection uses the product of weather and night modifiers:
+```
+combined_visibility_mod = weather_mod × night_mod
+effective_detection_range = base_range × terrain_visibility × combined_visibility_mod
+```
+
+**Source:** `backend/engine/tick.py` (night calculation), `backend/engine/detection.py` (NVG handling)
+
+---
+
+## 28. Phased & Conditional Orders
+
+Orders can include multiple phases that activate sequentially based on conditions.
+
+### 28.1 Order Queue
+
+When an order contains multiple phases, the first phase becomes the unit's immediate task. Remaining phases are stored in `unit.order_queue` as a list of entries, each with:
+- `task`: the action to perform (move, attack, defend, etc.)
+- `condition`: when to activate this phase
+
+### 28.2 Supported Conditions
+
+| Condition Type | Trigger | Example |
+|---|---|---|
+| `task_completed` | Unit has no current task (previous task finished) | "Move to B4-3, then defend" |
+| `location_reached` | Unit is at the specified snail path | "When at C6-6-8, advance to D4" |
+
+### 28.3 Processing
+
+Conditional orders are checked once per tick (step 2a2). When a condition is met:
+1. The task is assigned to the unit
+2. The entry is removed from the queue
+3. A `conditional_order_activated` event is generated
+
+**Source:** `backend/engine/tick.py` (`_process_conditional_orders`)
+
+---
+
+## 29. Unit Disband
+
+Commanders can disband units that have sustained unsustainable losses.
+
+### 29.1 Mechanics
+
+- **API:** `POST /api/sessions/{id}/units/{uid}/disband`
+- **Effect:** Unit is permanently destroyed (sets `is_destroyed = True`, clears task)
+- **Authority:** Commander must have authority over the unit
+- **Events:** Generates `unit_disbanded` event
+
+### 29.2 UI
+
+Right-click a unit → **⛔ Disband Unit** (only visible for non-admin players who can select the unit).
+
+**Source:** `backend/api/units.py` (`disband_unit`)
 
 ---
 
@@ -1133,8 +1358,10 @@ Red AI operates with **limited information**:
 | `movement` | all | Unit moved this tick |
 | `order_completed` | all | Unit arrived at destination |
 | `order_issued` | all | New task assigned to unit |
+| `conditional_order_activated` | all | Conditional/phased order triggered |
 | `combat` | all | Unit engaged another unit |
 | `unit_destroyed` | all | Unit destroyed |
+| `unit_disbanded` | all | Unit disbanded by commander |
 | `contact_new` | detecting side | New enemy contact detected |
 | `contact_lost` | detecting side | Lost contact with enemy |
 | `morale_break` | all | Unit morale broke, routing |
@@ -1146,8 +1373,12 @@ Red AI operates with **limited information**:
 | `water_blocked` | all | Unit halted at water without bridge |
 | `engineering` | all | Engineering task progress/completion |
 | `artillery_support` | all | Artillery unit firing in support |
+| `ceasefire_friendly` | all | Artillery ceased fire — friendly near target |
+| `dig_in_progress` | all | Unit improved defensive position |
+| `smoke_dissipated` | all | Smoke screen expired |
 | `object_discovered` | discovering side | Map object discovered via LOS |
 | `resupply` | all | Unit resupplied from structure |
+| `casualty_report` | unit side | Post-combat status report |
 | `red_ai_decision` | admin | Red AI issued orders |
 | `red_ai_error` | admin | Red AI decision failed |
 

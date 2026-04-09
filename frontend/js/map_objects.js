@@ -278,8 +278,39 @@ const KMapObjects = (() => {
 
         if (gtype === 'Point') return _createPointLayer(obj, color, inactive, opacity);
         if (gtype === 'LineString' || gtype === 'MultiLineString') return _createLineLayer(obj, color, inactive, opacity);
-        if (gtype === 'Polygon' || gtype === 'MultiPolygon') return _createPolygonLayer(obj, color, inactive, opacity);
+        if (gtype === 'Polygon' || gtype === 'MultiPolygon') {
+            if (obj.object_type === 'smoke') return _createSmokeLayer(obj, inactive);
+            return _createPolygonLayer(obj, color, inactive, opacity);
+        }
         return null;
+    }
+
+    // ── Smoke screen rendering ──────────────────────────────────
+
+    function _createSmokeLayer(obj, inactive) {
+        const rings = obj.geometry.type === 'Polygon'
+            ? obj.geometry.coordinates[0]
+            : obj.geometry.coordinates[0][0];
+        const latlngs = rings.map(c => [c[1], c[0]]);
+        const remaining = obj.properties ? obj.properties.ticks_remaining : 3;
+        const baseOpacity = inactive ? 0.15 : Math.min(0.45, 0.15 * remaining);
+
+        const poly = L.polygon(latlngs, {
+            color: '#888888',
+            weight: 1,
+            opacity: 0.4,
+            fillColor: '#aaaaaa',
+            fillOpacity: baseOpacity,
+            dashArray: '4,4',
+            className: 'smoke-polygon',
+        });
+
+        // Tooltip
+        const label = obj.label || 'Smoke Screen';
+        const ticksLeft = remaining || '?';
+        poly.bindTooltip(`🌫 ${label}<br>Dissipates in ~${ticksLeft} min`, {sticky: true, opacity: 0.9});
+
+        return poly;
     }
 
     // ── Point structures ──────────────────────────────────────

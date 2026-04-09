@@ -235,3 +235,84 @@ def generate_peer_support_requests(
     return messages
 
 
+# ── Templates for post-combat casualty reports ──
+
+CASUALTY_REPORT_RU = [
+    "Здесь {unit}. Цель уничтожена. Личный состав: {strength}%. Боеприпасы: {ammo}%. Продолжаем выполнение задачи.",
+    "{unit}, приём. Противник уничтожен в районе {grid}. Потери: {strength}% боеспособности. Готовы к дальнейшим действиям.",
+    "Здесь {unit}. Доклад: цель поражена. Состояние: {strength}%, БК: {ammo}%. Жду указаний.",
+]
+
+CASUALTY_REPORT_EN = [
+    "This is {unit}. Target destroyed. Strength at {strength}%. Ammo: {ammo}%. Continuing mission.",
+    "{unit}, over. Enemy eliminated at grid {grid}. Status: {strength}% combat effective. Standing by.",
+    "This is {unit}. Report: target neutralized. Strength {strength}%, ammo {ammo}%. Awaiting orders.",
+]
+
+
+def generate_casualty_radio_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+) -> list[dict]:
+    """
+    Generate radio messages from units involved in destroying an enemy.
+    Each involved unit reports their status and casualties.
+    """
+    messages = []
+    templates = CASUALTY_REPORT_RU if language == "ru" else CASUALTY_REPORT_EN
+
+    units_by_id = {str(u.id): u for u in all_units}
+
+    for evt in tick_events:
+        if evt.get("event_type") != "unit_destroyed":
+            continue
+        involved_ids = evt.get("payload", {}).get("involved_unit_ids", [])
+        if not involved_ids:
+            actor = evt.get("actor_unit_id")
+            if actor:
+                involved_ids = [str(actor)]
+
+        for uid_str in involved_ids:
+            unit = units_by_id.get(uid_str)
+            if not unit or unit.is_destroyed:
+                continue
+
+            comms = unit.comms_status
+            if hasattr(comms, 'value'):
+                comms = comms.value
+            if comms == "offline":
+                continue
+
+            grid = "текущем районе" if language == "ru" else "current area"
+            if grid_service:
+                try:
+                    from geoalchemy2.shape import to_shape
+                    pt = to_shape(unit.position)
+                    snail = grid_service.point_to_snail(pt.y, pt.x, depth=2)
+                    if snail:
+                        grid = snail
+                except Exception:
+                    pass
+
+            strength_pct = round((unit.strength or 1.0) * 100)
+            ammo_pct = round((unit.ammo or 1.0) * 100)
+            side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+            text = random.choice(templates).format(
+                unit=unit.name, grid=grid,
+                strength=strength_pct, ammo=ammo_pct,
+            )
+            messages.append({
+                "sender_name": unit.name,
+                "side": side,
+                "text": text,
+                "is_unit_response": True,
+                "response_type": "casualty_report",
+            })
+
+    return messages
+
+
