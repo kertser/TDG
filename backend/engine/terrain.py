@@ -321,12 +321,13 @@ class TerrainService:
 # ── Session-level terrain data cache ─────────────────────────
 # Avoids re-loading terrain/elevation from DB on every viewshed request.
 # Invalidated when terrain analysis runs (via clear_terrain_cache).
+# Long TTL: terrain data rarely changes during a game session.
 
 import threading
 _terrain_cache_lock = threading.Lock()
 _terrain_cache: dict[str, dict] = {}  # session_id_str → {terrain_cells, elevation_cells, ts}
 
-TERRAIN_CACHE_TTL = 300  # seconds
+TERRAIN_CACHE_TTL = 86400  # 24 hours — effectively session-lifetime; explicitly cleared on re-analysis
 
 
 def get_cached_terrain_data(session_id_str: str) -> dict | None:

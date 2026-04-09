@@ -39,7 +39,7 @@ class Report(Base):
     )
     channel: Mapped[str] = mapped_column(String(50), nullable=False, default="sitrep")
     from_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("units.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("units.id", ondelete="SET NULL"), nullable=True
     )
     to_side: Mapped[ReportSide] = mapped_column(
         SAEnum(ReportSide, name="report_side_enum", create_constraint=True),

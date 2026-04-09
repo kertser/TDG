@@ -225,6 +225,14 @@ const KAdmin = (() => {
         // Toggle visibility
         if (win.style.display === 'none' || !win.style.display) {
             win.style.display = 'flex';
+            // Try to restore admin unlock from sessionStorage
+            if (!_adminUnlocked) {
+                try {
+                    if (sessionStorage.getItem('admin_unlocked') === '1') {
+                        _applyAdminUnlock();
+                    }
+                } catch(e) {}
+            }
             // Apply locked class if not yet unlocked
             if (!_adminUnlocked) {
                 win.classList.add('admin-locked');
@@ -250,17 +258,10 @@ const KAdmin = (() => {
         const win = document.getElementById('admin-window');
         if (win) {
             win.style.display = 'none';
-            win.classList.add('admin-locked');
         }
 
-        // Lock admin panel when window is closed
-        _adminUnlocked = false;
-        const gate = document.getElementById('admin-lock-gate');
-        const content = document.getElementById('admin-content');
-        if (gate) gate.style.display = 'block';
-        if (content) content.style.display = 'none';
-        const pw = document.getElementById('admin-pw-input');
-        if (pw) pw.value = '';
+        // NOTE: we do NOT re-lock admin here — once unlocked, it stays unlocked
+        // for the entire browser session (until page reload).
 
         // Deactivate scenario builder if it's active
         try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
@@ -318,36 +319,43 @@ const KAdmin = (() => {
                 body: JSON.stringify({ password }),
             });
             if (resp.ok) {
-                _adminUnlocked = true;
-                const gate = document.getElementById('admin-lock-gate');
-                const content = document.getElementById('admin-content');
-                if (gate) gate.style.display = 'none';
-                if (content) content.style.display = 'block';
+                _applyAdminUnlock();
                 pw.value = '';
-                // Remove locked class — expand to full size
-                const win = document.getElementById('admin-window');
-                if (win) win.classList.remove('admin-locked');
-                // Show admin topbar button
-                const topbarBtn = document.getElementById('admin-topbar-btn');
-                if (topbarBtn) topbarBtn.style.display = '';
-                // Load admin sessions dropdown
-                _loadAdminSessions();
-                // Enable admin drag-and-drop on unit markers
-                try { KUnits.setAdminDrag(true); } catch(e) {}
-                // Re-render map objects so draggable markers become draggable
-                try { KMapObjects.render(); } catch(e) {}
-                // Mark god view for auto-enable once a session is available
-                if (!_godViewEnabled) {
-                    _pendingGodViewEnable = true;
-                    // Try immediately if session already exists
-                    _tryAutoEnableGodView();
-                }
+                // Remember admin unlock for this browser session
+                try { sessionStorage.setItem('admin_unlocked', '1'); } catch(e) {}
             } else {
                 const data = await resp.json().catch(() => ({}));
                 await KDialogs.alert(data.detail || 'Incorrect password');
             }
         } catch (err) {
             await KDialogs.alert('Error: ' + err.message);
+        }
+    }
+
+    /** Apply admin unlock state to UI (shared by password unlock and session restore). */
+    function _applyAdminUnlock() {
+        _adminUnlocked = true;
+        const gate = document.getElementById('admin-lock-gate');
+        const content = document.getElementById('admin-content');
+        if (gate) gate.style.display = 'none';
+        if (content) content.style.display = 'block';
+        // Remove locked class — expand to full size
+        const win = document.getElementById('admin-window');
+        if (win) win.classList.remove('admin-locked');
+        // Show admin topbar button
+        const topbarBtn = document.getElementById('admin-topbar-btn');
+        if (topbarBtn) topbarBtn.style.display = '';
+        // Load admin sessions dropdown
+        _loadAdminSessions();
+        // Enable admin drag-and-drop on unit markers
+        try { KUnits.setAdminDrag(true); } catch(e) {}
+        // Re-render map objects so draggable markers become draggable
+        try { KMapObjects.render(); } catch(e) {}
+        // Mark god view for auto-enable once a session is available
+        if (!_godViewEnabled) {
+            _pendingGodViewEnable = true;
+            // Try immediately if session already exists
+            _tryAutoEnableGodView();
         }
     }
 
@@ -1020,6 +1028,32 @@ const KAdmin = (() => {
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                     body: JSON.stringify({ current_time: isoTime }),
                 });
+
+                // Auto-set light_level on the scenario environment based on time of day
+                const dt = new Date(opDatetime);
+                const hour = dt.getHours();
+                let lightLevel = 'day';
+                if (hour >= 21 || hour < 5) lightLevel = 'night';
+                else if ((hour >= 5 && hour < 7) || (hour >= 19 && hour < 21)) lightLevel = 'twilight';
+
+                try {
+                    // Fetch current scenario environment and update light_level
+                    const scenResp = await fetch(`/api/scenarios/${_wizardScenarioId}`, {
+                        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+                    });
+                    if (scenResp.ok) {
+                        const scenData = await scenResp.json();
+                        const env = scenData.environment || {};
+                        env.light_level = lightLevel;
+                        await fetch(`/api/scenarios/${_wizardScenarioId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+                            body: JSON.stringify({ environment: env }),
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Auto-set light level failed:', e);
+                }
             }
 
             // 4. Add participants

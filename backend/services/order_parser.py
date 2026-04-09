@@ -245,11 +245,15 @@ class OrderParser:
         # Classification keywords
         command_kw_en = ["move", "advance", "attack", "defend", "hold", "observe", "withdraw",
                          "retreat", "support", "halt", "stop", "flank", "engage", "fire at",
-                         "fire on", "fire mission", "shoot", "disengage", "break contact"]
+                         "fire on", "fire mission", "shoot", "disengage", "break contact",
+                         "hit any", "hit enemy", "engage any", "open fire", "suppress",
+                         "capture", "seize", "take", "occupy"]
         command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
-                         "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение"]
+                         "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение",
+                         "поразить", "бей по", "удар по", "подавить", "подавляющ",
+                         "захвати", "захват", "овладе", "занять", "займ"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -275,12 +279,23 @@ class OrderParser:
             classification = MessageClassification.command
             # Determine order type — check fire BEFORE attack to avoid "fire" matching "engage"
             if any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
-                                                 "огонь по", "огонь на", "открыть огонь", "стреляй"]):
+                                                 "огонь по", "огонь на", "открыть огонь", "стреляй",
+                                                 "suppress", "подавить", "подавляющ",
+                                                 "suppressive", "подавляющий"]):
                 order_type = "fire"
+            elif any(kw in text_lower for kw in ["hit any", "hit enemy", "engage any",
+                                                   "fire on any", "open fire",
+                                                   "бей по", "поразить", "удар по",
+                                                   "огонь по любым", "огонь по всем"]):
+                # "Hit any enemy target in your sight" → engage (fire at targets of opportunity)
+                order_type = "attack"
+                engagement_rules = "fire_at_will"
             elif any(kw in text_lower for kw in ["move", "advance", "form ", "выдвигай", "двигай",
                                                      "движен", "марш", "обход", "перестрои", "построение"]):
                 order_type = "move"
-            elif any(kw in text_lower for kw in ["attack", "engage", "атак"]):
+            elif any(kw in text_lower for kw in ["attack", "engage", "атак",
+                                                    "capture", "seize", "take", "occupy",
+                                                    "захвати", "захват", "овладе", "занять", "займ"]):
                 order_type = "attack"
             elif any(kw in text_lower for kw in ["defend", "hold", "оборон", "удержи"]):
                 order_type = "defend"
@@ -488,7 +503,10 @@ class OrderParser:
         engagement_rules = None
         if any(kw in text_lower for kw in ["hold fire", "не стрелять", "огонь не открывать"]):
             engagement_rules = "hold_fire"
-        elif any(kw in text_lower for kw in ["fire at will", "огонь по готовности"]):
+        elif any(kw in text_lower for kw in ["fire at will", "огонь по готовности",
+                                               "in your sight", "в поле зрения", "в зоне видимости",
+                                               "any target", "any enemy", "по любым целям",
+                                               "по всем целям", "по обнаруженным"]):
             engagement_rules = "fire_at_will"
         elif any(kw in text_lower for kw in ["return fire only", "ответный огонь"]):
             engagement_rules = "return_fire_only"

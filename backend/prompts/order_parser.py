@@ -40,7 +40,10 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 
 **IMPORTANT**: "fire at [location]" or "огонь по [location]" is a **fire** order (indirect fire), NOT an attack order.
 Use order_type="fire" when the message says to fire/shoot at a specific grid location (artillery/mortar fire mission).
-Use order_type="attack" only when units are to physically advance and engage the enemy.
+Use order_type="attack" when units are to physically advance and engage the enemy. This also includes:
+  - "capture", "seize", "take", "occupy" (захватить, занять, овладеть) = attack + move to location
+  - "hit any enemy", "engage any target", "fire at will" = attack with engagement_rules="fire_at_will" (engage targets of opportunity, no specific location needed)
+  - "подавить любые цели", "огонь по любым целям в зоне видимости" = attack with fire_at_will
 Use order_type="disengage" when units are told to break contact, disengage, or exit combat ("разорвать контакт", "выйти из боя", "break contact", "disengage"). The unit stops fighting and seeks covered position.
 
 3. **Identify** the sender if the message includes self-identification ("Здесь первый взвод", "This is 2nd Platoon")

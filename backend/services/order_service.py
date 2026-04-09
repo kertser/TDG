@@ -376,6 +376,28 @@ class OrderService:
                     status_text = response_generator.generate_status_report(
                         unit_dict, parsed.language.value, situation=situation,
                     )
+                elif resp_type == ResponseType.wilco_fire and task:
+                    # For fire orders, include TARGET location in confirmation (not own position)
+                    lang = parsed.language.value
+                    target_snail = task.get("target_snail", "")
+                    target_loc = task.get("target_location", {})
+                    salvos = task.get("salvos_remaining", 3)
+                    if target_snail:
+                        if lang == "ru":
+                            status_text = f"Цель: {target_snail}. {salvos} залпов."
+                        else:
+                            status_text = f"Target: {target_snail}. {salvos} salvos."
+                    elif target_loc.get("lat") is not None:
+                        tgt_lat = round(target_loc["lat"], 4)
+                        tgt_lon = round(target_loc["lon"], 4)
+                        if lang == "ru":
+                            status_text = f"Цель: {tgt_lat}, {tgt_lon}. {salvos} залпов."
+                        else:
+                            status_text = f"Target: {tgt_lat}, {tgt_lon}. {salvos} salvos."
+                    else:
+                        status_text = response_generator.generate_brief_sitrep(
+                            unit_dict, parsed.language.value, situation=situation,
+                        )
                 else:
                     # Brief situation for acknowledgments (position + key info)
                     status_text = response_generator.generate_brief_sitrep(
@@ -577,6 +599,9 @@ class OrderService:
         # defend (defend current position) and observe (observe from current)
         if "target_location" not in task:
             if parsed.order_type.value in ("defend", "observe"):
+                return task
+            # Attack with fire_at_will (engage targets of opportunity) — no location needed
+            if parsed.order_type.value in ("attack", "engage") and task.get("engagement_rules") == "fire_at_will":
                 return task
             # For move/attack without location, intent might provide it
             if intent and hasattr(intent, "action"):

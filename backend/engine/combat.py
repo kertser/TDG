@@ -488,7 +488,8 @@ def _decrement_salvos(unit, events: list[dict]) -> None:
 
     salvos -= 1
     task["salvos_remaining"] = salvos
-    unit.current_task = task  # trigger ORM dirty
+    # Force SQLAlchemy JSONB change detection by assigning a new dict
+    unit.current_task = dict(task)
 
     if salvos <= 0:
         unit.current_task = None

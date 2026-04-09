@@ -83,30 +83,41 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     elevation_cells_dict = None
     grid_service = None
 
-    # Try to load terrain cells from DB
-    tc_result = await db.execute(
-        select(TerrainCell.snail_path, TerrainCell.terrain_type)
-        .where(TerrainCell.session_id == session_id)
-    )
-    tc_rows = tc_result.all()
-    if tc_rows:
-        terrain_cells_dict = {row[0]: row[1] for row in tc_rows}
-
-        # Load elevation cells
-        ec_result = await db.execute(
-            select(
-                ElevationCell.snail_path,
-                ElevationCell.elevation_m,
-                ElevationCell.slope_deg,
-                ElevationCell.aspect_deg,
-            ).where(ElevationCell.session_id == session_id)
+    # Try session-level cache first (avoids DB query every tick)
+    from backend.engine.terrain import get_cached_terrain_data, set_cached_terrain_data
+    _sid_str = str(session_id)
+    _cached = get_cached_terrain_data(_sid_str)
+    if _cached:
+        terrain_cells_dict = _cached.get("terrain_cells")
+        elevation_cells_dict = _cached.get("elevation_cells")
+    else:
+        # Load terrain cells from DB
+        tc_result = await db.execute(
+            select(TerrainCell.snail_path, TerrainCell.terrain_type)
+            .where(TerrainCell.session_id == session_id)
         )
-        ec_rows = ec_result.all()
-        if ec_rows:
-            elevation_cells_dict = {
-                row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
-                for row in ec_rows
-            }
+        tc_rows = tc_result.all()
+        if tc_rows:
+            terrain_cells_dict = {row[0]: row[1] for row in tc_rows}
+
+            # Load elevation cells
+            ec_result = await db.execute(
+                select(
+                    ElevationCell.snail_path,
+                    ElevationCell.elevation_m,
+                    ElevationCell.slope_deg,
+                    ElevationCell.aspect_deg,
+                ).where(ElevationCell.session_id == session_id)
+            )
+            ec_rows = ec_result.all()
+            if ec_rows:
+                elevation_cells_dict = {
+                    row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                    for row in ec_rows
+                }
+
+        # Cache for future ticks
+        set_cached_terrain_data(_sid_str, terrain_cells_dict, elevation_cells_dict)
 
         # Load grid service for point→snail resolution
         gd_result = await db.execute(
@@ -518,6 +529,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         generate_idle_radio_messages,
         generate_peer_support_requests,
         generate_casualty_radio_messages,
+        generate_contact_radio_messages,
     )
     from backend.models.chat_message import ChatMessage
 
@@ -533,8 +545,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         all_units, all_events, tick,
         grid_service=grid_service, language=_lang,
     )
+    contact_msgs = generate_contact_radio_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang,
+    )
 
-    radio_messages = idle_msgs + peer_msgs + casualty_msgs
+    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs
     radio_broadcast = []
     for msg in radio_messages:
         chat = ChatMessage(
@@ -786,11 +802,16 @@ def _order_to_task(order: Order) -> dict | None:
         task_type = intent.get("action", intent.get("type"))
         target_loc = intent.get("target_location", intent.get("destination"))
         if task_type and target_loc:
-            return {
+            result_task = {
                 "type": task_type,
                 "target_location": target_loc,
                 "order_id": str(order.id),
             }
+            # Add salvos for fire tasks
+            if task_type == "fire":
+                from backend.engine.combat import DEFAULT_FIRE_SALVOS
+                result_task["salvos_remaining"] = intent.get("salvos", DEFAULT_FIRE_SALVOS)
+            return result_task
 
     # Try parsed order
     if order.parsed_order:
@@ -939,9 +960,11 @@ async def _upsert_contacts(
 
             events.append({
                 "event_type": "contact_new",
+                "actor_unit_id": cd.get("observing_unit_id"),
                 "text_summary": f"New contact: {cd.get('estimated_type', 'unknown')} detected",
                 "payload": {
                     "observing_side": cd["observing_side"],
+                    "observing_unit_id": str(cd["observing_unit_id"]) if cd.get("observing_unit_id") else None,
                     "estimated_type": cd.get("estimated_type"),
                     "lat": cd["lat"],
                     "lon": cd["lon"],

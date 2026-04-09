@@ -45,10 +45,10 @@ class Event(Base):
         default=EventVisibility.all,
     )
     actor_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("units.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("units.id", ondelete="SET NULL"), nullable=True
     )
     target_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("units.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("units.id", ondelete="SET NULL"), nullable=True
     )
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     text_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

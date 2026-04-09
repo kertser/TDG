@@ -316,3 +316,132 @@ def generate_casualty_radio_messages(
     return messages
 
 
+# ── Templates for contact detection radio messages ──
+
+CONTACT_REPORT_RU = [
+    "Здесь {unit}! Наблюдаем противника, район {grid}. {type_desc}, дистанция ~{dist}м. Приём.",
+    "{unit}, приём! Обнаружен противник: {type_desc}, квадрат {grid}, ~{dist}м. Продолжаю наблюдение.",
+    "Здесь {unit}. Контакт! {type_desc} замечен в районе {grid}, ~{dist}м.",
+]
+
+CONTACT_REPORT_EN = [
+    "This is {unit}! Contact — enemy spotted at grid {grid}. {type_desc}, distance ~{dist}m. Over.",
+    "{unit}, over! Enemy detected: {type_desc}, grid {grid}, ~{dist}m. Continuing observation.",
+    "This is {unit}. Contact! {type_desc} observed at grid {grid}, ~{dist}m.",
+]
+
+UNIT_TYPE_NAMES_RU = {
+    "infantry_platoon": "пехотный взвод", "infantry_company": "пехотная рота",
+    "infantry_section": "пехотное отделение", "infantry_squad": "пехотное отделение",
+    "infantry_team": "пехотная группа", "infantry_battalion": "пехотный батальон",
+    "mech_platoon": "мех. взвод", "mech_company": "мех. рота",
+    "tank_platoon": "танковый взвод", "tank_company": "танковая рота",
+    "artillery_battery": "арт. батарея", "artillery_platoon": "арт. взвод",
+    "mortar_section": "миномётная секция", "mortar_team": "миномётная группа",
+    "at_team": "ПТ группа", "recon_team": "разведгруппа",
+    "recon_section": "разведотделение", "observation_post": "наблюдательный пост",
+    "sniper_team": "снайперская пара", "headquarters": "штаб",
+}
+
+
+def generate_contact_radio_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+) -> list[dict]:
+    """
+    Generate radio messages when units detect new enemy contacts.
+
+    Triggered by 'contact_new' events in the tick.
+    The observing unit reports the contact over radio.
+
+    Returns list of chat message dicts.
+    """
+    messages = []
+
+    templates = CONTACT_REPORT_RU if language == "ru" else CONTACT_REPORT_EN
+    type_names = UNIT_TYPE_NAMES_RU if language == "ru" else {}
+
+    units_by_id = {str(u.id): u for u in all_units}
+
+    # Track which units already reported this tick (avoid spam)
+    reported_units = set()
+
+    for evt in tick_events:
+        if evt.get("event_type") != "contact_new":
+            continue
+
+        payload = evt.get("payload", {})
+        observer_id = evt.get("actor_unit_id")
+        if not observer_id:
+            observer_id = payload.get("observing_unit_id")
+        if not observer_id:
+            continue
+
+        observer_id_str = str(observer_id)
+        if observer_id_str in reported_units:
+            continue  # one report per unit per tick
+
+        unit = units_by_id.get(observer_id_str)
+        if not unit or unit.is_destroyed:
+            continue
+
+        comms = unit.comms_status
+        if hasattr(comms, 'value'):
+            comms = comms.value
+        if comms == "offline":
+            continue
+
+        # Get contact info
+        contact_type = payload.get("estimated_type", "")
+        contact_lat = payload.get("lat")
+        contact_lon = payload.get("lon")
+
+        # Resolve grid reference for the contact position
+        contact_grid = "неизвестном районе" if language == "ru" else "unknown area"
+        if grid_service and contact_lat is not None and contact_lon is not None:
+            try:
+                snail = grid_service.point_to_snail(contact_lat, contact_lon, depth=2)
+                if snail:
+                    contact_grid = snail
+            except Exception:
+                pass
+
+        # Type description
+        if language == "ru":
+            type_desc = type_names.get(contact_type, contact_type.replace("_", " ") if contact_type else "противник")
+        else:
+            type_desc = contact_type.replace("_", " ") if contact_type else "enemy unit"
+
+        # Distance
+        dist = "?"
+        if contact_lat is not None and contact_lon is not None and unit.position is not None:
+            try:
+                from geoalchemy2.shape import to_shape
+                import math
+                pt = to_shape(unit.position)
+                dlat = (contact_lat - pt.y) * 111320
+                dlon = (contact_lon - pt.x) * 74000
+                dist = str(round(math.sqrt(dlat**2 + dlon**2)))
+            except Exception:
+                pass
+
+        side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+        text = random.choice(templates).format(
+            unit=unit.name, grid=contact_grid,
+            type_desc=type_desc, dist=dist,
+        )
+        messages.append({
+            "sender_name": unit.name,
+            "side": side,
+            "text": text,
+            "is_unit_response": True,
+            "response_type": "contact_report",
+        })
+        reported_units.add(observer_id_str)
+
+    return messages
+
+

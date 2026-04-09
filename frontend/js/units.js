@@ -533,6 +533,12 @@ const KUnits = (() => {
             const pers = PERSONNEL[u.unit_type] || DEFAULT_PERSONNEL;
             const status = u.unit_status || 'idle';
             const statusColor = STATUS_COLORS[status] || '#aaa';
+
+            // Detect enemy unit for tooltip fog-of-war
+            const _myTtSide = KSessionUI.getSide ? KSessionUI.getSide() : null;
+            const _isAdminTt = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+            const _isEnemyTt = _myTtSide && _myTtSide !== 'admin' && _myTtSide !== 'observer' && u.side !== _myTtSide;
+
             // Stack count for overlapping units
             const _stackCount = units.filter(x => !x.is_destroyed && x.lat != null
                 && Math.abs(x.lat - u.lat) < STACK_THRESHOLD_DEG
@@ -546,12 +552,21 @@ const KUnits = (() => {
             }
             const tooltipEyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
             const tooltipEyeTag = tooltipEyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${tooltipEyeH}m)</span>` : '';
-            const tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span>`
-                + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
-                + `<br>`
-                + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
-                + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}${tooltipEyeTag}</span> `
-                + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
+            let tooltipHtml;
+            if (_isEnemyTt && !_isAdminTt) {
+                // Enemy tooltip: show only name, type, and approximate condition
+                const estimateLabel = u.strength_estimate || (u.strength > 0.75 ? 'full' : u.strength > 0.5 ? 'reduced' : u.strength > 0.25 ? 'weakened' : 'critical');
+                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#ef5350;">[ENEMY]</span>`
+                    + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
+                    + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${estimateLabel}</span>`;
+            } else {
+                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${pers}p)</span>`
+                    + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
+                    + `<br>`
+                    + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
+                    + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}${tooltipEyeTag}</span> `
+                    + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
+            }
             marker.bindTooltip(tooltipHtml, {
                 permanent: false,
                 direction: 'top',
@@ -1042,32 +1057,47 @@ const KUnits = (() => {
         html += `<div class="unit-info-side-bar" style="background:${sideColor};"></div>`;
         html += `<div class="unit-info-title">`;
         html += `<div class="unit-info-name">${u.name}</div>`;
-        html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${pers} personnel</div>`;
+        if (isEnemy && !isAdmin) {
+            // Enemy unit: hide personnel, show approximate type only
+            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')}</div>`;
+        } else {
+            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${pers} personnel</div>`;
+        }
         html += `</div>`;
         html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${displayStatusIcon} ${displayStatus}</span></div>`;
         html += `</div>`;
 
-        html += `<div class="unit-info-stats">`;
-        html += _buildStatBar('STR', strPct, strClr);
-        html += _buildStatBar('MOR', morPct, morClr);
-        html += _buildStatBar('AMM', ammPct, ammClr);
-        if (supPct > 0) {
-            html += _buildStatBar('SUP', supPct, supClr);
+        if (isEnemy && !isAdmin) {
+            // Enemy unit: show only approximate strength estimate (from fog-of-war quantized data)
+            const estimate = u.strength_estimate || (strPct > 75 ? 'full' : strPct > 50 ? 'reduced' : strPct > 25 ? 'weakened' : 'critical');
+            const estimateLabels = { full: 'Full strength', reduced: 'Reduced', weakened: 'Weakened', critical: 'Critical' };
+            const estimateColors = { full: '#4caf50', reduced: '#ff9800', weakened: '#ff5722', critical: '#f44336' };
+            html += `<div style="padding:4px 12px;font-size:11px;color:${estimateColors[estimate] || '#aaa'};">⚡ Estimated condition: <b>${estimateLabels[estimate] || estimate}</b></div>`;
+        } else {
+            html += `<div class="unit-info-stats">`;
+            html += _buildStatBar('STR', strPct, strClr);
+            html += _buildStatBar('MOR', morPct, morClr);
+            html += _buildStatBar('AMM', ammPct, ammClr);
+            if (supPct > 0) {
+                html += _buildStatBar('SUP', supPct, supClr);
+            }
+            html += `</div>`;
         }
-        html += `</div>`;
 
-        html += `<div class="unit-info-ranges">`;
-        html += `<span title="Detection range" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
-        html += `<span title="Fire range" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
-        if (u.move_speed_mps) {
-            const speedOpt = taskSpeed && SPEED_OPTIONS[taskSpeed];
-            const speedIcon = speedOpt ? speedOpt.icon : '⚡';
-            const speedClr = speedOpt ? speedOpt.color : '#81c784';
-            html += `<span title="Movement speed (${taskSpeed || 'base'})" style="color:${speedClr};">${speedIcon} ${u.move_speed_mps.toFixed(1)}m/s</span>`;
+        if (!isEnemy || isAdmin) {
+            html += `<div class="unit-info-ranges">`;
+            html += `<span title="Detection range" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
+            html += `<span title="Fire range" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
+            if (u.move_speed_mps) {
+                const speedOpt = taskSpeed && SPEED_OPTIONS[taskSpeed];
+                const speedIcon = speedOpt ? speedOpt.icon : '⚡';
+                const speedClr = speedOpt ? speedOpt.color : '#81c784';
+                html += `<span title="Movement speed (${taskSpeed || 'base'})" style="color:${speedClr};">${speedIcon} ${u.move_speed_mps.toFixed(1)}m/s</span>`;
+            }
+            html += `</div>`;
         }
-        html += `</div>`;
 
-        if (u.current_task && u.current_task.type) {
+        if ((!isEnemy || isAdmin) && u.current_task && u.current_task.type) {
             const taskType = u.current_task.type;
             const tSpeed = u.current_task.speed;
             const tSpeedOpt = tSpeed && SPEED_OPTIONS[tSpeed];
@@ -1091,16 +1121,18 @@ const KUnits = (() => {
             html += `</div>`;
         }
 
-        if (u.comms_status && u.comms_status !== 'operational') {
+        if ((!isEnemy || isAdmin) && u.comms_status && u.comms_status !== 'operational') {
             const commsClr = u.comms_status === 'degraded' ? '#ff9800' : '#f44336';
             html += `<div style="padding:1px 12px 3px;font-size:10px;color:${commsClr};">📡 Comms: ${u.comms_status}</div>`;
         }
 
-        const formation = u.formation || (u.capabilities && u.capabilities.formation);
-        if (formation) {
-            const fObj = FORMATIONS.find(f => f.key === formation);
-            const fLabel = fObj ? `${fObj.icon} ${fObj.label}` : formation;
-            html += `<div style="padding:1px 12px 3px;font-size:10px;color:#b39ddb;">🔲 Formation: ${fLabel}</div>`;
+        if (!isEnemy || isAdmin) {
+            const formation = u.formation || (u.capabilities && u.capabilities.formation);
+            if (formation) {
+                const fObj = FORMATIONS.find(f => f.key === formation);
+                const fLabel = fObj ? `${fObj.icon} ${fObj.label}` : formation;
+                html += `<div style="padding:1px 12px 3px;font-size:10px;color:#b39ddb;">🔲 Formation: ${fLabel}</div>`;
+            }
         }
 
         if (u.heading_deg != null && u.heading_deg !== 0) {

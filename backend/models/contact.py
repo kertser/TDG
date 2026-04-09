@@ -39,7 +39,7 @@ class Contact(Base):
         nullable=False,
     )
     observing_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("units.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("units.id", ondelete="SET NULL"), nullable=True
     )
     # Internal tracking: which actual enemy unit this contact refers to.
     # Not exposed to players (they only see estimated_type/location).

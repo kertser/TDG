@@ -704,12 +704,46 @@ async def admin_update_unit(
 @router.delete("/sessions/{session_id}/units/{unit_id}", status_code=204)
 async def admin_delete_unit(session_id: uuid.UUID, unit_id: uuid.UUID, db: DB, user: CurrentUser):
     """Admin: delete a unit from a session."""
+    from sqlalchemy import update as sa_update, delete as sa_delete
+    from backend.models.event import Event
+    from backend.models.contact import Contact
+    from backend.models.report import Report
+
     result = await db.execute(
         select(Unit).where(Unit.id == unit_id, Unit.session_id == session_id)
     )
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
+
+    # ── Clean up FK references to this unit before deletion ──
+
+    # Events: null out actor/target references (events are append-only, keep rows)
+    await db.execute(
+        sa_update(Event).where(Event.actor_unit_id == unit_id).values(actor_unit_id=None)
+    )
+    await db.execute(
+        sa_update(Event).where(Event.target_unit_id == unit_id).values(target_unit_id=None)
+    )
+
+    # Contacts: null out observing_unit_id FK; also clean up contacts tracking this unit
+    await db.execute(
+        sa_update(Contact).where(Contact.observing_unit_id == unit_id).values(observing_unit_id=None)
+    )
+    await db.execute(
+        sa_delete(Contact).where(Contact.target_unit_id == unit_id)
+    )
+
+    # Reports: null out from_unit_id
+    await db.execute(
+        sa_update(Report).where(Report.from_unit_id == unit_id).values(from_unit_id=None)
+    )
+
+    # Child units: re-parent to this unit's parent (or null)
+    await db.execute(
+        sa_update(Unit).where(Unit.parent_unit_id == unit_id).values(parent_unit_id=unit.parent_unit_id)
+    )
+
     await db.delete(unit)
     await db.commit()
 

@@ -48,7 +48,7 @@ class Unit(Base):
     unit_type: Mapped[str] = mapped_column(String(50), nullable=False)
     sidc: Mapped[str] = mapped_column(String(30), nullable=False, default="")
     parent_unit_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("units.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("units.id", ondelete="SET NULL"), nullable=True
     )
 
     # Position & orientation
