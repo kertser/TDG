@@ -118,6 +118,14 @@ class ResponseGenerator:
 
         # Normal acknowledgment
         if parsed.classification == MessageClassification.command:
+            # Fire mission for artillery/mortar → use fire-specific response
+            unit_type = unit.get("unit_type", "")
+            is_fire_unit = unit_type in (
+                "artillery_battery", "artillery_platoon",
+                "mortar_section", "mortar_team",
+            )
+            if is_fire_unit:
+                return ResponseType.wilco_fire, None
             return ResponseType.wilco, None
 
         return ResponseType.ack, None
@@ -312,8 +320,8 @@ class ResponseGenerator:
                 parts.append(f"выдвигаемся" + (f" на {target_snail}" if target_snail else ""))
             elif task_type_raw in ("attack", "engage"):
                 parts.append(f"ведём бой" + (f", район {target_snail}" if target_snail else ""))
-            elif task_type_raw == "fire":
-                parts.append("ведём огонь")
+            elif task_type_raw in ("fire", "support"):
+                parts.append("ведём огневую поддержку" + (f", район {target_snail}" if target_snail else ""))
             elif task_type_raw == "defend":
                 parts.append("обороняем позиции")
             elif task_type_raw == "observe":
@@ -390,9 +398,9 @@ class ResponseGenerator:
                 f_descs = [f"{f['name']} ~{f['distance_m']}м" for f in friendlies[:2]]
                 parts.append(f"свои рядом: {', '.join(f_descs)}")
 
-        # Recent combat events (brief)
+        # Recent combat events (brief) — skip stale combat events against destroyed targets
         events = situation.get("recent_events", [])
-        combat_events = [e for e in events if e["type"] in ("combat", "contact_new", "morale_break", "unit_destroyed")]
+        combat_events = [e for e in events if e["type"] in ("contact_new", "morale_break", "unit_destroyed")]
         if combat_events:
             last = combat_events[0]
             parts.append(last.get("summary", last["type"]))
@@ -421,8 +429,8 @@ class ResponseGenerator:
                 parts.append(f"moving" + (f" to {target_snail}" if target_snail else ""))
             elif task_type in ("attack", "engage"):
                 parts.append(f"in contact" + (f", grid {target_snail}" if target_snail else ""))
-            elif task_type == "fire":
-                parts.append("engaging targets")
+            elif task_type in ("fire", "support"):
+                parts.append("providing fire support" + (f", grid {target_snail}" if target_snail else ""))
             elif task_type == "defend":
                 parts.append("holding position")
             elif task_type == "observe":
@@ -495,9 +503,9 @@ class ResponseGenerator:
                 f_descs = [f"{f['name']} ~{f['distance_m']}m" for f in friendlies[:2]]
                 parts.append(f"friendlies nearby: {', '.join(f_descs)}")
 
-        # Recent combat events
+        # Recent combat events — skip raw 'combat' events (stale engagement data)
         events = situation.get("recent_events", [])
-        combat_events = [e for e in events if e["type"] in ("combat", "contact_new", "morale_break", "unit_destroyed")]
+        combat_events = [e for e in events if e["type"] in ("contact_new", "morale_break", "unit_destroyed")]
         if combat_events:
             last = combat_events[0]
             parts.append(last.get("summary", last["type"]))

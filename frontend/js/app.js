@@ -174,6 +174,14 @@
         KWebSocket.on('event_new', (data) => {
             KGameLog.addEntry(data.text_summary || data.event_type, 'event');
             KEvents.addEvent(data);
+            // Show combat impact visual effects
+            if (data.event_type === 'combat' || data.event_type === 'unit_destroyed') {
+                const p = data.payload || {};
+                if (p.target_lat && p.target_lon) {
+                    const impactType = data.event_type === 'unit_destroyed' ? 'artillery' : 'combat';
+                    try { KMapObjects.showImpact(p.target_lat, p.target_lon, impactType); } catch(e) {}
+                }
+            }
         });
 
         KWebSocket.on('report_new', (data) => {
@@ -205,6 +213,13 @@
             try { KSessionUI.updateTurnBadge(); } catch(e) {}
             // Reload events for the new tick
             try { KEvents.load(sessionId, token); } catch(e) {}
+            // Show combat impact visual effects
+            if (data.combat_impacts && Array.isArray(data.combat_impacts)) {
+                for (const imp of data.combat_impacts) {
+                    const impactType = imp.type === 'unit_destroyed' ? 'artillery' : 'combat';
+                    try { KMapObjects.showImpact(imp.lat, imp.lon, impactType); } catch(e) {}
+                }
+            }
         });
 
         KGameLog.addEntry('Connected to session', 'info');

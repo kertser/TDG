@@ -293,24 +293,64 @@ const KMapObjects = (() => {
             : obj.geometry.coordinates[0][0];
         const latlngs = rings.map(c => [c[1], c[0]]);
         const remaining = obj.properties ? obj.properties.ticks_remaining : 3;
-        const baseOpacity = inactive ? 0.15 : Math.min(0.45, 0.15 * remaining);
+        const baseOpacity = inactive ? 0.1 : Math.min(0.35, 0.12 * remaining);
 
+        const group = L.featureGroup();
+
+        // Main smoke polygon — blurred edge
         const poly = L.polygon(latlngs, {
-            color: '#888888',
-            weight: 1,
-            opacity: 0.4,
-            fillColor: '#aaaaaa',
-            fillOpacity: baseOpacity,
-            dashArray: '4,4',
+            color: 'rgba(180,180,180,0.2)',
+            weight: 0,
+            fillColor: '#b0b0b0',
+            fillOpacity: baseOpacity * 0.4,
             className: 'smoke-polygon',
+            interactive: true,
         });
+        group.addLayer(poly);
+
+        // Compute centroid + rough radius
+        let cLat = 0, cLon = 0;
+        latlngs.forEach(([lat, lon]) => { cLat += lat; cLon += lon; });
+        cLat /= latlngs.length;
+        cLon /= latlngs.length;
+
+        // Estimate radius from polygon bounds
+        let maxDist = 0;
+        const mPerLon = 111320 * Math.cos(cLat * Math.PI / 180);
+        latlngs.forEach(([lat, lon]) => {
+            const d = Math.sqrt(((lat - cLat) * 111320) ** 2 + ((lon - cLon) * mPerLon) ** 2);
+            if (d > maxDist) maxDist = d;
+        });
+        const radiusM = maxDist || 100;
+
+        // Multiple overlapping semi-transparent circles for dispersed smoky effect
+        const cloudCount = inactive ? 2 : Math.min(8, Math.max(3, remaining * 2));
+        for (let i = 0; i < cloudCount; i++) {
+            // Pseudo-random offsets (deterministic from obj.id char codes)
+            const seed = (obj.id || '').charCodeAt(i % (obj.id || 'x').length) || 42;
+            const angle = ((seed * 137.5 + i * 47) % 360) * Math.PI / 180;
+            const offsetFrac = ((seed * 13 + i * 31) % 60) / 100;
+            const oLat = cLat + (offsetFrac * radiusM * Math.cos(angle)) / 111320;
+            const oLon = cLon + (offsetFrac * radiusM * Math.sin(angle)) / mPerLon;
+            const cloudR = radiusM * (0.4 + ((seed + i * 17) % 40) / 60);
+
+            group.addLayer(L.circle([oLat, oLon], {
+                radius: cloudR,
+                color: 'transparent',
+                weight: 0,
+                fillColor: '#c8c8c8',
+                fillOpacity: baseOpacity * (0.3 + (i % 3) * 0.15),
+                className: 'smoke-cloud',
+                interactive: false,
+            }));
+        }
 
         // Tooltip
         const label = obj.label || 'Smoke Screen';
         const ticksLeft = remaining || '?';
         poly.bindTooltip(`🌫 ${label}<br>Dissipates in ~${ticksLeft} min`, {sticky: true, opacity: 0.9});
 
-        return poly;
+        return group;
     }
 
     // ── Point structures ──────────────────────────────────────
@@ -1133,6 +1173,135 @@ const KMapObjects = (() => {
 
     function isVisible() { return _visible; }
 
+    // ── Artillery / combat impact visualization ──────────────
+    // Animated explosion effect that fades and disappears.
+
+    let _impactLayer = null;
+
+    function _ensureImpactLayer() {
+        if (!_impactLayer && _map) {
+            _impactLayer = L.layerGroup().addTo(_map);
+        }
+        return _impactLayer;
+    }
+
+    /**
+     * Show an animated impact effect at a given location.
+     * @param {number} lat
+     * @param {number} lon
+     * @param {string} type - 'artillery' | 'combat' | 'smoke_impact'
+     * @param {number} durationMs - how long the effect lasts (default 25000ms = 25s)
+     */
+    function showImpact(lat, lon, type = 'artillery', durationMs = 25000) {
+        const layer = _ensureImpactLayer();
+        if (!layer || !_map) return;
+
+        const isArtillery = type === 'artillery';
+        const baseRadius = isArtillery ? 80 : 40;
+        const color = isArtillery ? '#FF6600' : '#FF4444';
+        const coreColor = isArtillery ? '#FFD700' : '#FF8800';
+
+        // Inner flash circle (bright, shrinks)
+        const flash = L.circle([lat, lon], {
+            radius: baseRadius * 0.4,
+            color: coreColor,
+            weight: 2,
+            opacity: 0.9,
+            fillColor: '#FFFFFF',
+            fillOpacity: 0.7,
+            interactive: false,
+            className: 'impact-flash',
+        });
+
+        // Main blast circle
+        const blast = L.circle([lat, lon], {
+            radius: baseRadius,
+            color: color,
+            weight: 2,
+            opacity: 0.8,
+            fillColor: color,
+            fillOpacity: 0.35,
+            interactive: false,
+            className: 'impact-blast',
+        });
+
+        // Outer shockwave ring
+        const shockwave = L.circle([lat, lon], {
+            radius: baseRadius * 1.8,
+            color: color,
+            weight: 1.5,
+            opacity: 0.5,
+            fillColor: 'transparent',
+            fillOpacity: 0,
+            dashArray: '6,4',
+            interactive: false,
+            className: 'impact-shockwave',
+        });
+
+        // Debris/smoke cloud (lingers longer)
+        const smoke = L.circle([lat, lon], {
+            radius: baseRadius * 1.2,
+            color: 'transparent',
+            weight: 0,
+            fillColor: '#555',
+            fillOpacity: 0.25,
+            interactive: false,
+            className: 'impact-smoke',
+        });
+
+        layer.addLayer(flash);
+        layer.addLayer(blast);
+        layer.addLayer(shockwave);
+        layer.addLayer(smoke);
+
+        // Phase 1 (0-2s): bright flash fades
+        setTimeout(() => {
+            try { layer.removeLayer(flash); } catch(e) {}
+        }, 2000);
+
+        // Phase 2 (2-8s): blast circle fades
+        setTimeout(() => {
+            try {
+                blast.setStyle({ opacity: 0.3, fillOpacity: 0.12 });
+                shockwave.setStyle({ opacity: 0.15 });
+            } catch(e) {}
+        }, 3000);
+
+        setTimeout(() => {
+            try { layer.removeLayer(blast); } catch(e) {}
+            try { layer.removeLayer(shockwave); } catch(e) {}
+        }, 8000);
+
+        // Phase 3 (8s-end): smoke lingers then fades
+        setTimeout(() => {
+            try { smoke.setStyle({ fillOpacity: 0.1 }); } catch(e) {}
+        }, durationMs * 0.6);
+
+        // Final cleanup
+        setTimeout(() => {
+            try { layer.removeLayer(smoke); } catch(e) {}
+        }, durationMs);
+    }
+
+    /**
+     * Show impact effects for combat events received via tick update.
+     * @param {Array} events - tick event list from state_update
+     */
+    function processTickEvents(events) {
+        if (!events || !Array.isArray(events)) return;
+        for (const evt of events) {
+            const payload = evt.payload || {};
+            if (evt.event_type === 'combat' || evt.event_type === 'unit_destroyed') {
+                // Show impact at target location
+                const lat = payload.target_lat || payload.lat;
+                const lon = payload.target_lon || payload.lon;
+                if (lat && lon) {
+                    showImpact(lat, lon, evt.event_type === 'unit_destroyed' ? 'artillery' : 'combat');
+                }
+            }
+        }
+    }
+
     function onObjectCreated(data) {
         if (data && data.id) {
             const idx = _objects.findIndex(o => o.id === data.id);
@@ -1173,6 +1342,7 @@ const KMapObjects = (() => {
         startPlacement, cancelPlacement,
         onObjectCreated, onObjectUpdated, onObjectDeleted,
         getObjects, getDefinitions, clearAll,
+        showImpact, processTickEvents,
     };
 })();
 

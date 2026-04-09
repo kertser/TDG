@@ -420,9 +420,26 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
         pass
 
     # Also broadcast tick_update to all
+    # Include combat impact locations for visual effects
+    combat_impacts = []
+    for evt_dict in result.get("_raw_events", []):
+        etype = evt_dict.get("event_type", "")
+        if etype in ("combat", "unit_destroyed"):
+            payload = evt_dict.get("payload", {})
+            if payload.get("target_lat") and payload.get("target_lon"):
+                combat_impacts.append({
+                    "type": etype,
+                    "lat": payload["target_lat"],
+                    "lon": payload["target_lon"],
+                })
+
     await ws_manager.broadcast(
         session_id,
-        {"type": "tick_update", "data": {"tick": result["tick"], "game_time": result.get("game_time")}},
+        {"type": "tick_update", "data": {
+            "tick": result["tick"],
+            "game_time": result.get("game_time"),
+            "combat_impacts": combat_impacts,
+        }},
     )
 
     # Broadcast radio chatter messages generated during tick
@@ -444,6 +461,9 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
             {"type": "report_new", "data": rpt},
             only_side=rpt_side,
         )
+
+    # Strip internal data before returning
+    result.pop("_raw_events", None)
 
     return result
 

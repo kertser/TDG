@@ -51,6 +51,7 @@ class SpeedMode(str, enum.Enum):
 class ResponseType(str, enum.Enum):
     ack = "ack"                       # acknowledgment
     wilco = "wilco"                   # will comply
+    wilco_fire = "wilco_fire"         # will comply — fire mission (artillery/mortar)
     unable = "unable"                 # cannot comply
     clarify = "clarify"              # request clarification
     status = "status"                # status report

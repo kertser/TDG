@@ -395,6 +395,10 @@ def process_combat(
                 u_task = u.current_task
                 if u_task and u_task.get("target_unit_id") == str(target.id):
                     involved_ids.append(str(u.id))
+                    # Clear the engage task — target is gone
+                    u.current_task = None
+            # Clear attacker's task too
+            attacker.current_task = None
             events.append({
                 "event_type": "unit_destroyed",
                 "actor_unit_id": attacker.id,
@@ -404,6 +408,8 @@ def process_combat(
                     "attacker": str(attacker.id),
                     "target": str(target.id),
                     "involved_unit_ids": involved_ids,
+                    "target_lat": tgt_pos[0],
+                    "target_lon": tgt_pos[1],
                 },
             })
         else:
@@ -425,6 +431,8 @@ def process_combat(
                     "suppression": round(suppression_inflicted, 4),
                     "target_strength": round(target.strength, 4),
                     "distance_m": round(dist, 1),
+                    "target_lat": tgt_pos[0],
+                    "target_lon": tgt_pos[1],
                 },
             })
 

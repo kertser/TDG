@@ -24,6 +24,12 @@ TEMPLATES_RU = {
         "{unit} принял. Начали движение. {status_text}",
         "Здесь {unit}, выполняем. {status_text}",
     ],
+    "wilco_fire": [
+        "Здесь {unit}. Принял, готовлю огонь. {status_text}",
+        "{unit}, приём. Цель принята, готовимся к открытию огня. {status_text}",
+        "Здесь {unit}. Так точно, расчёт к бою. {status_text}",
+        "{unit} принял. Огонь по готовности. {status_text}",
+    ],
     "unable": [
         "Здесь {unit}. Не могу выполнить! {reason}",
         "{unit}, приём. Выполнение невозможно. {reason}",
@@ -61,6 +67,12 @@ TEMPLATES_EN = {
         "This is {unit}. Roger, moving out. {status_text}",
         "{unit}, copy. Beginning movement. {status_text}",
         "This is {unit}. Wilco, executing now. {status_text}",
+    ],
+    "wilco_fire": [
+        "This is {unit}. Roger, preparing to fire. {status_text}",
+        "{unit}, copy. Target received, standing by to fire. {status_text}",
+        "This is {unit}. Fire mission received, crew ready. {status_text}",
+        "{unit}, shot out. Firing for effect. {status_text}",
     ],
     "unable": [
         "This is {unit}. Unable to comply! {reason}",

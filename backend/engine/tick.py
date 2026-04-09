@@ -389,6 +389,20 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
             if contact.target_unit_id and str(contact.target_unit_id) in destroyed_ids:
                 await db.delete(contact)
 
+        # ── 5c. Clear engage/attack/fire tasks targeting destroyed units ──
+        for u in all_units:
+            if u.is_destroyed:
+                continue
+            task = u.current_task
+            if not task:
+                continue
+            task_type = task.get("type", "")
+            if task_type not in ("attack", "engage", "fire"):
+                continue
+            target_uid = task.get("target_unit_id")
+            if target_uid and str(target_uid) in destroyed_ids:
+                u.current_task = None
+
     # ── 6. Suppression recovery ──────────────────────────────
     process_suppression_recovery(all_units, under_fire)
 
@@ -533,6 +547,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         "units_alive": sum(1 for u in all_units if not u.is_destroyed),
         "radio_messages": radio_broadcast,
         "reports": report_broadcast,
+        "_raw_events": all_events,  # for combat impact visualization
     }
 
 

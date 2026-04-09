@@ -238,15 +238,15 @@ def generate_peer_support_requests(
 # ── Templates for post-combat casualty reports ──
 
 CASUALTY_REPORT_RU = [
-    "Здесь {unit}. Цель уничтожена. Личный состав: {strength}%. Боеприпасы: {ammo}%. Продолжаем выполнение задачи.",
-    "{unit}, приём. Противник уничтожен в районе {grid}. Потери: {strength}% боеспособности. Готовы к дальнейшим действиям.",
-    "Здесь {unit}. Доклад: цель поражена. Состояние: {strength}%, БК: {ammo}%. Жду указаний.",
+    "Здесь {unit}. Цель уничтожена. Личный состав: {strength}%. Боеприпасы: {ammo}%. Ожидаем указаний, приём.",
+    "{unit}, приём. Противник уничтожен в районе {grid}. Потери: {strength}% боеспособности. Жду дальнейших указаний.",
+    "Здесь {unit}. Доклад: цель поражена. Состояние: {strength}%, БК: {ammo}%. Жду приказов, приём.",
 ]
 
 CASUALTY_REPORT_EN = [
-    "This is {unit}. Target destroyed. Strength at {strength}%. Ammo: {ammo}%. Continuing mission.",
-    "{unit}, over. Enemy eliminated at grid {grid}. Status: {strength}% combat effective. Standing by.",
-    "This is {unit}. Report: target neutralized. Strength {strength}%, ammo {ammo}%. Awaiting orders.",
+    "This is {unit}. Target destroyed. Strength at {strength}%. Ammo: {ammo}%. Awaiting orders, over.",
+    "{unit}, over. Enemy eliminated at grid {grid}. Status: {strength}% combat effective. Standing by for orders.",
+    "This is {unit}. Report: target neutralized. Strength {strength}%, ammo {ammo}%. Awaiting further tasking, over.",
 ]
 
 

@@ -56,7 +56,43 @@ const KOrders = (() => {
         });
 
         // ── Auto-scroll radio messages when panel becomes visible (hover/expand) ──
+        // ── Hover zone with margin: collapse only when mouse moves 30px+ away for 800ms ──
+        let _collapseTimer = null;
+        const HOVER_MARGIN = 30;   // px beyond panel edge before collapse starts
+        const COLLAPSE_DELAY = 800; // ms after leaving margin zone
+
+        function _isMouseNearPanel(e) {
+            const rect = panel.getBoundingClientRect();
+            return (
+                e.clientX >= rect.left - HOVER_MARGIN &&
+                e.clientX <= rect.right + HOVER_MARGIN &&
+                e.clientY >= rect.top - HOVER_MARGIN &&
+                e.clientY <= rect.bottom + HOVER_MARGIN
+            );
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (panel.classList.contains('expanded')) return; // pinned
+            if (panel.style.display === 'none') return;
+
+            if (_isMouseNearPanel(e)) {
+                // Mouse inside margin zone — cancel any pending collapse
+                if (_collapseTimer) { clearTimeout(_collapseTimer); _collapseTimer = null; }
+            } else {
+                // Mouse outside margin zone — start collapse countdown
+                if (!_collapseTimer) {
+                    _collapseTimer = setTimeout(() => {
+                        _collapseTimer = null;
+                        if (panel.classList.contains('expanded')) return;
+                        const focused = panel.querySelector(':focus');
+                        if (focused) focused.blur();
+                    }, COLLAPSE_DELAY);
+                }
+            }
+        });
+
         panel.addEventListener('mouseenter', () => {
+            if (_collapseTimer) { clearTimeout(_collapseTimer); _collapseTimer = null; }
             _scrollRadioToBottom();
         });
 
@@ -72,6 +108,9 @@ const KOrders = (() => {
                 toggleBtn.title = isExpanded ? 'Pin panel open' : 'Auto-collapse';
             });
         }
+
+        // ── Resize by dragging top edge ──
+        _initResizeHandle(panel);
 
 
         // ── Radio channel sub-tabs ──
@@ -99,8 +138,7 @@ const KOrders = (() => {
                     _submitOrder();
                 }
             });
-            // Auto-resize textarea
-            textArea.addEventListener('input', () => _autoResize(textArea));
+            // No auto-resize for orders textarea — it fills available space via CSS flex
         }
         if (clearSelBtn) {
             clearSelBtn.addEventListener('click', () => {
@@ -154,6 +192,66 @@ const KOrders = (() => {
     function _autoResize(ta) {
         ta.style.height = 'auto';
         ta.style.height = Math.min(ta.scrollHeight, 400) + 'px';
+    }
+
+    /** Initialize top-edge resize handle for the command panel. */
+    function _initResizeHandle(panel) {
+        // Remove existing resize handle if re-initialized
+        const existing = panel.querySelector('.cmd-resize-handle');
+        if (existing) existing.remove();
+
+        // Create invisible grab zone at top edge
+        const handle = document.createElement('div');
+        handle.className = 'cmd-resize-handle';
+        panel.insertBefore(handle, panel.firstChild);
+
+        let _resizing = false;
+        let _startY = 0;
+        let _startH = 0;
+        let _wasPinned = false;
+
+        handle.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            _resizing = true;
+            _startY = e.clientY;
+            // Get current panel height
+            _startH = panel.offsetHeight;
+            // Remember if user had it pinned before resize
+            _wasPinned = panel.classList.contains('expanded');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            // Pin panel open during resize
+            panel.classList.add('expanded');
+            panel.classList.add('resizing');
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!_resizing) return;
+            const dy = _startY - e.clientY; // dragging up = positive = taller
+            const newH = Math.max(80, Math.min(window.innerHeight * 0.85, _startH + dy));
+            // Apply custom height via CSS variable
+            panel.style.setProperty('--cmd-panel-height', newH + 'px');
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!_resizing) return;
+            _resizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            // Step 1: remove resizing to re-enable CSS transitions
+            panel.classList.remove('resizing');
+            // Step 2: wait one frame so transitions are active before collapsing
+            requestAnimationFrame(() => {
+                if (!_wasPinned) {
+                    panel.classList.remove('expanded');
+                }
+                // Blur any focused element to prevent :hover trap
+                const focused = panel.querySelector(':focus');
+                if (focused) focused.blur();
+            });
+        });
     }
 
     /** Scroll the radio messages container to the bottom, with retries for CSS transitions. */
