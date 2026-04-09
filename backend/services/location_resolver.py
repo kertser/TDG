@@ -58,12 +58,15 @@ class LocationResolver:
     Deterministic resolution of location references to geographic coordinates.
     """
 
-    def __init__(self, grid_service: Any = None):
+    def __init__(self, grid_service: Any = None, elevation_peaks: list[dict] | None = None):
         """
         Args:
             grid_service: An initialized GridService instance (for snail/grid resolution).
+            elevation_peaks: List of elevation peak dicts with keys:
+                {snail_path, lat, lon, elevation_m, label, label_ru}
         """
         self.grid_service = grid_service
+        self.elevation_peaks = elevation_peaks or []
 
     def resolve_all(
         self,
@@ -110,6 +113,10 @@ class LocationResolver:
         if ref_type == "coordinate" or self._looks_like_coordinate(normalized):
             return self._resolve_coordinate(ref, normalized)
 
+        # 3b. Try height/elevation reference (e.g. "height 170", "высота 170")
+        if ref_type == "height" or self._looks_like_height(normalized):
+            return self._resolve_height(ref, normalized)
+
         # 4. Try relative direction
         if ref_type == "relative":
             return self._resolve_relative(ref, normalized, unit_pos, heading_deg)
@@ -125,6 +132,69 @@ class LocationResolver:
 
     def _looks_like_coordinate(self, text: str) -> bool:
         return bool(re.match(r'^-?\d+\.?\d*\s*[,;]\s*-?\d+\.?\d*$', text))
+
+    def _looks_like_height(self, text: str) -> bool:
+        """Check if text looks like a height/elevation reference."""
+        text_lower = text.lower().strip()
+        # English: "height 170", "hill 250", "elevation 300"
+        # Russian: "высота 170", "выс. 170", "выс 170"
+        return bool(re.match(
+            r'^(?:height|hill|elevation|высота|выс\.?|отм\.?)\s*\d+',
+            text_lower
+        ))
+
+    def _resolve_height(self, ref: LocationRefRaw, normalized: str) -> ResolvedLocation:
+        """Resolve a height reference like 'height 170' or 'высота 170' to peak coordinates."""
+        # Extract the elevation number
+        m = re.search(r'(\d+(?:\.\d+)?)', normalized)
+        if not m:
+            return ResolvedLocation(
+                source_text=ref.source_text,
+                ref_type="height",
+                normalized_ref=normalized,
+                confidence=0.1,
+            )
+
+        target_elev = float(m.group(1))
+
+        if not self.elevation_peaks:
+            logger.warning("No elevation peaks available for height resolution: %r", normalized)
+            return ResolvedLocation(
+                source_text=ref.source_text,
+                ref_type="height",
+                normalized_ref=f"Height {int(target_elev)}",
+                confidence=0.2,
+            )
+
+        # Find the closest peak by elevation value
+        best_peak = None
+        best_diff = float('inf')
+        for peak in self.elevation_peaks:
+            diff = abs(peak.get("elevation_m", 0) - target_elev)
+            if diff < best_diff:
+                best_diff = diff
+                best_peak = peak
+
+        if best_peak is None or best_diff > 50:
+            # No peak within 50m of the target elevation
+            return ResolvedLocation(
+                source_text=ref.source_text,
+                ref_type="height",
+                normalized_ref=f"Height {int(target_elev)}",
+                confidence=0.2,
+            )
+
+        confidence = 0.9 if best_diff < 5 else (0.7 if best_diff < 20 else 0.5)
+
+        return ResolvedLocation(
+            source_text=ref.source_text,
+            ref_type="height",
+            normalized_ref=f"Height {round(best_peak['elevation_m'])}",
+            lat=best_peak.get("lat"),
+            lon=best_peak.get("lon"),
+            confidence=confidence,
+            resolution_depth=best_peak.get("snail_path", "").count("-") if best_peak.get("snail_path") else 0,
+        )
 
     def _resolve_snail(self, ref: LocationRefRaw, normalized: str) -> ResolvedLocation:
         """Resolve a snail path like 'B8-2-4' to coordinates."""
@@ -311,6 +381,14 @@ class LocationResolver:
         m = re.search(r'(-?\d+\.?\d*)\s*[,;]\s*(-?\d+\.?\d*)', source)
         if m:
             return self._resolve_coordinate(ref, f"{m.group(1)},{m.group(2)}")
+
+        # Try height/elevation reference
+        height_m = re.search(
+            r'(?:height|hill|elevation|высот[аыеу]|выс\.?|отм\.?)\s*(\d+(?:\.\d+)?)',
+            source, re.IGNORECASE
+        )
+        if height_m:
+            return self._resolve_height(ref, f"height {height_m.group(1)}")
 
         # Try direction keywords in source
         source_lower = source.lower()

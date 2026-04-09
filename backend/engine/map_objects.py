@@ -287,9 +287,9 @@ MAP_OBJECT_DEFS: dict[str, dict] = {
         "description": "Bridge — enables crossing over water obstacles",
         "color": "#757575",
     },
-    # ═══ SMOKE ════════════════════════════════════════════
+    # ═══ EFFECTS ════════════════════════════════════════════
     "smoke": {
-        "category": "obstacle",
+        "category": "effect",
         "geometry_type": "Polygon",
         "movement_factor_infantry": 0.9,
         "movement_factor_vehicle": 0.9,
@@ -305,12 +305,73 @@ MAP_OBJECT_DEFS: dict[str, dict] = {
         "description": "Smoke screen — drastically reduces visibility in area for ~3 minutes",
         "color": "#888888",
         "is_transient": True,           # expires after ticks_remaining
+        "default_ticks": 3,
+    },
+    "fog_effect": {
+        "category": "effect",
+        "geometry_type": "Polygon",
+        "movement_factor_infantry": 1.0,
+        "movement_factor_vehicle": 1.0,
+        "vehicle_passable": True,
+        "infantry_passable": True,
+        "damage_per_tick": 0.0,
+        "protection_bonus": 1.0,
+        "detection_bonus_m": 0,
+        "effect_radius_m": 200,
+        "visibility_factor": 0.15,      # very low visibility
+        "breach_ticks": 0,
+        "build_ticks": 0,
+        "description": "Dense fog zone — severely reduces visibility, no movement penalty",
+        "color": "#E0E0E0",
+        "is_transient": True,
+        "default_ticks": 6,
+    },
+    "fire_effect": {
+        "category": "effect",
+        "geometry_type": "Polygon",
+        "movement_factor_infantry": 0.1,
+        "movement_factor_vehicle": 0.2,
+        "vehicle_passable": True,
+        "infantry_passable": True,
+        "damage_per_tick": 0.03,        # burns units inside
+        "protection_bonus": 1.0,
+        "detection_bonus_m": 0,
+        "effect_radius_m": 80,
+        "visibility_factor": 0.3,       # flames and heat haze reduce visibility
+        "breach_ticks": 0,
+        "build_ticks": 0,
+        "description": "Area fire / wildfire — damages and slows units, reduces visibility from heat and smoke",
+        "color": "#FF4400",
+        "is_transient": True,
+        "default_ticks": 5,
+    },
+    "chemical_cloud": {
+        "category": "effect",
+        "geometry_type": "Polygon",
+        "movement_factor_infantry": 0.5,
+        "movement_factor_vehicle": 0.8,
+        "vehicle_passable": True,
+        "infantry_passable": True,
+        "damage_per_tick": 0.05,        # toxic — heavy damage, especially to infantry
+        "damage_per_tick_infantry": 0.06,
+        "damage_per_tick_vehicle": 0.02, # vehicles provide some NBC protection
+        "protection_bonus": 1.0,
+        "detection_bonus_m": 0,
+        "effect_radius_m": 120,
+        "visibility_factor": 0.2,       # opaque toxic cloud
+        "breach_ticks": 0,
+        "build_ticks": 0,
+        "description": "Chemical / toxic gas cloud — heavy damage to infantry, reduced damage to vehicles (NBC protection), severely impairs visibility and movement",
+        "color": "#AACC00",
+        "is_transient": True,
+        "default_ticks": 8,
     },
 }
 
 # Quick lookup helpers
 OBSTACLE_TYPES = [k for k, v in MAP_OBJECT_DEFS.items() if v["category"] == "obstacle"]
 STRUCTURE_TYPES = [k for k, v in MAP_OBJECT_DEFS.items() if v["category"] == "structure"]
+EFFECT_TYPES = [k for k, v in MAP_OBJECT_DEFS.items() if v["category"] == "effect"]
 ALL_OBJECT_TYPES = list(MAP_OBJECT_DEFS.keys())
 
 # Category mapping

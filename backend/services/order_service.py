@@ -76,6 +76,15 @@ class OrderService:
         grid_info, grid_service = await self._load_grid(session_id, db)
         game_time = await self._get_game_time(session_id, db)
 
+        # Load elevation peaks for height references in orders
+        elevation_peaks = await self._load_elevation_peaks(session_id, db)
+        if elevation_peaks and grid_info:
+            grid_info["height_tops"] = [
+                {"label": p["label"], "label_ru": p["label_ru"],
+                 "elevation_m": p["elevation_m"], "snail_path": p.get("snail_path", "")}
+                for p in elevation_peaks[:30]  # Limit to top 30 peaks
+            ]
+
         # ── 2. Parse via LLM ────────────────────────────────────
         parsed = await order_parser.parse(
             original_text=original_text,
@@ -169,7 +178,9 @@ class OrderService:
             order.target_unit_ids = [uuid.UUID(u["id"]) for u in matched_units]
 
         # ── Resolve locations ─────────────────────────────
-        resolver = LocationResolver(grid_service=grid_service)
+        # Load elevation peaks for height reference resolution
+        elevation_peaks = await self._load_elevation_peaks(session_id, db)
+        resolver = LocationResolver(grid_service=grid_service, elevation_peaks=elevation_peaks)
         # Use first matched unit's position for relative references
         unit_pos = None
         unit_heading = None
@@ -200,6 +211,7 @@ class OrderService:
                 "coordinate": ReferenceType.coordinate,
                 "relative": ReferenceType.terrain,
                 "terrain": ReferenceType.terrain,
+                "height": ReferenceType.terrain,
             }
             ref_type = ref_type_map.get(loc.ref_type, ReferenceType.mixed)
 
@@ -751,6 +763,92 @@ class OrderService:
         }
         return grid_info, grid_service
 
+    async def _load_elevation_peaks(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> list[dict]:
+        """Load elevation peaks (local maxima) for height reference resolution."""
+        try:
+            from backend.models.elevation_cell import ElevationCell
+
+            result = await db.execute(
+                select(ElevationCell).where(ElevationCell.session_id == session_id)
+            )
+            cells = result.scalars().all()
+            if not cells or len(cells) < 3:
+                return []
+
+            # Build a spatial lookup for neighbor checking
+            cell_list = list(cells)
+            cell_list.sort(key=lambda c: c.snail_path)
+
+            # Estimate cell spacing
+            lats = [c.centroid_lat for c in cell_list]
+            lons = [c.centroid_lon for c in cell_list]
+            if len(set(lats)) < 2:
+                return []
+            sorted_lats = sorted(set(lats))
+            sorted_lons = sorted(set(lons))
+            cell_dlat = (sorted_lats[-1] - sorted_lats[0]) / max(1, len(sorted_lats) - 1) if len(sorted_lats) > 1 else 0.001
+            cell_dlon = (sorted_lons[-1] - sorted_lons[0]) / max(1, len(sorted_lons) - 1) if len(sorted_lons) > 1 else 0.001
+
+            min_lat = min(lats)
+            min_lon = min(lons)
+
+            # Spatial grid index
+            grid_idx: dict[str, list] = {}
+            for c in cell_list:
+                row = round((c.centroid_lat - min_lat) / cell_dlat) if cell_dlat > 0 else 0
+                col = round((c.centroid_lon - min_lon) / cell_dlon) if cell_dlon > 0 else 0
+                key = f"{row},{col}"
+                if key not in grid_idx:
+                    grid_idx[key] = []
+                grid_idx[key].append(c)
+
+            # Find peaks
+            peaks = []
+            min_prominence = 3.0  # meters
+            for cell in cell_list:
+                row = round((cell.centroid_lat - min_lat) / cell_dlat) if cell_dlat > 0 else 0
+                col = round((cell.centroid_lon - min_lon) / cell_dlon) if cell_dlon > 0 else 0
+                neighbors = []
+                for dr in (-1, 0, 1):
+                    for dc in (-1, 0, 1):
+                        if dr == 0 and dc == 0:
+                            continue
+                        key = f"{row + dr},{col + dc}"
+                        if key in grid_idx:
+                            neighbors.extend(grid_idx[key])
+                if not neighbors:
+                    continue
+                max_neighbor = max(n.elevation_m for n in neighbors)
+                if cell.elevation_m > max_neighbor and (cell.elevation_m - max_neighbor) >= min_prominence:
+                    peaks.append({
+                        "snail_path": cell.snail_path,
+                        "lat": cell.centroid_lat,
+                        "lon": cell.centroid_lon,
+                        "elevation_m": round(cell.elevation_m, 1),
+                        "label": f"Height {round(cell.elevation_m)}",
+                        "label_ru": f"Высота {round(cell.elevation_m)}",
+                    })
+
+            # Deduplicate very close peaks
+            peaks.sort(key=lambda p: p["elevation_m"], reverse=True)
+            deduped = []
+            for peak in peaks:
+                too_close = False
+                for existing in deduped:
+                    if abs(peak["lat"] - existing["lat"]) < cell_dlat * 1.5 and abs(peak["lon"] - existing["lon"]) < cell_dlon * 1.5:
+                        too_close = True
+                        break
+                if not too_close:
+                    deduped.append(peak)
+            return deduped
+        except Exception as e:
+            logger.warning("Failed to load elevation peaks: %s", e)
+            return []
+
     async def _get_game_time(
         self,
         session_id: uuid.UUID,
@@ -956,6 +1054,36 @@ class OrderService:
                         surrounding[row[0]] = row[1]
                     if surrounding:
                         situation["surrounding_terrain"] = surrounding
+            except Exception:
+                pass
+
+        # ── Nearby height tops (elevation peaks) ───────────
+        if unit_lat and unit_lon:
+            try:
+                elevation_peaks = await self._load_elevation_peaks(session_id, db)
+                if elevation_peaks:
+                    nearby_heights = []
+                    for peak in elevation_peaks:
+                        p_lat = peak.get("lat", 0)
+                        p_lon = peak.get("lon", 0)
+                        dlat = math.radians(p_lat - unit_lat)
+                        dlon = math.radians(p_lon - unit_lon)
+                        a = (math.sin(dlat / 2) ** 2 +
+                             math.cos(math.radians(unit_lat)) *
+                             math.cos(math.radians(p_lat)) *
+                             math.sin(dlon / 2) ** 2)
+                        dist_m = 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                        if dist_m <= 5000:  # within 5km
+                            nearby_heights.append({
+                                "label": peak["label"],
+                                "label_ru": peak["label_ru"],
+                                "elevation_m": peak["elevation_m"],
+                                "distance_m": round(dist_m),
+                                "snail_path": peak.get("snail_path", ""),
+                            })
+                    nearby_heights.sort(key=lambda h: h["distance_m"])
+                    if nearby_heights:
+                        situation["nearby_heights"] = nearby_heights[:8]
             except Exception:
                 pass
 

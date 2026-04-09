@@ -75,6 +75,20 @@ In addition to grid/snail references, players may use map coordinates (decimal d
 
 When coordinates are given, extract them as location_refs with ref_type="coordinate" and normalized="lat,lon".
 
+## Height / Elevation References
+
+Players may refer to hilltops/elevation points by their height:
+- "Height 170" or "Hill 250" (English)
+- "Высота 170" or "выс. 250" or "отметка 300" (Russian)
+- "в направлении высоты 170" = "toward height 170"
+- "занять высоту 250" = "occupy height 250"
+- "наблюдательный пункт на высоте 300" = "observation post on height 300"
+
+When a height reference is found, extract it as location_refs with ref_type="height" and normalized="height NNN".
+Height tops are named terrain features visible on the map.
+
+{height_tops_context}
+
 ## Russian Military Radio Conventions
 
 - "Приём" / "Приём!" = "Over" (end of transmission)
@@ -447,6 +461,26 @@ PARSED:
   "formation": "column",
   "engagement_rules": null,
   "urgency": "immediate",
+  "purpose": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Первый взвод, выдвинуться в направлении высоты 170"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Первый взвод"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "высоты 170", "ref_type": "height", "normalized": "height 170"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
   "purpose": null,
   "report_text": null,
   "confidence": 0.95,

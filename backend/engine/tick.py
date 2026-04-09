@@ -218,19 +218,27 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     )
     map_objects_list = list(mo_result.scalars().all())
 
-    # ── 1c. Process smoke decay ────────────────────────────
-    smoke_updated = []  # smoke MapObjects whose state changed this tick
+    # ── 1c. Process transient effect decay (smoke, fog, fire, chemical) ──
+    TRANSIENT_TYPES = {"smoke", "fog_effect", "fire_effect", "chemical_cloud"}
+    EFFECT_DISSIPATE_LABELS = {
+        "smoke": "Smoke screen",
+        "fog_effect": "Fog zone",
+        "fire_effect": "Area fire",
+        "chemical_cloud": "Chemical cloud",
+    }
+    smoke_updated = []  # transient effect MapObjects whose state changed this tick
     for obj in map_objects_list:
-        if obj.object_type == "smoke" and obj.is_active:
+        if obj.object_type in TRANSIENT_TYPES and obj.is_active:
             props = obj.properties or {}
             ticks_remaining = props.get("ticks_remaining", 0) - 1
             if ticks_remaining <= 0:
                 obj.is_active = False
                 smoke_updated.append(obj)
+                eff_label = EFFECT_DISSIPATE_LABELS.get(obj.object_type, obj.object_type)
                 all_events.append({
-                    "event_type": "smoke_dissipated",
-                    "text_summary": f"Smoke screen dissipated at {obj.label or 'position'}",
-                    "payload": {"object_id": str(obj.id)},
+                    "event_type": "effect_dissipated",
+                    "text_summary": f"{eff_label} dissipated at {obj.label or 'position'}",
+                    "payload": {"object_id": str(obj.id), "effect_type": obj.object_type},
                 })
             else:
                 new_props = dict(props)
@@ -430,6 +438,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     # ── 9b. Structure effects (resupply, comms bonus) ─────────
     struct_events = process_structures(all_units, map_objects_list)
     all_events.extend(struct_events)
+
+    # ── 9c. Transient effect damage (fire, chemical cloud) ────
+    effect_damage_events = _process_effect_damage(all_units, map_objects_list)
+    all_events.extend(effect_damage_events)
 
     # ── 10. Persist events ───────────────────────────────────────
     for evt_dict in all_events:
@@ -1250,3 +1262,75 @@ Respond with ONLY a valid JSON object:
         return None
 
 
+def _process_effect_damage(all_units: list, map_objects: list) -> list[dict]:
+    """Apply damage from active fire/chemical effects to units inside them."""
+    from backend.engine.map_objects import MAP_OBJECT_DEFS
+    events = []
+    if not map_objects:
+        return events
+
+    DAMAGING_EFFECTS = {"fire_effect", "chemical_cloud"}
+    active_effects = [
+        o for o in map_objects
+        if o.object_type in DAMAGING_EFFECTS and o.is_active and o.geometry is not None
+    ]
+    if not active_effects:
+        return events
+
+    from shapely.geometry import Point as ShapelyPoint
+    from geoalchemy2.shape import to_shape as ts
+
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        if unit.position is None:
+            continue
+        try:
+            unit_shape = ts(unit.position)
+            unit_pt = ShapelyPoint(unit_shape.x, unit_shape.y)
+        except Exception:
+            continue
+
+        for eff_obj in active_effects:
+            try:
+                eff_shape = ts(eff_obj.geometry)
+                if not (eff_shape.contains(unit_pt) or eff_shape.distance(unit_pt) * 111320 < 10):
+                    continue
+            except Exception:
+                continue
+
+            defn = MAP_OBJECT_DEFS.get(eff_obj.object_type, {})
+            # Differentiated damage for infantry vs vehicle
+            is_vehicle = unit.unit_type and any(
+                k in unit.unit_type for k in ("tank", "mech", "vehicle", "avlb", "apc")
+            )
+            if is_vehicle:
+                dmg = defn.get("damage_per_tick_vehicle", defn.get("damage_per_tick", 0))
+            else:
+                dmg = defn.get("damage_per_tick_infantry", defn.get("damage_per_tick", 0))
+
+            if dmg > 0 and unit.strength > 0:
+                unit.strength = max(0.0, unit.strength - dmg)
+                eff_label = {
+                    "fire_effect": "fire zone",
+                    "chemical_cloud": "chemical contamination",
+                }.get(eff_obj.object_type, eff_obj.object_type)
+                events.append({
+                    "event_type": "effect_damage",
+                    "text_summary": f"{unit.name} taking damage from {eff_label}",
+                    "actor_unit_id": str(unit.id),
+                    "payload": {
+                        "effect_type": eff_obj.object_type,
+                        "damage": round(dmg, 4),
+                        "unit_strength": round(unit.strength, 3),
+                    },
+                })
+                if unit.strength <= 0:
+                    unit.is_destroyed = True
+                    events.append({
+                        "event_type": "unit_destroyed",
+                        "text_summary": f"{unit.name} destroyed by {eff_label}",
+                        "actor_unit_id": str(unit.id),
+                        "payload": {"cause": eff_obj.object_type},
+                    })
+    return events

@@ -424,7 +424,7 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
     except Exception:
         pass
 
-    # Broadcast smoke object updates (decay / dissipation) to all clients
+    # Broadcast transient effect updates (smoke/fog/fire/chemical decay/dissipation) to all clients
     try:
         smoke_updated = result.get("_smoke_updated", [])
         for smoke_obj in smoke_updated:
@@ -435,7 +435,7 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
                     {"type": "map_object_updated", "data": serialized},
                 )
             else:
-                # Smoke dissipated — send deletion so frontend removes it
+                # Effect dissipated — send deletion so frontend removes it
                 await ws_manager.broadcast(
                     session_id,
                     {"type": "map_object_deleted", "data": {"id": str(smoke_obj.id), "object_id": str(smoke_obj.id)}},

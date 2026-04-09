@@ -110,11 +110,12 @@ def _posture_modifier(target_task: dict | None) -> float:
 
 
 def _is_in_smoke(lat: float, lon: float, map_objects: list | None) -> bool:
-    """Check if a point is inside an active smoke area."""
+    """Check if a point is inside an active visibility-reducing effect (smoke, fog, chemical cloud)."""
     if not map_objects:
         return False
+    VISIBILITY_EFFECT_TYPES = {"smoke", "fog_effect", "fire_effect", "chemical_cloud"}
     for obj in map_objects:
-        if obj.object_type != "smoke" or not obj.is_active:
+        if obj.object_type not in VISIBILITY_EFFECT_TYPES or not obj.is_active:
             continue
         if obj.geometry is None:
             continue

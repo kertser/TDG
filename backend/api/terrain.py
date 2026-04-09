@@ -668,6 +668,176 @@ async def get_elevation_at_point(
     return {"snail_path": None, "elevation_m": None, "slope_deg": None, "aspect_deg": None}
 
 
+# ── Elevation peaks (hilltops) ────────────────────────────────
+
+@router.get("/{session_id}/elevation/peaks")
+async def get_elevation_peaks(
+    session_id: uuid.UUID,
+    db: DB,
+    min_prominence_m: float = Query(5.0, description="Minimum height difference from surrounding terrain to count as peak"),
+    min_distance_m: float = Query(1500.0, description="Minimum distance in meters between reported peaks (dedup radius)"),
+):
+    """
+    Find dominant hilltops (height tops / высоты) — terrain features where
+    the ground descends in every direction for a significant distance.
+
+    Algorithm:
+      1. For each cell, cast 8 rays outward (N, NE, E, SE, S, SW, W, NW),
+         each ray extending `check_dist` cells (~2-3 km).
+      2. A direction "descends" if the MAX elevation along the entire ray
+         is strictly lower than the candidate cell.
+      3. A cell is a peak only if ALL 8 directions (with data) descend.
+      4. Dynamic prominence threshold adapts to terrain relief — ensures
+         peaks are significant relative to the landscape, not just noise.
+      5. Dedup: within min_distance_m, only the highest peak is kept.
+    """
+    result = await db.execute(
+        select(ElevationCell).where(ElevationCell.session_id == session_id)
+    )
+    cells = result.scalars().all()
+    if not cells:
+        return {"peaks": []}
+
+    all_cells = [c for c in cells if c.elevation_m is not None]
+    if not all_cells:
+        return {"peaks": []}
+
+    all_cells.sort(key=lambda c: c.snail_path)
+
+    # Compute cell spacing from grid definition
+    cell_size_lat = 0.001  # fallback
+    cell_size_lon = 0.001
+    gd_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = gd_result.scalar_one_or_none()
+    if gd and len(all_cells) >= 2:
+        depth = all_cells[0].depth if all_cells else 1
+        rec_base = getattr(gd, "recursion_base", 3) or 3
+        cell_size_m = gd.base_square_size_m / (rec_base ** depth)
+        gs = GridService(gd)
+        cx_local = (gd.columns / 2) * gd.base_square_size_m
+        cy_local = (gd.rows / 2) * gd.base_square_size_m
+        _c_lon, _c_lat = gs._to_geo.transform(cx_local, cy_local)
+        _e_lon, _e_lat = gs._to_geo.transform(cx_local + cell_size_m, cy_local)
+        _n_lon, _n_lat = gs._to_geo.transform(cx_local, cy_local + cell_size_m)
+        cell_size_lat = abs(_n_lat - _c_lat)
+        cell_size_lon = abs(_e_lon - _c_lon)
+
+    # Build spatial grid index: "row,col" → (max_elev, min_elev)
+    min_lat_val = min(c.centroid_lat for c in all_cells)
+    min_lon_val = min(c.centroid_lon for c in all_cells)
+    grid_idx: dict[str, list] = {}
+    for c in all_cells:
+        row = round((c.centroid_lat - min_lat_val) / cell_size_lat) if cell_size_lat > 0 else 0
+        col = round((c.centroid_lon - min_lon_val) / cell_size_lon) if cell_size_lon > 0 else 0
+        key = f"{row},{col}"
+        if key not in grid_idx:
+            grid_idx[key] = []
+        grid_idx[key].append(c)
+
+    _elev_cache: dict[str, tuple] = {}
+    for key, cell_list in grid_idx.items():
+        elevs = [c.elevation_m for c in cell_list if c.elevation_m is not None]
+        if elevs:
+            _elev_cache[key] = (max(elevs), min(elevs))
+
+    # ── Compute terrain statistics for dynamic prominence threshold ──
+    all_elevs = [c.elevation_m for c in all_cells]
+    terrain_max = max(all_elevs)
+    terrain_min = min(all_elevs)
+    terrain_range = terrain_max - terrain_min
+
+    # Dynamic prominence: scale with terrain relief.
+    # For flat terrain (range ~50m), require ~10m. For mountainous (range ~500m), ~50m.
+    # Formula: max(user_param, 15% of range, hard floor of 8m)
+    effective_prominence = max(min_prominence_m, terrain_range * 0.15, 8.0)
+
+    # ── 8 cardinal + diagonal directions ──
+    DIRECTIONS_8 = [
+        (1, 0), (1, 1), (0, 1), (-1, 1),
+        (-1, 0), (-1, -1), (0, -1), (1, -1),
+    ]
+
+    # How many cells to check outward per direction.
+    # Must be long enough to distinguish real hilltops from slope undulations.
+    # With ~333m cells, 8 steps = ~2.7km per ray — good for typical terrain.
+    check_dist = 8
+
+    # ── Find peaks: cells with terrain descending in every direction ──
+    peaks = []
+    for cell in all_cells:
+        row = round((cell.centroid_lat - min_lat_val) / cell_size_lat) if cell_size_lat > 0 else 0
+        col = round((cell.centroid_lon - min_lon_val) / cell_size_lon) if cell_size_lon > 0 else 0
+        elev = cell.elevation_m
+
+        descending = 0
+        checked = 0
+        lowest_far = elev
+
+        for dr, dc in DIRECTIONS_8:
+            ray_max = None
+            ray_min = None
+            for step in range(1, check_dist + 1):
+                key = f"{row + dr * step},{col + dc * step}"
+                cached = _elev_cache.get(key)
+                if cached is not None:
+                    e_max, e_min = cached
+                    ray_max = e_max if ray_max is None else max(ray_max, e_max)
+                    ray_min = e_min if ray_min is None else min(ray_min, e_min)
+
+            if ray_max is None:
+                continue  # no data in this direction (grid edge)
+
+            checked += 1
+            if ray_max < elev:
+                descending += 1
+                lowest_far = min(lowest_far, ray_min)
+
+        # Require data in at least 5 directions and ALL must descend
+        if checked < 5 or descending < checked:
+            continue
+
+        # Prominence: how much this peak rises above surrounding terrain
+        prominence = elev - lowest_far
+        if prominence < effective_prominence:
+            continue
+
+        peaks.append({
+            "snail_path": cell.snail_path,
+            "lat": round(cell.centroid_lat, 7),
+            "lon": round(cell.centroid_lon, 7),
+            "elevation_m": round(elev, 1),
+            "prominence_m": round(prominence, 1),
+            "label": f"Height {round(elev)}",
+            "label_ru": f"Высота {round(elev)}",
+        })
+
+    # Sort by elevation descending (highest peaks first — kept during dedup)
+    peaks.sort(key=lambda p: p["elevation_m"], reverse=True)
+
+    # Deduplicate: proper Euclidean distance check
+    avg_lat = sum(p["lat"] for p in peaks) / len(peaks) if peaks else 48.0
+    meters_per_deg_lat = 111320.0
+    meters_per_deg_lon = 111320.0 * math.cos(math.radians(avg_lat))
+    min_dist_sq = min_distance_m * min_distance_m
+
+    deduped = []
+    for peak in peaks:
+        too_close = False
+        for existing in deduped:
+            dlat_m = (peak["lat"] - existing["lat"]) * meters_per_deg_lat
+            dlon_m = (peak["lon"] - existing["lon"]) * meters_per_deg_lon
+            dist_sq = dlat_m * dlat_m + dlon_m * dlon_m
+            if dist_sq < min_dist_sq:
+                too_close = True
+                break
+        if not too_close:
+            deduped.append(peak)
+
+    return {"peaks": deduped}
+
+
 # ── Reference data endpoint ──────────────────────────────────
 
 @router.get("/{session_id}/terrain/types")
@@ -678,5 +848,4 @@ async def get_terrain_types(session_id: uuid.UUID):
         "modifiers": TERRAIN_MODIFIERS,
         "colors": TERRAIN_COLORS,
     }
-
 

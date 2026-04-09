@@ -3491,6 +3491,11 @@ button:hover { background: #1a5276; }
     background: none !important;
     border: none !important;
 }
+/* Ensure invisible hit-area rectangles for map objects stay invisible */
+.map-obj-icon path,
+.leaflet-overlay-pane path[stroke="none"] {
+    outline: none !important;
+}
 .map-obj-point {
     font-size: 18px;
     text-align: center;
@@ -4333,5 +4338,30 @@ button:hover { background: #1a5276; }
     background: rgba(239,83,80,0.25);
     border-color: rgba(239,83,80,0.45);
     color: #ff7043;
+}
+
+/* ── Height Top Markers (elevation peaks) ──────────────── */
+.height-top-icon {
+    background: transparent !important;
+    border: none !important;
+}
+.height-top-marker {
+    text-align: center;
+    white-space: nowrap;
+}
+.height-top-label {
+    font-family: 'Arial Narrow', Arial, sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    color: #5D3A1A;
+    text-shadow:
+        -1px -1px 0 rgba(255,255,255,0.8),
+         1px -1px 0 rgba(255,255,255,0.8),
+        -1px  1px 0 rgba(255,255,255,0.8),
+         1px  1px 0 rgba(255,255,255,0.8),
+         0    0   3px rgba(255,255,255,0.6);
+    line-height: 1;
+    margin-top: -1px;
+    letter-spacing: 0.5px;
 }
 

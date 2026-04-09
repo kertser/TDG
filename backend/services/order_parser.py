@@ -30,6 +30,18 @@ from backend.prompts.order_parser import (
 
 logger = logging.getLogger(__name__)
 
+def _build_height_tops_context(grid_info: dict | None) -> str:
+    """Build a text description of available height tops for the LLM prompt."""
+    if not grid_info or "height_tops" not in grid_info:
+        return ""
+    peaks = grid_info["height_tops"]
+    if not peaks:
+        return ""
+    lines = ["Available named height tops on the map:"]
+    for p in peaks[:20]:
+        lines.append(f"  - {p['label']} ({p['label_ru']}) at grid {p.get('snail_path', '?')}")
+    return "\n".join(lines)
+
 # Max retries on LLM parse failure
 MAX_RETRIES = 1
 
@@ -165,6 +177,7 @@ class OrderParser:
             unit_roster=build_unit_roster(filtered_units),
             grid_info=build_grid_info(grid_info),
             game_time=game_time or "Unknown",
+            height_tops_context=_build_height_tops_context(grid_info),
         )
         user_msg = build_user_message(original_text)
 
@@ -320,6 +333,21 @@ class OrderParser:
                     "source_text": m.group().strip(),
                     "ref_type": "coordinate",
                     "normalized": coord_str,
+                })
+
+        # Match height/elevation references: "height 170", "высота 170", "выс. 250"
+        height_pattern = re.compile(
+            r'(?:height|hill|elevation|высот[аыеу]|выс\.?|отм\.?|отметк[аеу])\s*(\d+(?:\.\d+)?)',
+            re.IGNORECASE,
+        )
+        for m in height_pattern.finditer(text):
+            height_val = m.group(1)
+            height_norm = f"height {height_val}"
+            if not any(lr["normalized"] == height_norm for lr in location_refs):
+                location_refs.append({
+                    "source_text": m.group().strip(),
+                    "ref_type": "height",
+                    "normalized": height_norm,
                 })
 
         # Extract target unit references from text

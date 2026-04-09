@@ -16,7 +16,7 @@ from backend.database import get_db
 from backend.api.deps import get_session_participant
 from backend.models.map_object import MapObject, ObjectCategory, ObjectSide
 from backend.models.unit import Unit
-from backend.engine.map_objects import MAP_OBJECT_DEFS, OBSTACLE_TYPES, STRUCTURE_TYPES, ALL_OBJECT_TYPES, get_category
+from backend.engine.map_objects import MAP_OBJECT_DEFS, OBSTACLE_TYPES, STRUCTURE_TYPES, EFFECT_TYPES, ALL_OBJECT_TYPES, get_category
 from backend.services.ws_manager import ws_manager
 
 router = APIRouter()
@@ -118,11 +118,15 @@ async def get_object_definitions():
             "vehicle_passable": defn.get("vehicle_passable", True),
             "infantry_passable": defn.get("infantry_passable", True),
             "damage_per_tick": defn.get("damage_per_tick", 0),
+            "is_transient": defn.get("is_transient", False),
+            "visibility_factor": defn.get("visibility_factor"),
+            "default_ticks": defn.get("default_ticks"),
         }
     return {
         "definitions": result,
         "obstacle_types": OBSTACLE_TYPES,
         "structure_types": STRUCTURE_TYPES,
+        "effect_types": EFFECT_TYPES,
     }
 
 
@@ -260,10 +264,17 @@ async def create_map_object(
     except ValueError:
         side_enum = ObjectSide.neutral
 
-    # Default discovery: structures revealed, obstacles hidden
+    # Default discovery: structures revealed, obstacles hidden, effects revealed
+    defn = MAP_OBJECT_DEFS.get(body.object_type, {})
     is_structure = (category == "structure")
-    disc_blue = body.discovered_by_blue if body.discovered_by_blue is not None else is_structure
-    disc_red = body.discovered_by_red if body.discovered_by_red is not None else is_structure
+    is_effect = (category == "effect")
+    disc_blue = body.discovered_by_blue if body.discovered_by_blue is not None else (is_structure or is_effect)
+    disc_red = body.discovered_by_red if body.discovered_by_red is not None else (is_structure or is_effect)
+
+    # For transient effects, auto-set ticks_remaining in properties if not provided
+    props = body.properties or {}
+    if defn.get("is_transient") and "ticks_remaining" not in props:
+        props["ticks_remaining"] = defn.get("default_ticks", 3)
 
     obj = MapObject(
         session_id=session_id,
@@ -272,7 +283,7 @@ async def create_map_object(
         object_category=ObjectCategory(category),
         geometry=geom,
         label=body.label,
-        properties=body.properties,
+        properties=props if props else None,
         style_json=body.style_json,
         is_active=True,
         health=1.0,
@@ -574,7 +585,7 @@ async def fire_smoke(
         session_id=session_id,
         side=ObjectSide.neutral,
         object_type="smoke",
-        object_category=ObjectCategory.obstacle,
+        object_category=ObjectCategory.effect,
         geometry=from_shape(smoke_poly, srid=4326),
         properties={
             "ticks_remaining": body.duration_ticks,

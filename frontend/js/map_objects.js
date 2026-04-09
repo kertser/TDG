@@ -94,12 +94,26 @@ const KMapObjects = (() => {
             `<line x1="6" y1="10" x2="22" y2="10" stroke="#4E342E" stroke-width="0.8"/>` +
             `</svg>`,
         bridge_structure: (c) =>
-            `<svg viewBox="0 0 32 24" width="32" height="24">` +
-            `<path d="M2,18 Q16,4 30,18" fill="none" stroke="${c}" stroke-width="3" stroke-linecap="round"/>` +
-            `<line x1="2" y1="18" x2="30" y2="18" stroke="${c}" stroke-width="2.5"/>` +
-            `<line x1="9" y1="18" x2="9" y2="13" stroke="${c}" stroke-width="2"/>` +
-            `<line x1="16" y1="18" x2="16" y2="8" stroke="${c}" stroke-width="2"/>` +
-            `<line x1="23" y1="18" x2="23" y2="13" stroke="${c}" stroke-width="2"/>` +
+            // Top-down bridge view: deck, railings, supports, road markings
+            `<svg viewBox="0 0 120 36" width="120" height="36">` +
+            // Shadow/water hint underneath
+            `<rect x="2" y="3" width="116" height="30" rx="2" fill="#3366aa" opacity="0.2"/>` +
+            // Support pillars (visible through/beside deck)
+            `<rect x="18" y="1" width="5" height="34" rx="1" fill="#555" opacity="0.5"/>` +
+            `<rect x="50" y="1" width="5" height="34" rx="1" fill="#555" opacity="0.5"/>` +
+            `<rect x="82" y="1" width="5" height="34" rx="1" fill="#555" opacity="0.5"/>` +
+            // Main deck surface
+            `<rect x="4" y="5" width="112" height="26" rx="1.5" fill="${c}"/>` +
+            // Road surface (slightly lighter)
+            `<rect x="8" y="9" width="104" height="18" fill="#606060"/>` +
+            // Side barriers / guardrails
+            `<rect x="4" y="5" width="112" height="3.5" rx="0.8" fill="#888" opacity="0.85"/>` +
+            `<rect x="4" y="27.5" width="112" height="3.5" rx="0.8" fill="#888" opacity="0.85"/>` +
+            // Center line dashes
+            `<line x1="14" y1="18" x2="106" y2="18" stroke="#fff" stroke-width="1" stroke-dasharray="5,3.5" opacity="0.45"/>` +
+            // Edge lane markings
+            `<line x1="10" y1="10.5" x2="110" y2="10.5" stroke="#fff" stroke-width="0.5" opacity="0.25"/>` +
+            `<line x1="10" y1="25.5" x2="110" y2="25.5" stroke="#fff" stroke-width="0.5" opacity="0.25"/>` +
             `</svg>`,
         airfield: (c) =>
             // Airfield: realistic top-down runway with taxiway, apron, markings
@@ -186,6 +200,8 @@ const KMapObjects = (() => {
         command_post_structure: '#1565C0', fuel_depot: '#F57F17',
         airfield: '#37474F', supply_cache: '#8D6E63',
         bridge_structure: '#757575',
+        smoke: '#888888', fog_effect: '#E0E0E0',
+        fire_effect: '#FF4400', chemical_cloud: '#AACC00',
     };
 
     // ═══════════════════════════════════════════════════════════
@@ -281,6 +297,9 @@ const KMapObjects = (() => {
         if (gtype === 'LineString' || gtype === 'MultiLineString') return _createLineLayer(obj, color, inactive, opacity);
         if (gtype === 'Polygon' || gtype === 'MultiPolygon') {
             if (obj.object_type === 'smoke') return _createSmokeLayer(obj, inactive);
+            if (obj.object_type === 'fog_effect') return _createFogLayer(obj, inactive);
+            if (obj.object_type === 'fire_effect') return _createFireLayer(obj, inactive);
+            if (obj.object_type === 'chemical_cloud') return _createChemicalLayer(obj, inactive);
             return _createPolygonLayer(obj, color, inactive, opacity);
         }
         return null;
@@ -346,10 +365,251 @@ const KMapObjects = (() => {
             }));
         }
 
-        // Tooltip
+        // Tooltip and context menu
         const label = obj.label || 'Smoke Screen';
         const ticksLeft = remaining || '?';
         poly.bindTooltip(`🌫 ${label}<br>Dissipates in ~${ticksLeft} min`, {sticky: true, opacity: 0.9});
+        poly.on('contextmenu', (e) => {
+            L.DomEvent.stopPropagation(e);
+            if (_isAdminOpen()) _showObjectContextMenu(e, obj);
+        });
+
+        // Admin drag handle
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, latlngs);
+        }
+
+        return group;
+    }
+
+    // ── Fog zone rendering ─────────────────────────────────────
+
+    function _createFogLayer(obj, inactive) {
+        const rings = obj.geometry.type === 'Polygon'
+            ? obj.geometry.coordinates[0]
+            : obj.geometry.coordinates[0][0];
+        const latlngs = rings.map(c => [c[1], c[0]]);
+        const remaining = obj.properties ? obj.properties.ticks_remaining : 6;
+        const baseOpacity = inactive ? 0.08 : Math.min(0.3, 0.06 * remaining);
+
+        const group = L.featureGroup();
+
+        // Main fog polygon — soft white diffuse area
+        const poly = L.polygon(latlngs, {
+            color: 'rgba(220,220,220,0.1)',
+            weight: 0,
+            fillColor: '#f0f0f0',
+            fillOpacity: baseOpacity * 0.5,
+            className: 'fog-polygon',
+            interactive: true,
+        });
+        group.addLayer(poly);
+
+        // Compute centroid + rough radius
+        let cLat = 0, cLon = 0;
+        latlngs.forEach(([lat, lon]) => { cLat += lat; cLon += lon; });
+        cLat /= latlngs.length;
+        cLon /= latlngs.length;
+        const mPerLon = 111320 * Math.cos(cLat * Math.PI / 180);
+        let maxDist = 0;
+        latlngs.forEach(([lat, lon]) => {
+            const d = Math.sqrt(((lat - cLat) * 111320) ** 2 + ((lon - cLon) * mPerLon) ** 2);
+            if (d > maxDist) maxDist = d;
+        });
+        const radiusM = maxDist || 150;
+
+        // Multiple soft white circles for diffuse fog appearance
+        const cloudCount = inactive ? 2 : Math.min(10, Math.max(4, remaining * 2));
+        for (let i = 0; i < cloudCount; i++) {
+            const seed = (obj.id || '').charCodeAt(i % (obj.id || 'x').length) || 42;
+            const angle = ((seed * 137.5 + i * 47) % 360) * Math.PI / 180;
+            const offsetFrac = ((seed * 13 + i * 31) % 60) / 100;
+            const oLat = cLat + (offsetFrac * radiusM * Math.cos(angle)) / 111320;
+            const oLon = cLon + (offsetFrac * radiusM * Math.sin(angle)) / mPerLon;
+            const cloudR = radiusM * (0.5 + ((seed + i * 17) % 40) / 60);
+
+            group.addLayer(L.circle([oLat, oLon], {
+                radius: cloudR,
+                color: 'transparent',
+                weight: 0,
+                fillColor: '#ffffff',
+                fillOpacity: baseOpacity * (0.25 + (i % 3) * 0.1),
+                className: 'fog-cloud',
+                interactive: false,
+            }));
+        }
+
+        const label = obj.label || 'Fog Zone';
+        const ticksLeft = remaining || '?';
+        poly.bindTooltip(`🌫 ${label}<br>Dissipates in ~${ticksLeft} min`, {sticky: true, opacity: 0.9});
+        poly.on('contextmenu', (e) => {
+            L.DomEvent.stopPropagation(e);
+            if (_isAdminOpen()) _showObjectContextMenu(e, obj);
+        });
+
+        // Admin drag handle
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, latlngs);
+        }
+
+        return group;
+    }
+
+    // ── Fire zone rendering ──────────────────────────────────────
+
+    function _createFireLayer(obj, inactive) {
+        const rings = obj.geometry.type === 'Polygon'
+            ? obj.geometry.coordinates[0]
+            : obj.geometry.coordinates[0][0];
+        const latlngs = rings.map(c => [c[1], c[0]]);
+        const remaining = obj.properties ? obj.properties.ticks_remaining : 5;
+        const baseOpacity = inactive ? 0.1 : Math.min(0.5, 0.12 * remaining);
+
+        const group = L.featureGroup();
+
+        // Main fire polygon — orange-red area
+        const poly = L.polygon(latlngs, {
+            color: 'rgba(255,68,0,0.3)',
+            weight: 1,
+            fillColor: '#FF4400',
+            fillOpacity: baseOpacity * 0.4,
+            className: 'fire-polygon',
+            interactive: true,
+        });
+        group.addLayer(poly);
+
+        // Compute centroid + rough radius
+        let cLat = 0, cLon = 0;
+        latlngs.forEach(([lat, lon]) => { cLat += lat; cLon += lon; });
+        cLat /= latlngs.length;
+        cLon /= latlngs.length;
+        const mPerLon = 111320 * Math.cos(cLat * Math.PI / 180);
+        let maxDist = 0;
+        latlngs.forEach(([lat, lon]) => {
+            const d = Math.sqrt(((lat - cLat) * 111320) ** 2 + ((lon - cLon) * mPerLon) ** 2);
+            if (d > maxDist) maxDist = d;
+        });
+        const radiusM = maxDist || 80;
+
+        // Fire circles: orange/red glowing spots with varying intensity
+        const flameCount = inactive ? 2 : Math.min(8, Math.max(3, remaining * 2));
+        for (let i = 0; i < flameCount; i++) {
+            const seed = (obj.id || '').charCodeAt(i % (obj.id || 'x').length) || 42;
+            const angle = ((seed * 137.5 + i * 47) % 360) * Math.PI / 180;
+            const offsetFrac = ((seed * 13 + i * 31) % 65) / 100;
+            const oLat = cLat + (offsetFrac * radiusM * Math.cos(angle)) / 111320;
+            const oLon = cLon + (offsetFrac * radiusM * Math.sin(angle)) / mPerLon;
+            const cloudR = radiusM * (0.3 + ((seed + i * 17) % 35) / 70);
+
+            // Alternate orange and bright yellow for flame effect
+            const isHot = (i % 3 === 0);
+            group.addLayer(L.circle([oLat, oLon], {
+                radius: cloudR,
+                color: 'transparent',
+                weight: 0,
+                fillColor: isHot ? '#FFAA00' : '#FF4400',
+                fillOpacity: baseOpacity * (isHot ? 0.5 : 0.35),
+                className: 'fire-flame',
+                interactive: false,
+            }));
+        }
+
+        // Dark smoke ring on outer edge
+        group.addLayer(L.circle([cLat, cLon], {
+            radius: radiusM * 1.3,
+            color: 'transparent',
+            weight: 0,
+            fillColor: '#333',
+            fillOpacity: baseOpacity * 0.15,
+            className: 'fire-smoke',
+            interactive: false,
+        }));
+
+        const label = obj.label || 'Area Fire';
+        const ticksLeft = remaining || '?';
+        poly.bindTooltip(`🔥 ${label}<br>Burns out in ~${ticksLeft} min<br>⚠ Damages units inside`, {sticky: true, opacity: 0.9});
+        poly.on('contextmenu', (e) => {
+            L.DomEvent.stopPropagation(e);
+            if (_isAdminOpen()) _showObjectContextMenu(e, obj);
+        });
+
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, latlngs);
+        }
+
+        return group;
+    }
+
+    // ── Chemical cloud rendering ─────────────────────────────────
+
+    function _createChemicalLayer(obj, inactive) {
+        const rings = obj.geometry.type === 'Polygon'
+            ? obj.geometry.coordinates[0]
+            : obj.geometry.coordinates[0][0];
+        const latlngs = rings.map(c => [c[1], c[0]]);
+        const remaining = obj.properties ? obj.properties.ticks_remaining : 8;
+        const baseOpacity = inactive ? 0.08 : Math.min(0.35, 0.06 * remaining);
+
+        const group = L.featureGroup();
+
+        // Main chemical polygon — yellow-green toxic area
+        const poly = L.polygon(latlngs, {
+            color: 'rgba(170,204,0,0.25)',
+            weight: 1,
+            fillColor: '#AACC00',
+            fillOpacity: baseOpacity * 0.4,
+            className: 'chem-polygon',
+            interactive: true,
+        });
+        group.addLayer(poly);
+
+        // Compute centroid + rough radius
+        let cLat = 0, cLon = 0;
+        latlngs.forEach(([lat, lon]) => { cLat += lat; cLon += lon; });
+        cLat /= latlngs.length;
+        cLon /= latlngs.length;
+        const mPerLon = 111320 * Math.cos(cLat * Math.PI / 180);
+        let maxDist = 0;
+        latlngs.forEach(([lat, lon]) => {
+            const d = Math.sqrt(((lat - cLat) * 111320) ** 2 + ((lon - cLon) * mPerLon) ** 2);
+            if (d > maxDist) maxDist = d;
+        });
+        const radiusM = maxDist || 120;
+
+        // Toxic cloud circles: yellow-green splotches
+        const cloudCount = inactive ? 2 : Math.min(9, Math.max(4, remaining * 1.5));
+        for (let i = 0; i < cloudCount; i++) {
+            const seed = (obj.id || '').charCodeAt(i % (obj.id || 'x').length) || 42;
+            const angle = ((seed * 137.5 + i * 47) % 360) * Math.PI / 180;
+            const offsetFrac = ((seed * 13 + i * 31) % 55) / 100;
+            const oLat = cLat + (offsetFrac * radiusM * Math.cos(angle)) / 111320;
+            const oLon = cLon + (offsetFrac * radiusM * Math.sin(angle)) / mPerLon;
+            const cloudR = radiusM * (0.4 + ((seed + i * 17) % 40) / 60);
+
+            // Alternate between yellow-green and darker green
+            const isDark = (i % 3 === 0);
+            group.addLayer(L.circle([oLat, oLon], {
+                radius: cloudR,
+                color: 'transparent',
+                weight: 0,
+                fillColor: isDark ? '#88AA00' : '#CCEE44',
+                fillOpacity: baseOpacity * (isDark ? 0.35 : 0.25),
+                className: 'chem-cloud',
+                interactive: false,
+            }));
+        }
+
+        const label = obj.label || 'Chemical Cloud';
+        const ticksLeft = remaining || '?';
+        poly.bindTooltip(`☣ ${label}<br>Dissipates in ~${ticksLeft} min<br>⚠ Toxic — heavy damage`, {sticky: true, opacity: 0.9});
+        poly.on('contextmenu', (e) => {
+            L.DomEvent.stopPropagation(e);
+            if (_isAdminOpen()) _showObjectContextMenu(e, obj);
+        });
+
+        if (_isAdminOpen()) {
+            _addDragHandle(group, obj, latlngs);
+        }
 
         return group;
     }
@@ -360,6 +620,10 @@ const KMapObjects = (() => {
         // Airfield uses geographic overlay (scales with map zoom)
         if (obj.object_type === 'airfield') {
             return _createAirfieldLayer(obj, color, inactive, opacity);
+        }
+        // Bridge uses geographic overlay (top-down, rotatable, resizable)
+        if (obj.object_type === 'bridge_structure') {
+            return _createBridgeLayer(obj, color, inactive, opacity);
         }
 
         const coords = obj.geometry.coordinates;
@@ -481,13 +745,14 @@ const KMapObjects = (() => {
 
         const group = L.featureGroup([overlay]);
 
-        // Add a transparent interactive hit area matching the rotated runway footprint
-        // Use a rotated polygon for more accurate click detection
+        // Add an invisible interactive hit area for tooltip/contextmenu
         const hitArea = L.rectangle(bounds, {
-            color: 'transparent',
-            fillColor: 'transparent',
-            fillOpacity: 0,
+            stroke: false,
             weight: 0,
+            fill: true,
+            fillColor: 'transparent',
+            fillOpacity: 0.0001,
+            color: 'transparent',
             interactive: true,
         });
         group.addLayer(hitArea);
@@ -506,6 +771,12 @@ const KMapObjects = (() => {
                     iconAnchor: [11, 11],
                 }),
                 draggable: true,
+            });
+
+            // Propagate contextmenu from drag handle to show object menu
+            dragMarker.on('contextmenu', (e) => {
+                L.DomEvent.stopPropagation(e);
+                _showObjectContextMenu(e, obj);
             });
 
             dragMarker.on('dragend', async () => {
@@ -542,6 +813,12 @@ const KMapObjects = (() => {
                     iconAnchor: [8, 8],
                 }),
                 draggable: true,
+            });
+
+            // Propagate contextmenu from rotation handle
+            rotHandle.on('contextmenu', (e) => {
+                L.DomEvent.stopPropagation(e);
+                _showObjectContextMenu(e, obj);
             });
 
             rotHandle.on('drag', () => {
@@ -598,6 +875,235 @@ const KMapObjects = (() => {
         }
 
         return group;
+    }
+
+    // ── Bridge (geographic overlay — top-down, rotatable, resizable) ─────
+
+    function _buildBridgeSvg(innerSvg, svgW, svgH, svgSize, scaleY, rotationDeg) {
+        const cx = svgSize / 2, cy = svgSize / 2;
+        // Transform: translate to canvas center → rotate → scale Y for aspect ratio → translate content center to origin
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgSize} ${svgSize}" width="${svgSize}" height="${svgSize}">` +
+            `<g transform="translate(${cx}, ${cy}) rotate(${rotationDeg}) scale(1, ${scaleY.toFixed(4)}) translate(${-svgW / 2}, ${-svgH / 2})">` +
+            innerSvg +
+            `</g></svg>`;
+    }
+
+    function _createBridgeLayer(obj, color, inactive, opacity) {
+        const coords = obj.geometry.coordinates;
+        const centerLat = coords[1];
+        const centerLon = coords[0];
+        const label = obj.label || 'Bridge';
+        const adminOpen = _isAdminOpen();
+        const rotationDeg = (obj.properties && obj.properties.rotation_deg) || 0;
+        // Bridge dimensions from properties (default: 60m long, 14m wide)
+        const lengthM = (obj.properties && obj.properties.length_m) || 60;
+        const widthM = (obj.properties && obj.properties.width_m) || 14;
+
+        // SVG viewBox: 120 x 36 (ratio 3.33:1)
+        const svgW = 120, svgH = 36;
+
+        // Bounding circle radius for any rotation
+        const diagM = Math.sqrt(lengthM * lengthM + widthM * widthM);
+        const halfSide = diagM / 2 + 5;
+
+        const mPerLon = METERS_PER_DEG * Math.cos(centerLat * Math.PI / 180);
+        const dLat = halfSide / METERS_PER_DEG;
+        const dLon = halfSide / mPerLon;
+
+        const bounds = L.latLngBounds(
+            [centerLat - dLat, centerLon - dLon],
+            [centerLat + dLat, centerLon + dLon]
+        );
+
+        // Compute svgSize so that svgW (120 units) maps to lengthM in geographic bounds (2*halfSide).
+        // 120 / svgSize = lengthM / (2 * halfSide)  →  svgSize = 120 * 2 * halfSide / lengthM
+        const svgSize = Math.ceil(svgW * 2 * halfSide / lengthM);
+        // Correct Y-axis scaling: the SVG aspect ratio (120:36=3.33) may differ from bridge ratio (lengthM:widthM).
+        // scaleY adjusts so that 36 SVG units map to widthM in the same coordinate space.
+        const scaleY = (widthM / lengthM) * (svgW / svgH);
+
+        const innerSvg = STRUCTURE_SVGS.bridge_structure(color)
+            .replace(/<svg[^>]*>/, '').replace(/<\/svg>/, '');
+
+        const svgString = _buildBridgeSvg(innerSvg, svgW, svgH, svgSize, scaleY, rotationDeg);
+        const dataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+
+        const overlay = L.imageOverlay(dataUri, bounds, {
+            opacity: opacity,
+            interactive: false,
+        });
+
+        const group = L.featureGroup([overlay]);
+
+        // Invisible hit area for tooltip/contextmenu
+        const hitArea = L.rectangle(bounds, {
+            stroke: false,
+            weight: 0,
+            fill: true,
+            fillColor: 'transparent',
+            fillOpacity: 0.0001,
+            color: 'transparent',
+            interactive: true,
+        });
+        group.addLayer(hitArea);
+        _bindTooltipAndContext(hitArea, obj);
+
+        // Admin: drag handle (center) + rotation handle + resize handle
+        if (adminOpen) {
+            // Helper: propagate contextmenu from admin handles
+            const _bindCtx = (handle) => {
+                handle.on('contextmenu', (e) => {
+                    L.DomEvent.stopPropagation(e);
+                    _showObjectContextMenu(e, obj);
+                });
+            };
+
+            // ── Center drag handle ──
+            const dragMarker = L.marker([centerLat, centerLon], {
+                icon: L.divIcon({
+                    className: 'map-obj-icon',
+                    html: '<div style="width:18px;height:18px;border:2px dashed rgba(79,195,247,0.6);border-radius:50%;cursor:grab;background:rgba(79,195,247,0.1);"></div>',
+                    iconSize: [18, 18],
+                    iconAnchor: [9, 9],
+                }),
+                draggable: true,
+            });
+
+            dragMarker.on('dragend', async () => {
+                const newLL = dragMarker.getLatLng();
+                const newGeom = { type: 'Point', coordinates: [newLL.lng, newLL.lat] };
+                const sid = _sessionId || KSessionUI?.getSessionId();
+                const token = KSessionUI?.getToken();
+                const headers = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                try {
+                    await fetch(`/api/sessions/${sid}/map-objects/${obj.id}`, {
+                        method: 'PUT', headers,
+                        body: JSON.stringify({ geometry: newGeom }),
+                    });
+                    obj.geometry = newGeom;
+                    render();
+                } catch (err) { console.warn('Move bridge failed:', err); }
+            });
+            _bindCtx(dragMarker);
+            group.addLayer(dragMarker);
+
+            // ── Rotation handle (at one end of bridge) ──
+            const halfLen = lengthM / 2;
+            const rotRad = rotationDeg * Math.PI / 180;
+            const rotHandleLat = centerLat - (halfLen * Math.sin(rotRad)) / METERS_PER_DEG;
+            const rotHandleLon = centerLon + (halfLen * Math.cos(rotRad)) / mPerLon;
+
+            const rotHandle = L.marker([rotHandleLat, rotHandleLon], {
+                icon: L.divIcon({
+                    className: 'map-obj-icon',
+                    html: '<div style="width:14px;height:14px;border:2px solid #ff9800;border-radius:50%;cursor:pointer;background:rgba(255,152,0,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;" title="Drag to rotate">↻</div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7],
+                }),
+                draggable: true,
+            });
+
+            rotHandle.on('drag', () => {
+                const handleLL = rotHandle.getLatLng();
+                const dLatM = (handleLL.lat - centerLat) * METERS_PER_DEG;
+                const dLonM = (handleLL.lng - centerLon) * mPerLon;
+                let newDeg = Math.atan2(-dLatM, dLonM) * 180 / Math.PI;
+                if (newDeg < 0) newDeg += 360;
+                const previewSvg = _buildBridgeSvg(innerSvg, svgW, svgH, svgSize, scaleY, newDeg.toFixed(1));
+                overlay.setUrl('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg));
+            });
+
+            rotHandle.on('dragend', async () => {
+                const handleLL = rotHandle.getLatLng();
+                const dLatM = (handleLL.lat - centerLat) * METERS_PER_DEG;
+                const dLonM = (handleLL.lng - centerLon) * mPerLon;
+                let newDeg = Math.atan2(-dLatM, dLonM) * 180 / Math.PI;
+                if (newDeg < 0) newDeg += 360;
+                newDeg = Math.round(newDeg);
+                await _updateBridgeProps(obj, { rotation_deg: newDeg });
+            });
+            _bindCtx(rotHandle);
+            group.addLayer(rotHandle);
+
+            // ── Resize handle (at the other end — drag to change length) ──
+            const resHandleLat = centerLat + (halfLen * Math.sin(rotRad)) / METERS_PER_DEG;
+            const resHandleLon = centerLon - (halfLen * Math.cos(rotRad)) / mPerLon;
+
+            const resHandle = L.marker([resHandleLat, resHandleLon], {
+                icon: L.divIcon({
+                    className: 'map-obj-icon',
+                    html: '<div style="width:14px;height:14px;border:2px solid #4caf50;border-radius:2px;cursor:nwse-resize;background:rgba(76,175,80,0.25);display:flex;align-items:center;justify-content:center;font-size:9px;" title="Drag to resize">⤡</div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7],
+                }),
+                draggable: true,
+            });
+
+            resHandle.on('drag', () => {
+                // Live preview: compute new length from drag position
+                const handleLL = resHandle.getLatLng();
+                const dLatM = (handleLL.lat - centerLat) * METERS_PER_DEG;
+                const dLonM = (handleLL.lng - centerLon) * mPerLon;
+                const newHalfLen = Math.sqrt(dLatM * dLatM + dLonM * dLonM);
+                const newLength = Math.max(20, Math.round(newHalfLen * 2));
+                // Recompute SVG params for preview
+                const newDiagM = Math.sqrt(newLength * newLength + widthM * widthM);
+                const newHalfSide = newDiagM / 2 + 5;
+                const newSvgSize = Math.ceil(svgW * 2 * newHalfSide / newLength);
+                const newScaleY = (widthM / newLength) * (svgW / svgH);
+                const previewSvg = _buildBridgeSvg(innerSvg, svgW, svgH, newSvgSize, newScaleY, rotationDeg);
+                overlay.setUrl('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(previewSvg));
+                // Update geographic bounds
+                const newDLat = newHalfSide / METERS_PER_DEG;
+                const newDLon = newHalfSide / mPerLon;
+                const newBounds = L.latLngBounds(
+                    [centerLat - newDLat, centerLon - newDLon],
+                    [centerLat + newDLat, centerLon + newDLon]
+                );
+                overlay.setBounds(newBounds);
+                hitArea.setBounds(newBounds);
+            });
+
+            resHandle.on('dragend', async () => {
+                const handleLL = resHandle.getLatLng();
+                const dLatM = (handleLL.lat - centerLat) * METERS_PER_DEG;
+                const dLonM = (handleLL.lng - centerLon) * mPerLon;
+                const newHalfLen = Math.sqrt(dLatM * dLatM + dLonM * dLonM);
+                const newLength = Math.max(20, Math.round(newHalfLen * 2));
+                await _updateBridgeProps(obj, { length_m: newLength });
+            });
+            _bindCtx(resHandle);
+            group.addLayer(resHandle);
+        }
+
+        // Effect radius circle
+        const effectR = (obj.definition && obj.definition.effect_radius_m) || 0;
+        if (effectR > 0) {
+            group.addLayer(L.circle([centerLat, centerLon], {
+                radius: effectR, color, weight: 1, dashArray: '4,4',
+                fillColor: color, fillOpacity: inactive ? 0.03 : 0.06,
+                opacity: opacity * 0.5, interactive: false,
+            }));
+        }
+
+        return group;
+    }
+
+    async function _updateBridgeProps(obj, propsUpdate) {
+        const sid = _sessionId || KSessionUI?.getSessionId();
+        const token = KSessionUI?.getToken();
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const updatedProps = { ...(obj.properties || {}), ...propsUpdate };
+        try {
+            await fetch(`/api/sessions/${sid}/map-objects/${obj.id}`, {
+                method: 'PUT', headers,
+                body: JSON.stringify({ properties: updatedProps }),
+            });
+            obj.properties = updatedProps;
+            render();
+        } catch (err) { console.warn('Update bridge failed:', err); }
     }
 
     // ── Line obstacles (NATO style) ───────────────────────────
@@ -784,6 +1290,12 @@ const KMapObjects = (() => {
             } catch (err) { console.warn('Move map object failed:', err); }
         });
 
+        // Propagate contextmenu from drag handle
+        dragMarker.on('contextmenu', (e) => {
+            L.DomEvent.stopPropagation(e);
+            if (_isAdminOpen()) _showObjectContextMenu(e, obj);
+        });
+
         group.addLayer(dragMarker);
     }
 
@@ -813,7 +1325,8 @@ const KMapObjects = (() => {
         const status = obj.is_active ? '✓ Active' : '✗ Inactive';
         const prot = obj.definition ? obj.definition.protection_bonus : 1.0;
         const rotDeg = (obj.properties && obj.properties.rotation_deg) ? ` · ↻${obj.properties.rotation_deg}°` : '';
-        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}${rotDeg}</span>`;
+        const lenM = (obj.properties && obj.properties.length_m) ? ` · ${obj.properties.length_m}m` : '';
+        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}${rotDeg}${lenM}</span>`;
         // Show discovery status in admin mode
         if (_isAdminOpen()) {
             const bIcon = obj.discovered_by_blue ? '👁' : '🚫';

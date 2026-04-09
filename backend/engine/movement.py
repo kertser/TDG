@@ -210,7 +210,7 @@ def _check_obstacles(
             continue
 
         defn = MAP_OBJECT_DEFS.get(obj.object_type)
-        if not defn or defn["category"] != "obstacle":
+        if not defn or defn["category"] not in ("obstacle", "effect"):
             continue
 
         try:

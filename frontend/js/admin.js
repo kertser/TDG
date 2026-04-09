@@ -4347,6 +4347,7 @@ const KAdmin = (() => {
     function _renderObjectButtons(defs) {
         const obstacleContainer = document.getElementById('admin-obstacle-buttons');
         const structureContainer = document.getElementById('admin-structure-buttons');
+        const effectContainer = document.getElementById('admin-effect-buttons');
         if (!obstacleContainer || !structureContainer) return;
 
         const ICONS = {
@@ -4357,6 +4358,7 @@ const KAdmin = (() => {
             field_hospital: '✚', command_post_structure: '⚑',
             fuel_depot: '⛽', airfield: '✈️', supply_cache: '🗃',
             bridge_structure: '🌁',
+            smoke: '🌫', fog_effect: '🌁', fire_effect: '🔥', chemical_cloud: '☣',
         };
         const GEOM_HINTS = {
             LineString: '(draw line, right-click to finish)',
@@ -4366,6 +4368,7 @@ const KAdmin = (() => {
 
         let obstacleHtml = '';
         let structureHtml = '';
+        let effectHtml = '';
 
         for (const [key, defn] of Object.entries(defs)) {
             const icon = ICONS[key] || '⬟';
@@ -4379,6 +4382,8 @@ const KAdmin = (() => {
 
             if (defn.category === 'obstacle') {
                 obstacleHtml += btn;
+            } else if (defn.category === 'effect') {
+                effectHtml += btn;
             } else {
                 structureHtml += btn;
             }
@@ -4386,6 +4391,7 @@ const KAdmin = (() => {
 
         obstacleContainer.innerHTML = obstacleHtml;
         structureContainer.innerHTML = structureHtml;
+        if (effectContainer) effectContainer.innerHTML = effectHtml;
 
         // Bind click handlers
         document.querySelectorAll('.map-obj-place-btn').forEach(btn => {

@@ -70,7 +70,7 @@ class LocationRefRaw(BaseModel):
     source_text: str = Field(..., description="The original text fragment, e.g. 'B8 по улитке 2-4'")
     ref_type: str = Field(
         "unknown",
-        description="Best guess: 'grid', 'snail', 'coordinate', 'relative', 'terrain', 'unknown'",
+        description="Best guess: 'grid', 'snail', 'coordinate', 'height', 'relative', 'terrain', 'unknown'",
     )
     normalized: str = Field(
         "",

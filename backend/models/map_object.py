@@ -17,6 +17,7 @@ from backend.database import Base
 class ObjectCategory(str, enum.Enum):
     obstacle = "obstacle"
     structure = "structure"
+    effect = "effect"
 
 
 class ObjectSide(str, enum.Enum):

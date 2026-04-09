@@ -18,8 +18,10 @@ const KTerrain = (() => {
     let legendControl = null;
     let _visible = false;
     let _elevVisible = false;
+    let _peaksVisible = false;
     let _terrainData = null;
     let _elevationData = null;
+    let _peaksData = null;
 
     // Admin painting state
     let _paintMode = false;
@@ -70,6 +72,13 @@ const KTerrain = (() => {
 
         terrainLayer = L.layerGroup({ pane: 'terrainPane' });
         elevationLayer = L.layerGroup({ pane: 'elevationPane' });
+
+        // Peaks layer uses the overlay pane (above terrain)
+        if (!map.getPane('peaksPane')) {
+            map.createPane('peaksPane');
+            map.getPane('peaksPane').style.zIndex = 450;
+            map.getPane('peaksPane').style.pointerEvents = 'none';
+        }
     }
 
     function setSession(sid) {
@@ -90,6 +99,8 @@ const KTerrain = (() => {
             _terrainData = await resp.json();
             _buildSpatialIndex();
             _renderTerrain();
+            // Auto-load peaks (derived from elevation data) if not yet loaded
+            if (!_peaksData) loadPeaks(token);
         } catch (err) {
             console.warn('Terrain load error:', err);
         }
@@ -104,6 +115,8 @@ const KTerrain = (() => {
             if (!resp.ok) return;
             _elevationData = await resp.json();
             _renderElevation();
+            // Auto-load peaks when elevation data is available
+            loadPeaks(token);
         } catch (err) {
             console.warn('Elevation load error:', err);
         }
@@ -261,6 +274,116 @@ const KTerrain = (() => {
     }
 
     // ── Toggle visibility ───────────────────────────────
+
+    // Peaks layer group (created lazily)
+    let _peaksLayerGroup = null;
+
+    function _ensurePeaksLayer() {
+        if (!_peaksLayerGroup && map) {
+            _peaksLayerGroup = L.layerGroup();
+        }
+        return _peaksLayerGroup;
+    }
+
+    // ── Load and render elevation peaks (height tops) ───
+
+    async function loadPeaks(token) {
+        if (!sessionId) return;
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}/elevation/peaks`, {
+                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
+            if (!resp.ok) return;
+            _peaksData = await resp.json();
+            _renderPeaks();
+            // Auto-show peaks when data is available
+            if (_peaksData && _peaksData.peaks && _peaksData.peaks.length > 0) {
+                const layer = _ensurePeaksLayer();
+                if (layer && map && !map.hasLayer(layer)) {
+                    layer.addTo(map);
+                    _peaksVisible = true;
+                }
+            }
+        } catch (err) {
+            console.warn('Peaks load error:', err);
+        }
+    }
+
+    function _renderPeaks() {
+        const layer = _ensurePeaksLayer();
+        if (!layer) return;
+        layer.clearLayers();
+
+        if (!_peaksData || !_peaksData.peaks || !_peaksData.peaks.length) return;
+
+        for (const peak of _peaksData.peaks) {
+            const elev = Math.round(peak.elevation_m);
+            // Small fixed-size triangle marker + elevation number (does not scale with zoom)
+            const labelHtml = `<div class="height-top-marker" style="pointer-events:auto;">` +
+                `<svg width="8" height="8" viewBox="0 0 14 14" style="display:block;margin:0 auto;">` +
+                `<polygon points="7,1 1,13 13,13" fill="#8B4513" stroke="#5D3A1A" stroke-width="1.2" opacity="0.9"/>` +
+                `</svg>` +
+                `<div class="height-top-label">${elev}</div>` +
+                `</div>`;
+
+            const icon = L.divIcon({
+                className: 'height-top-icon',
+                html: labelHtml,
+                iconSize: [26, 18],
+                iconAnchor: [13, 16],
+            });
+
+            const marker = L.marker([peak.lat, peak.lon], {
+                icon: icon,
+                interactive: true,
+                pane: 'peaksPane',
+            });
+
+            marker.bindTooltip(
+                `${elev} m`,
+                { sticky: false, className: 'terrain-tooltip' }
+            );
+
+            marker.addTo(layer);
+        }
+    }
+
+    function togglePeaks() {
+        _peaksVisible = !_peaksVisible;
+        const layer = _ensurePeaksLayer();
+        if (!layer) return _peaksVisible;
+        if (_peaksVisible) {
+            if (!map.hasLayer(layer)) layer.addTo(map);
+            // Auto-load if not yet loaded
+            if (!_peaksData) {
+                const token = typeof KSessionUI !== 'undefined' ? KSessionUI.getToken() : null;
+                loadPeaks(token);
+            }
+        } else {
+            if (map.hasLayer(layer)) map.removeLayer(layer);
+        }
+        return _peaksVisible;
+    }
+
+    function showPeaks() {
+        _peaksVisible = true;
+        const layer = _ensurePeaksLayer();
+        if (layer && !map.hasLayer(layer)) layer.addTo(map);
+        if (!_peaksData) {
+            const token = typeof KSessionUI !== 'undefined' ? KSessionUI.getToken() : null;
+            loadPeaks(token);
+        }
+    }
+
+    function hidePeaks() {
+        _peaksVisible = false;
+        const layer = _ensurePeaksLayer();
+        if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+    }
+
+    function isPeaksVisible() { return _peaksVisible; }
+
+    function getPeaks() { return _peaksData ? _peaksData.peaks : []; }
 
     function toggle() {
         _visible = !_visible;
@@ -526,8 +649,9 @@ const KTerrain = (() => {
     function getTerrainLabels() { return TERRAIN_LABELS; }
 
     return {
-        init, setSession, load, loadElevation,
-        toggle, toggleElevation, show, hide, isVisible,
+        init, setSession, load, loadElevation, loadPeaks,
+        toggle, toggleElevation, togglePeaks, show, hide, isVisible,
+        showPeaks, hidePeaks, isPeaksVisible, getPeaks,
         showLegend, hideLegend, toggleLegend,
         startPaintMode, stopPaintMode, setPaintType, isPaintMode,
         analyze, analyzeWithProgress, estimateCellCount,
