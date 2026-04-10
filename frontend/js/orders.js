@@ -139,6 +139,13 @@ const KOrders = (() => {
             _stopTopZoneMonitor(); // cancel any active top-zone tracking
             panel.classList.add('hovered');
             _scrollRadioToBottom();
+            // If radio tab is active, clear unread since user can now see messages
+            const radioTabBtn = document.querySelector('.cmd-tab-btn[data-cmd-tab="cmd-radio"]');
+            if (radioTabBtn && radioTabBtn.classList.contains('active')) {
+                _radioUnread = 0;
+                _setLastRead();
+                _updateRadioLed();
+            }
         });
 
         panel.addEventListener('mouseleave', (e) => {
@@ -784,7 +791,10 @@ const KOrders = (() => {
         const panel = document.getElementById('command-panel');
         const isRadioActive = radioTabBtn && radioTabBtn.classList.contains('active');
         const isPanelVisible = panel && (panel.classList.contains('hovered') || panel.classList.contains('expanded'));
-        if (!isRadioActive || !isPanelVisible) {
+        if (isRadioActive && isPanelVisible) {
+            // User can see messages — mark as read
+            _setLastRead();
+        } else {
             _radioUnread++;
             _updateRadioLed();
         }

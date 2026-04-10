@@ -139,14 +139,14 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         # Cache for future ticks
         set_cached_terrain_data(_sid_str, terrain_cells_dict, elevation_cells_dict)
 
-        # Load grid service for point→snail resolution
-        gd_result = await db.execute(
-            select(GridDefinition).where(GridDefinition.session_id == session_id)
-        )
-        gd = gd_result.scalar_one_or_none()
-        if gd:
-            from backend.services.grid_service import GridService
-            grid_service = GridService(gd)
+    # Always build grid_service (needed for radio chatter grid refs on every tick)
+    gd_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = gd_result.scalar_one_or_none()
+    if gd:
+        from backend.services.grid_service import GridService
+        grid_service = GridService(gd)
 
     terrain = TerrainService(
         terrain_meta=scenario.terrain_meta if scenario else None,

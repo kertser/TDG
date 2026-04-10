@@ -161,10 +161,18 @@ class OrderService:
         elif parsed.classification == MessageClassification.acknowledgment:
             order.status = OrderStatus.completed
             order.completed_at = datetime.now(timezone.utc)
+            # Generate brief unit ack response — even ack messages deserve a reply
+            await self._generate_brief_ack_responses(
+                order, parsed, result, units_context, session_id, db, issuer_side, grid_service,
+            )
 
         elif parsed.classification == MessageClassification.status_report:
             order.status = OrderStatus.completed
             order.completed_at = datetime.now(timezone.utc)
+            # Generate brief unit ack response
+            await self._generate_brief_ack_responses(
+                order, parsed, result, units_context, session_id, db, issuer_side, grid_service,
+            )
 
         elif parsed.classification == MessageClassification.unclear:
             # ── Escalate: try full model with richer context before giving up ──
@@ -675,6 +683,57 @@ class OrderService:
             order.validated_at = datetime.now(timezone.utc)
         else:
             order.status = OrderStatus.failed
+
+    async def _generate_brief_ack_responses(
+        self,
+        order: Order,
+        parsed: ParsedOrderData,
+        result: OrderParseResult,
+        units_context: list[dict],
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+        grid_service: Any = None,
+    ):
+        """
+        Generate brief unit acknowledgment responses for non-command messages
+        (acknowledgments, status reports, encouragement). Units reply with a
+        short "Принял" / "Acknowledged" so the commander knows they heard.
+        """
+        matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
+
+        # If no specific units referenced, use order's target_unit_ids
+        if not matched and order.target_unit_ids:
+            for uid in order.target_unit_ids:
+                for u in units_context:
+                    if u.get("id") == str(uid):
+                        matched.append(u)
+
+        # If still no units, pick first available same-side unit
+        if not matched:
+            same_side = [
+                u for u in units_context
+                if u.get("side") == issuer_side
+                and not u.get("is_destroyed")
+                and u.get("comms_status") != "offline"
+            ]
+            if same_side:
+                matched = [same_side[0]]
+
+        for unit_dict in matched:
+            resp_type, reason = response_generator.determine_response_type(parsed, unit_dict)
+            if resp_type == ResponseType.no_response:
+                continue
+
+            # For ack/report messages from commander, unit just acknowledges briefly
+            resp = response_generator.generate_response(
+                parsed=parsed,
+                unit=unit_dict,
+                response_type=ResponseType.ack,
+                status_text="",
+            )
+            if resp:
+                result.responses.append(resp)
 
     async def _process_status_request(
         self,

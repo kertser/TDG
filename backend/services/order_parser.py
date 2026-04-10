@@ -298,7 +298,9 @@ class OrderParser:
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
                          "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение",
                          "поразить", "бей по", "удар по", "подавить", "подавляющ",
-                         "захвати", "захват", "овладе", "занять", "займ"]
+                         "захвати", "захват", "овладе", "занять", "займ",
+                         "продолжай", "будьте готовы", "координируй", "организуй",
+                         "откройте огонь", "открывай", "выдвину", "приказываю"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -310,7 +312,15 @@ class OrderParser:
         # Strong sender-identification signals → status report or ack
         is_self_report = any(kw in text_lower for kw in ["здесь ", "this is "])
 
-        if any(kw in text_lower for kw in ack_kw):
+        # Pre-check: does the message contain any command keywords?
+        has_command_kw = any(kw in text_lower for kw in command_kw_en + command_kw_ru)
+        has_ack_kw = any(kw in text_lower for kw in ack_kw)
+
+        # If message has BOTH ack AND command keywords, it's a command with ack preamble
+        # e.g. "Вас понял. Атакуйте." or "Roger. Move to grid B8."
+        if has_ack_kw and has_command_kw:
+            classification = MessageClassification.command
+        elif has_ack_kw:
             classification = MessageClassification.acknowledgment
         elif any(kw in text_lower for kw in status_req_kw):
             classification = MessageClassification.status_request
@@ -318,10 +328,13 @@ class OrderParser:
         elif is_self_report and any(kw in text_lower for kw in report_kw):
             # "Здесь [unit]. ..." is almost always a status report
             classification = MessageClassification.status_report
-        elif any(kw in text_lower for kw in report_kw) and not any(kw in text_lower for kw in command_kw_en + command_kw_ru):
+        elif any(kw in text_lower for kw in report_kw) and not has_command_kw:
             classification = MessageClassification.status_report
-        elif any(kw in text_lower for kw in command_kw_en + command_kw_ru):
+        elif has_command_kw:
             classification = MessageClassification.command
+
+        # Determine order type for all command-classified messages
+        if classification == MessageClassification.command:
             # Determine order type — check fire BEFORE attack to avoid "fire" matching "engage"
             if any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
                                                  "огонь по", "огонь на", "открыть огонь", "стреляй",
