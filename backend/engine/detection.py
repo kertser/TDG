@@ -175,7 +175,6 @@ def process_detection(
                 continue
 
             base_range = observer.detection_range_m or 1500.0
-            observer_terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
 
             # Observer capabilities (used for NVG and recon checks)
             capabilities = observer.capabilities or {}
@@ -298,17 +297,21 @@ def process_detection(
 
                 # Detection probability
                 posture_mod = _posture_modifier(target.current_task)
-                distance_factor = max(0.0, 1.0 - dist / pair_effective_range)
 
-                # Observer terrain visibility: observer in dense terrain (forest, urban)
-                # has reduced detection probability (harder to scan surroundings).
-                # This was previously applied to range; now applied to probability
-                # to keep range consistent with the fog-of-war visibility service.
-                observer_terrain_prob = 0.5 + 0.5 * observer_terrain_vis
+                # Quadratic distance falloff: 1 - (d/r)²
+                # Gives much better detection at medium ranges than linear (1 - d/r).
+                # At 50% range: 0.75 (vs 0.50 linear), at 80% range: 0.36 (vs 0.20).
+                # This prevents the unrealistic scenario where units walk within 800m
+                # of each other without detecting anything.
+                ratio = dist / pair_effective_range
+                distance_factor = max(0.0, 1.0 - ratio * ratio)
 
                 # Target terrain concealment: targets in obscuring terrain
                 # (forest, urban, scrub) are harder to detect even if LOS exists.
                 # Maps terrain visibility factor 0.4–1.0 → concealment 0.7–1.0
+                # Note: observer terrain is NOT penalized here — LOS checks already
+                # handle terrain obstruction, and double-penalizing would make
+                # detection unrealistically difficult.
                 target_terrain_vis = terrain.visibility_factor(tgt_lon, tgt_lat)
                 target_concealment = 0.5 + 0.5 * target_terrain_vis
 
@@ -319,7 +322,7 @@ def process_detection(
                 if _is_in_smoke(obs_lat, obs_lon, map_objects):
                     smoke_mod *= 0.15
 
-                prob = base_prob * distance_factor * posture_mod * recon_bonus * observer_terrain_prob * target_concealment * smoke_mod
+                prob = base_prob * distance_factor * posture_mod * recon_bonus * target_concealment * smoke_mod
                 prob = min(prob, 0.95)  # cap at 95%
 
                 roll = _deterministic_roll(tick, observer.id, target.id)

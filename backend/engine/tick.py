@@ -396,6 +396,66 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     )
     all_events.extend(discovery_events)
 
+    # ── 3c. Same-tick target resolution from newly detected contacts ──
+    # If Blue detects Red THIS tick, Blue attack units should immediately get
+    # target info rather than waiting until next tick's step 1b.
+    if new_contacts_data:
+        # Reload contacts from DB (now includes this tick's detections)
+        _fresh_contacts_result = await db.execute(
+            select(Contact).where(Contact.session_id == session_id, Contact.is_stale == False)
+        )
+        _fresh_contacts = list(_fresh_contacts_result.scalars().all())
+
+        for unit in all_units:
+            if unit.is_destroyed:
+                continue
+            task = unit.current_task
+            if not task:
+                continue
+            task_type = task.get("type", "")
+            if task_type not in ("attack", "engage", "fire"):
+                continue
+            if task.get("target_location"):
+                continue  # Already has a target
+
+            unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+            best_dist = float('inf')
+            best_lat = None
+            best_lon = None
+            best_target_uid = None
+
+            for contact in _fresh_contacts:
+                c_side = contact.observing_side.value if hasattr(contact.observing_side, 'value') else str(contact.observing_side)
+                if c_side != unit_side:
+                    continue
+                if contact.location_estimate is None:
+                    continue
+                try:
+                    c_pt = to_shape(contact.location_estimate)
+                    c_lat, c_lon = c_pt.y, c_pt.x
+                except Exception:
+                    continue
+                try:
+                    u_pt = to_shape(unit.position)
+                    u_lat, u_lon = u_pt.y, u_pt.x
+                except Exception:
+                    continue
+                dlat = (c_lat - u_lat) * 111320
+                dlon = (c_lon - u_lon) * 74000
+                dist = (dlat**2 + dlon**2) ** 0.5
+                if dist < best_dist:
+                    best_dist = dist
+                    best_lat = c_lat
+                    best_lon = c_lon
+                    best_target_uid = str(contact.target_unit_id) if contact.target_unit_id else None
+
+            if best_lat is not None:
+                new_task = dict(task)
+                new_task["target_location"] = {"lat": best_lat, "lon": best_lon}
+                if best_target_uid:
+                    new_task["target_unit_id"] = best_target_uid
+                unit.current_task = new_task
+
     # ── 4. Decay stale contacts ──────────────────────────────────
     result = await db.execute(
         select(Contact).where(Contact.session_id == session_id)

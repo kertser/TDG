@@ -1230,7 +1230,10 @@ def process_artillery_support(
                 # Check if artillery already has a task
                 sib_task = sib.current_task
                 if sib_task and sib_task.get("type") in ("fire", "attack", "engage"):
-                    continue  # Already firing
+                    # If the fire task has no target, the unit is on standby
+                    # (e.g. ordered "get ready to support") — still available
+                    if sib_task.get("target_location") or sib_task.get("target_unit_id"):
+                        continue  # Actually firing at a real target — skip
 
                 # Check range
                 sib_pos = _get_position(sib)
