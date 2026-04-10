@@ -201,14 +201,30 @@ def generate_spotreps(
         type_display = _unit_type_display(est_type, lang)
         conf_pct = int(confidence * 100)
 
+        # Compute bearing from observer to contact
+        bearing_str = ""
+        if observer_uid:
+            for u in all_units:
+                if str(u.id) == str(observer_uid):
+                    obs_pos = _get_unit_pos(u)
+                    if obs_pos:
+                        brg = _bearing_deg(obs_pos[0], obs_pos[1], lat, lon)
+                        compass = _bearing_to_compass(brg, lang)
+                        dist_m = _distance_m(obs_pos[0], obs_pos[1], lat, lon)
+                        if lang == "ru":
+                            bearing_str = f", направление {compass} ({int(brg)}°), дальность ~{int(dist_m)}м"
+                        else:
+                            bearing_str = f", bearing {compass} ({int(brg)}°), range ~{int(dist_m)}m"
+                    break
+
         if lang == "ru":
-            text = f"СПОТТЕРРЕП. "
+            text = f"РАЗВЕДДОНЕСЕНИЕ. "
             if observer_name:
-                text += f"От: {observer_name}. "
+                text += f"Докладывает {observer_name}. "
             text += f"Обнаружен противник: {type_display}"
             if grid_ref:
                 text += f", район {grid_ref}"
-            text += f" ({lat:.4f}, {lon:.4f})"
+            text += bearing_str
             text += f". Достоверность: {conf_pct}%. Приём."
         else:
             text = f"SPOTREP. "
@@ -217,7 +233,7 @@ def generate_spotreps(
             text += f"Enemy spotted: {type_display}"
             if grid_ref:
                 text += f", grid {grid_ref}"
-            text += f" ({lat:.4f}, {lon:.4f})"
+            text += bearing_str
             text += f". Confidence: {conf_pct}%. Over."
 
         reports.append({
@@ -286,19 +302,24 @@ def generate_shelreps(
         grid_ref = _get_grid_ref(target_unit, grid_service)
         pos = _get_unit_pos(target_unit)
         strength = target_unit.strength or 1.0
+        strPct = int(strength * 100)
         s_label = _strength_label(strength, lang)
 
         if lang == "ru":
-            text = f"ДОНЕСЕНИЕ ОБ ОБСТРЕЛЕ. {target_unit.name} под огнём"
+            text = f"ДОНЕСЕНИЕ ОБ ОБСТРЕЛЕ. {target_unit.name} ведёт бой"
             if grid_ref:
                 text += f", район {grid_ref}"
-            text += f". Состояние: {s_label}"
+            text += f". Боеспособность: {s_label} ({strPct}%)"
+            if (target_unit.ammo or 1.0) < 0.3:
+                text += f". Боеприпасы на исходе"
             text += f". Приём."
         else:
             text = f"SHELREP. {target_unit.name} under fire"
             if grid_ref:
                 text += f", grid {grid_ref}"
-            text += f". Status: {s_label}"
+            text += f". Status: {s_label} ({strPct}%)"
+            if (target_unit.ammo or 1.0) < 0.3:
+                text += ". Low ammunition"
             text += f". Over."
 
         reports.append({
@@ -356,15 +377,15 @@ def generate_casreps(
         grid_ref = _get_grid_ref(destroyed, grid_service)
 
         if lang == "ru":
-            text = f"ПОТЕРИ. {destroyed.name} уничтожен"
+            text = f"ДОНЕСЕНИЕ О ПОТЕРЯХ. {destroyed.name} уничтожен"
             if grid_ref:
                 text += f", район {grid_ref}"
-            text += ". Приём."
+            text += ". Подразделение потеряно. Приём."
         else:
             text = f"CASREP. {destroyed.name} destroyed"
             if grid_ref:
                 text += f", grid {grid_ref}"
-            text += ". Over."
+            text += ". Unit lost. Over."
 
         reports.append({
             "channel": "casrep",
@@ -451,18 +472,35 @@ def generate_sitreps(
                         enemy_losses += 1
                     break
 
+        # Build per-unit detail lines for more informative report
+        unit_details_lines = []
+        for u in side_units:
+            u_type = _unit_type_display(u.unit_type, lang)
+            u_grid = _get_grid_ref(u, grid_service) or "?"
+            u_str = _strength_label(u.strength or 1.0, lang)
+            u_task = _task_display(u.current_task, lang)
+            if lang == "ru":
+                line = f"  • {u.name} ({u_type}) — {u_grid}, {u_str}, {u_task}"
+            else:
+                line = f"  • {u.name} ({u_type}) — {u_grid}, {u_str}, {u_task}"
+            if (u.ammo or 1.0) < 0.3:
+                line += " ⚠БК" if lang == "ru" else " ⚠AMMO"
+            unit_details_lines.append(line)
+
         if lang == "ru":
-            text = f"СИТРЕП, ход {tick}.\n"
-            text += f"Подразделений: {total} (марш: {moving}, бой: {fighting}, оборона: {defending}, ожидание: {idle}).\n"
-            text += f"Средняя боеспособность: {avg_strength:.0%}, мораль: {avg_morale:.0%}."
+            text = f"ДОКЛАД ОБ ОБСТАНОВКЕ, ход {tick}.\n"
+            text += f"В строю: {total} подразд. (на марше: {moving}, в бою: {fighting}, в обороне: {defending}, ожидание: {idle}).\n"
+            text += f"Средняя боеспособность: {avg_strength:.0%}, боевой дух: {avg_morale:.0%}."
             if low_ammo:
-                text += f" Низкий бк: {low_ammo} подр."
-            text += f"\nКонтактов с противником: {len(side_contacts)}."
+                text += f" Низкий боекомплект: {low_ammo} подр."
+            text += f"\nИзвестные позиции противника: {len(side_contacts)}."
             if our_losses:
-                text += f" Наши потери за ход: {our_losses}."
+                text += f" Потери за ход: {our_losses}."
             if enemy_losses:
-                text += f" Потери противника: {enemy_losses}."
-            text += " Приём."
+                text += f" Уничтожено противника: {enemy_losses}."
+            if unit_details_lines:
+                text += "\nСостав и положение:\n" + "\n".join(unit_details_lines)
+            text += "\nПриём."
         else:
             text = f"SITREP, turn {tick}.\n"
             text += f"Units: {total} (moving: {moving}, combat: {fighting}, defending: {defending}, idle: {idle}).\n"
@@ -474,7 +512,9 @@ def generate_sitreps(
                 text += f" Own losses this turn: {our_losses}."
             if enemy_losses:
                 text += f" Enemy losses: {enemy_losses}."
-            text += " Over."
+            if unit_details_lines:
+                text += "\nUnit disposition:\n" + "\n".join(unit_details_lines)
+            text += "\nOver."
 
         reports.append({
             "channel": "sitrep",

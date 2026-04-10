@@ -251,20 +251,11 @@ const KOrders = (() => {
             radioText.addEventListener('input', () => _autoResize(radioText));
         }
 
-        // Update meta info
-        _updateMeta();
-
-        // Load participants for radio
-        _loadParticipants();
-
-        // Load existing orders
-        _loadOrders();
-
-        // Load chat history from server
-        _loadChatHistory();
-
-        // Render initial radio state
-        _renderRadioMessages();
+        // ── Clear radio messages ──
+        const clearRadioBtn = document.getElementById('clear-radio-btn');
+        if (clearRadioBtn) {
+            clearRadioBtn.addEventListener('click', () => _clearAllChats());
+        }
     }
 
     function _autoResize(ta) {
@@ -708,10 +699,6 @@ const KOrders = (() => {
             if (resp.ok) {
                 textArea.value = '';
                 textArea.style.height = '';
-                const unitNames = selectedIds.length > 0
-                    ? ` → [${KUnits.getAllUnits().filter(u => selectedIds.includes(u.id)).map(u => u.name).join(', ')}]`
-                    : '';
-                KGameLog.addEntry(`Order issued: ${text}${unitNames}`, 'order');
                 // Enrich with local user info for radio log display
                 result.issuer_name = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserName() : '';
                 _orders.unshift(result);
@@ -752,12 +739,19 @@ const KOrders = (() => {
         // Add to local immediately (optimistic)
         const myId = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserId() : '';
         const myName = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserName() : '';
+        // Use game clock time if available
+        let gameTimeStr = null;
+        const clockEl = document.querySelector('.game-clock-time');
+        if (clockEl && clockEl.dataset && clockEl.dataset.isoTime) {
+            gameTimeStr = clockEl.dataset.isoTime;
+        }
         _chatMessages.push({
             sender_id: myId,
             sender_name: myName,
             text: text,
             recipient: recipient,
             timestamp: new Date().toISOString(),
+            game_time: gameTimeStr,
             own: true,
         });
         _renderRadioMessages();
@@ -777,6 +771,7 @@ const KOrders = (() => {
             text: data.text,
             recipient: data.recipient || 'all',
             timestamp: data.timestamp || new Date().toISOString(),
+            game_time: data.game_time || null,
             own: data.sender_id === myId,
             is_unit_response: isUnitResponse,
             is_order: isOrder,
@@ -791,11 +786,6 @@ const KOrders = (() => {
             _radioUnread++;
             _updateRadioLed();
         }
-
-        // Also add to game log
-        const recipientLabel = data.recipient === 'all' ? '(all)' : '(DM)';
-        const prefix = isUnitResponse ? '' : '📻 ';
-        KGameLog.addEntry(`${prefix}${data.sender_name} ${recipientLabel}: ${data.text}`, 'info');
     }
 
     function _renderRadioMessages() {
@@ -824,7 +814,9 @@ const KOrders = (() => {
             const isUnit = msg.is_unit_response || false;
             const isOrder = msg.is_order || false;
             const cls = isOrder ? 'msg-order' : isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
-            const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+            // Prefer game_time (scenario time) over wall-clock timestamp
+            const timeSource = msg.game_time || msg.timestamp;
+            const time = timeSource ? new Date(timeSource).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
             const recipientTag = msg.recipient !== 'all' && !msg.own ? ' (DM)' : '';
             return `<div class="radio-msg ${cls}">
                 <div class="radio-msg-sender">${_escHtml(msg.sender_name)}${recipientTag}</div>
@@ -981,13 +973,6 @@ const KOrders = (() => {
         }
         _renderOrders();
 
-        // Only show a gamelog entry for meaningful status transitions (not initial pending)
-        if (data.status && data.status !== 'pending') {
-            const statusLabels = { validated: '✓ Validated', executing: '⚙ Executing', completed: '✅ Completed', failed: '✗ Failed', cancelled: '— Cancelled' };
-            const label = statusLabels[data.status] || data.status;
-            const brief = data.original_text ? data.original_text.substring(0, 60) : data.id.slice(0,8);
-            KGameLog.addEntry(`${label}: ${brief}`, data.status === 'failed' ? 'error' : 'order');
-        }
 
         // Highlight resolved locations on the map
         if (data.resolved_locations && data.resolved_locations.length > 0) {
@@ -1037,5 +1022,22 @@ const KOrders = (() => {
         return d.innerHTML;
     }
 
-    return { init, updateSelectedDisplay, onOrderStatus, onChatMessage, refreshMeta, hide };
+    function clearRadio() {
+        _chatMessages = [];
+        _radioUnread = 0;
+        _updateRadioLed();
+        _renderRadioMessages();
+    }
+
+    /** Clear all chat messages (local only — from UI button). */
+    async function _clearAllChats() {
+        const ok = await KDialogs.confirm(
+            'Clear all radio messages from the display?\n(Messages are preserved on the server.)',
+            { title: '🗑 Clear Radio', confirmLabel: 'Clear', cancelLabel: 'Cancel' }
+        );
+        if (!ok) return;
+        clearRadio();
+    }
+
+    return { init, updateSelectedDisplay, onOrderStatus, onChatMessage, refreshMeta, hide, clearRadio };
 })();

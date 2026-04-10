@@ -33,6 +33,9 @@ class ChatMessage(Base):
         String(100), nullable=False, default="all"
     )  # 'all' or a specific user_id
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    game_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # scenario/game time when message was created
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

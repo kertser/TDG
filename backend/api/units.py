@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 from math import radians, cos, sin, asin, sqrt
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -238,6 +238,7 @@ async def rename_unit(
     session_id: uuid.UUID,
     unit_id: uuid.UUID,
     body: UnitRenameRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
@@ -247,7 +248,9 @@ async def rename_unit(
     unit = result.scalar_one_or_none()
     if unit is None:
         raise HTTPException(status_code=404, detail="Unit not found")
-    if side not in ("admin", "observer"):
+    # Admin-side participants and X-Admin-Mode header bypass side checks
+    is_admin_mode = side == "admin" or request.headers.get("x-admin-mode") == "1"
+    if not is_admin_mode and side not in ("observer",):
         if unit.side.value != side:
             raise HTTPException(status_code=403, detail="Cannot rename units from other side")
         has_authority = await check_command_authority(user_id, unit, session_id, db)

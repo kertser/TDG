@@ -171,7 +171,6 @@
         });
 
         KWebSocket.on('event_new', (data) => {
-            KGameLog.addEntry(data.text_summary || data.event_type, 'event');
             KEvents.addEvent(data);
             // Show combat impact visual effects
             if (data.event_type === 'combat' || data.event_type === 'unit_destroyed') {
@@ -184,7 +183,6 @@
         });
 
         KWebSocket.on('report_new', (data) => {
-            KGameLog.addEntry('[' + (data.channel || 'report').toUpperCase() + '] ' + (data.text || ''), 'report');
             KReports.addReport(data);
         });
 

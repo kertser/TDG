@@ -1054,18 +1054,23 @@ const KUnits = (() => {
 
     function _showUnitContextMenu(u, e) {
         _menuOpenTime = Date.now();
-        const menu = _createUnitContextMenu();
         const canSel = _canSelect(u);
+        const isAdmin = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+
+        // Detect enemy unit — block context menu entirely for non-admins
+        const _mySideCtx = KSessionUI.getSide ? KSessionUI.getSide() : null;
+        const isEnemy = u.is_enemy === true || (_mySideCtx && _mySideCtx !== 'admin' && _mySideCtx !== 'observer' && u.side !== _mySideCtx);
+        if (isEnemy && !isAdmin) {
+            return; // No context menu on enemy units for non-admins
+        }
+
+        const menu = _createUnitContextMenu();
         const canAsgn = _canAssign(u);
         const isSel = selectedUnitIds.has(u.id);
         const status = u.unit_status || 'idle';
         const statusIcon = STATUS_ICONS[status] || '•';
         const statusColor = STATUS_COLORS[status] || '#aaa';
 
-        // Detect enemy unit for fog-of-war info filtering
-        const _mySideCtx = KSessionUI.getSide ? KSessionUI.getSide() : null;
-        const isAdmin = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
-        const isEnemy = u.is_enemy === true || (_mySideCtx && _mySideCtx !== 'admin' && _mySideCtx !== 'observer' && u.side !== _mySideCtx);
 
         const userId = KSessionUI.getUserId();
         const isAssignedToMe = u.assigned_user_ids && u.assigned_user_ids.includes(userId);
@@ -1307,11 +1312,27 @@ const KUnits = (() => {
         if (!token || !sessionId) return;
 
         try {
-            const resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/rename`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({ name: newName.trim() }),
-            });
+            const isAdmin = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+            let resp;
+            if (isAdmin) {
+                // Use admin endpoint — bypasses side/authority checks
+                resp = await fetch(`/api/admin/sessions/${sessionId}/units/${u.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ name: newName.trim() }),
+                });
+            } else {
+                const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+                // Send admin mode header if admin is unlocked — allows cross-side rename
+                if (typeof KAdmin !== 'undefined' && KAdmin.isUnlocked()) {
+                    headers['X-Admin-Mode'] = '1';
+                }
+                resp = await fetch(`/api/sessions/${sessionId}/units/${u.id}/rename`, {
+                    method: 'PUT',
+                    headers,
+                    body: JSON.stringify({ name: newName.trim() }),
+                });
+            }
             if (resp.ok) {
                 u.name = newName.trim();
                 render(allUnitsData);

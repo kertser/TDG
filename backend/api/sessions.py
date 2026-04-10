@@ -17,6 +17,18 @@ from backend.models.scenario import Scenario
 router = APIRouter()
 
 
+def _get_scenario_start_time(scenario) -> datetime | None:
+    """Extract start_time from scenario environment JSONB, if set."""
+    if scenario and scenario.environment and isinstance(scenario.environment, dict):
+        st = scenario.environment.get("start_time")
+        if st:
+            try:
+                return datetime.fromisoformat(str(st).replace('Z', '+00:00'))
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
 # ── Schemas ───────────────────────────────────────────
 
 class SessionCreate(BaseModel):
@@ -69,7 +81,7 @@ async def create_session(body: SessionCreate, db: DB, user: CurrentUser):
         status=SessionStatus.lobby,
         tick=0,
         tick_interval=60,
-        current_time=datetime.now(timezone.utc),
+        current_time=_get_scenario_start_time(scenario) or datetime.now(timezone.utc),
         settings=body.settings,
     )
     db.add(session)
@@ -301,7 +313,7 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
     session.status = SessionStatus.running
     if session.current_time is None:
-        session.current_time = datetime.now(timezone.utc)
+        session.current_time = _get_scenario_start_time(session.scenario) or datetime.now(timezone.utc)
     await db.flush()
     return {
         "status": session.status.value,
@@ -481,8 +493,10 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
     # Broadcast radio chatter messages generated during tick
     radio_messages = result.get("radio_messages", [])
+    game_time_str = result.get("game_time")
     for msg in radio_messages:
         msg_side = msg.get("side", "blue")
+        msg["game_time"] = game_time_str
         await ws_manager.broadcast(
             session_id,
             {"type": "chat_message", "data": msg},

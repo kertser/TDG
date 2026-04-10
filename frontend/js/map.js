@@ -248,8 +248,11 @@ const KMap = (() => {
                 const m = String(_currentGameTime.getUTCMinutes()).padStart(2, '0');
                 const dateStr = _currentGameTime.toISOString().split('T')[0];
                 _clockEl.time.textContent = `${dateStr} ${h}:${m}`;
+                // Store ISO string for other modules to access
+                _clockEl.time.dataset.isoTime = _currentGameTime.toISOString();
             } else {
                 _clockEl.time.textContent = '--:--';
+                _clockEl.time.dataset.isoTime = '';
             }
         }
     }

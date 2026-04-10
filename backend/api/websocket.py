@@ -12,7 +12,7 @@ from sqlalchemy import select
 from backend.config import settings
 from backend.database import async_session_factory
 from backend.models.user import User
-from backend.models.session import SessionParticipant
+from backend.models.session import Session, SessionParticipant
 from backend.services.ws_manager import ws_manager
 
 router = APIRouter()
@@ -353,6 +353,21 @@ async def _handle_chat_message(
 
     now = datetime.now(timezone.utc)
 
+    # Get game time from the session for display purposes
+    game_time_str = None
+    game_time_dt = None
+    async with async_session_factory() as db_sess:
+        try:
+            result = await db_sess.execute(
+                select(Session).where(Session.id == session_id)
+            )
+            session = result.scalar_one_or_none()
+            if session and session.current_time:
+                game_time_dt = session.current_time
+                game_time_str = session.current_time.isoformat()
+        except Exception:
+            pass
+
     # Persist to database
     async with async_session_factory() as db:
         try:
@@ -363,6 +378,7 @@ async def _handle_chat_message(
                 side=side,
                 recipient=recipient,
                 text=text,
+                game_time=game_time_dt,
                 created_at=now,
             )
             db.add(msg)
@@ -380,6 +396,7 @@ async def _handle_chat_message(
         "recipient": recipient,
         "side": side,
         "timestamp": now.isoformat(),
+        "game_time": game_time_str,
     }
 
     if recipient == "all":

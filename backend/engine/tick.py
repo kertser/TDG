@@ -355,8 +355,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         await db.delete(c)
 
     # ── 4b. Artillery support (auto-assign idle artillery in CoC) ──
-    arty_events = process_artillery_support(all_units, terrain)
-    all_events.extend(arty_events)
+    # ── 4b. Artillery support — moved to after 4d so we know which units are under attack ──
 
     # ── 4c. Defensive posture / dig-in progression ─────────────
     from backend.engine.defense import process_defense
@@ -399,6 +398,17 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 "target_unit_id": attacker_ids[0],
                 "auto_return_fire": True,
             }
+
+    # ── 4e. Artillery support (auto-assign idle artillery in CoC) ──
+    # Build preliminary under_fire set from attacking_map (who is being targeted)
+    preliminary_under_fire = set()
+    for target_id_str in attacking_map:
+        for u in all_units:
+            if str(u.id) == target_id_str and not u.is_destroyed:
+                preliminary_under_fire.add(u.id)
+                break
+    arty_events = process_artillery_support(all_units, terrain, under_fire=preliminary_under_fire)
+    all_events.extend(arty_events)
 
     # ── 5. Execute combat ────────────────────────────────────────
     combat_events, under_fire = process_combat(all_units, terrain, map_objects_list)
@@ -553,20 +563,26 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs
     radio_broadcast = []
     for msg in radio_messages:
+        # Ensure sender_name has the 📻 prefix for unit responses
+        # so chat history correctly identifies them as unit messages
+        raw_name = msg["sender_name"]
+        display_name = raw_name if raw_name.startswith("📻") else f"📻 {raw_name}"
         chat = ChatMessage(
             session_id=session_id,
-            sender_name=msg["sender_name"],
+            sender_name=display_name,
             side=msg["side"],
             recipient="all",
             text=msg["text"],
+            game_time=game_time,
         )
         db.add(chat)
         radio_broadcast.append({
             "type": "chat_message",
-            "sender_name": msg["sender_name"],
+            "sender_name": display_name,
             "side": msg["side"],
             "text": msg["text"],
             "recipient": "all",
+            "game_time": game_time.isoformat() if game_time else None,
             "is_unit_response": msg.get("is_unit_response", True),
             "response_type": msg.get("response_type", ""),
         })

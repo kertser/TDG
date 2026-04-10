@@ -1199,6 +1199,14 @@ class OrderService:
             except Exception:
                 pass
 
+        # ── Top-level shorthand keys for terrain/elevation ──
+        if "terrain" in situation:
+            situation["terrain_type"] = situation["terrain"].get("type", "open")
+            if "elevation_m" in situation["terrain"]:
+                situation["elevation_m"] = situation["terrain"]["elevation_m"]
+        elif "elevation" in situation:
+            situation["elevation_m"] = situation["elevation"].get("elevation_m")
+
         # ── Surrounding terrain (adjacent cells) ──────────
         if situation.get("grid_ref") and grid_service:
             try:

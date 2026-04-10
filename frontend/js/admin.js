@@ -78,6 +78,8 @@ const KAdmin = (() => {
                 _tryAutoEnableGodView();
                 // Load grid for the selected session on the map
                 _tryLoadAdminSessionGrid();
+                // Pre-fill the game-time input with the selected session's current_time
+                _populateSessionTimeInput(_adminSelectedSessionId);
             });
         }
 
@@ -101,6 +103,7 @@ const KAdmin = (() => {
         _bind('admin-pause-session', 'click', _pauseSession);
         _bind('admin-reset-session', 'click', _resetSession);
         _bind('admin-apply-turn-interval', 'click', _applyTurnInterval);
+        _bind('admin-set-session-time', 'click', _setSessionTime);
         _bind('admin-load-participants', 'click', _loadParticipants);
         _bind('admin-inject-event', 'click', _injectEvent);
         _bind('admin-apply-grid', 'click', _applyGrid);
@@ -569,6 +572,38 @@ const KAdmin = (() => {
         return (initialUnits.blue || []).length + (initialUnits.red || []).length;
     }
 
+    /** Save current session state (units, grid) back to the linked scenario. */
+    async function saveSessionToScenario() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { await KDialogs.alert('Select a session first'); return; }
+
+        if (!await KDialogs.confirm(
+            '💾 Overwrite the linked scenario with the current session state?\n\n' +
+            'This will save all current unit positions, stats, and grid settings\n' +
+            'back to the scenario as its new baseline.\n\n' +
+            'The existing scenario data will be replaced.',
+            {dangerous: true}
+        )) return;
+
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/save-to-scenario`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                KGameLog.addEntry(`Scenario "${data.scenario_title}" updated from session (${data.blue_units}B + ${data.red_units}R units)`, 'info');
+                await KDialogs.alert(`✓ ${data.message}`);
+                refreshScenarioList();
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                await KDialogs.alert('Save failed: ' + (d.detail || resp.status));
+            }
+        } catch (err) {
+            await KDialogs.alert('Save error: ' + err.message);
+        }
+    }
+
     async function editScenario(scenarioId) {
         await KScenarioBuilder.activate(scenarioId);
         // Switch to builder sub-tab
@@ -696,6 +731,11 @@ const KAdmin = (() => {
                                 <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">Temperature (°C)</label>
                                 <input type="number" id="sd-env-temp" value="${environment.temperature != null ? environment.temperature : ''}" min="-50" max="60" step="1" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;box-sizing:border-box;" placeholder="e.g. 18" />
                             </div>
+                            <div style="grid-column: 1 / -1;">
+                                <label style="display:block;font-size:9px;color:#78909c;margin-bottom:2px;">⏰ Operation Start Time</label>
+                                <input type="datetime-local" id="sd-env-start-time" value="${environment.start_time ? new Date(environment.start_time).toISOString().slice(0,16) : ''}" style="width:100%;padding:4px 6px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;font-size:11px;box-sizing:border-box;" title="Default in-game operation start date and time for new sessions" />
+                                <div style="font-size:8px;color:#555;margin-top:2px;">Sessions created from this scenario will use this as the initial game clock.</div>
+                            </div>
                         </div>
                     </div>
                     <div style="display:flex;gap:8px;justify-content:flex-end;">
@@ -729,6 +769,8 @@ const KAdmin = (() => {
                 if (envPrecip) newEnv.precipitation = envPrecip; else delete newEnv.precipitation;
                 if (envLight) newEnv.light_level = envLight; else delete newEnv.light_level;
                 if (envTempRaw !== '') newEnv.temperature = parseFloat(envTempRaw); else delete newEnv.temperature;
+                const envStartTime = document.getElementById('sd-env-start-time')?.value || '';
+                if (envStartTime) newEnv.start_time = new Date(envStartTime).toISOString(); else delete newEnv.start_time;
 
                 const newObjectives = { ...(scenario.objectives || {}), task_text: newTask };
 
@@ -754,6 +796,35 @@ const KAdmin = (() => {
                     // Also update the cached scenario description for the briefing modal
                     if (typeof KSessionUI !== 'undefined' && KSessionUI.updateScenarioCache) {
                         KSessionUI.updateScenarioCache(newTitle, newDesc, newObjectives, newEnv);
+                    }
+
+                    // If start_time was set and there is an active session, propagate to session clock
+                    if (newEnv.start_time) {
+                        const activeSid = _getAdminSessionId();
+                        const activeToken = _getToken();
+                        if (activeSid && activeToken) {
+                            try {
+                                const stResp = await fetch(`/api/admin/sessions/${activeSid}/set-time`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${activeToken}` },
+                                    body: JSON.stringify({ current_time: newEnv.start_time }),
+                                });
+                                if (stResp.ok) {
+                                    const stData = await stResp.json();
+                                    // Update game clock display
+                                    KMap.setGameTime(stData.tick, stData.current_time);
+                                    // Update the admin game-time input
+                                    const dtInput = document.getElementById('admin-session-time');
+                                    if (dtInput) {
+                                        try {
+                                            const d = new Date(newEnv.start_time);
+                                            const pad = n => String(n).padStart(2, '0');
+                                            dtInput.value = `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+                                        } catch(e) {}
+                                    }
+                                }
+                            } catch(e) { /* non-critical */ }
+                        }
                     }
                 } catch (err) {
                     await KDialogs.alert('Save failed: ' + err.message);
@@ -830,6 +901,18 @@ const KAdmin = (() => {
                 _setVal('wizard-session-name', sc.title || 'New Session');
                 _setVal('wizard-turn-interval', 1);
                 _setVal('wizard-turn-limit', sc.objectives?.turn_limit || 0);
+                // Pre-fill operation start time from scenario environment
+                const envStartTime = sc.environment?.start_time;
+                if (envStartTime) {
+                    try {
+                        const dt = new Date(envStartTime);
+                        const pad = n => String(n).padStart(2, '0');
+                        const dtLocal = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth()+1)}-${pad(dt.getUTCDate())}T${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}`;
+                        _setVal('wizard-operation-datetime', dtLocal);
+                    } catch(e) { _setVal('wizard-operation-datetime', ''); }
+                } else {
+                    _setVal('wizard-operation-datetime', '');
+                }
                 const infoEl = document.getElementById('wizard-scenario-info');
                 if (infoEl) {
                     const unitCount = ((sc.initial_units?.blue || []).length + (sc.initial_units?.red || []).length);
@@ -1300,7 +1383,7 @@ const KAdmin = (() => {
     async function _resetSession() {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
-        if (!await KDialogs.confirm('⚠ Reset session to turn 0? All progress will be lost.', {dangerous: true})) return;
+        if (!await KDialogs.confirm('⚠ Reset session to turn 0?\n\nUnits, orders, events, chat and reports will be cleared.\nMap objects and terrain data are preserved.', {dangerous: true})) return;
         try {
             const resp = await fetch(`/api/admin/sessions/${sid}/reset`, {
                 method: 'POST', headers: { 'Authorization': `Bearer ${token}` },
@@ -1308,12 +1391,33 @@ const KAdmin = (() => {
             const data = await resp.json();
             _showInfo('admin-session-status', `✓ ${data.message}`, 'success');
             KGameLog.addEntry('Session reset to turn 0 (admin)', 'info');
-            // Reload grid and units on the map if this is the active session
+            // Full data refresh for the active session
             const userSid = _getUserSessionId();
             if (sid === userSid || _godViewEnabled) {
                 const map = KMap.getMap();
                 try { await KGrid.load(map, _getAdminSessionId()); } catch(e) {}
                 await refreshMapUnits();
+                // Refresh all supporting data
+                try { KContacts.clearAll(); await KContacts.load(sid, token); } catch(e) {}
+                try { KOverlays.clearAll(); await KOverlays.loadFromServer(); } catch(e) {}
+                try { KEvents.load(sid, token); } catch(e) {}
+                try { KReports.load(sid, token); } catch(e) {}
+                try { KMapObjects.clearAll(); KMapObjects.load(sid, token); } catch(e) {}
+                try { KTerrain.load(sid, token); } catch(e) {}
+                try { KOrders.clearRadio(); } catch(e) {}
+                // Reset game clock to the reset time from server
+                KMap.setGameTime(0, data.current_time || null);
+                // Update the admin game-time input to reflect reset time
+                if (data.current_time) {
+                    const dtInput = document.getElementById('admin-session-time');
+                    if (dtInput) {
+                        try {
+                            const d = new Date(data.current_time);
+                            const pad = n => String(n).padStart(2, '0');
+                            dtInput.value = `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+                        } catch(e) {}
+                    }
+                }
             }
         } catch (err) {
             _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
@@ -1333,6 +1437,46 @@ const KAdmin = (() => {
                 body: JSON.stringify({ tick_interval: seconds }),
             });
             _showInfo('admin-session-status', `Turn interval: ${minutes} min`, 'success');
+        } catch (err) {
+            _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    /** Populate the admin-session-time input with the session's current_time. */
+    async function _populateSessionTimeInput(sid) {
+        const dtInput = document.getElementById('admin-session-time');
+        if (!dtInput || !sid) return;
+        const token = _getToken();
+        if (!token) return;
+        try {
+            const resp = await fetch(`/api/sessions/${sid}`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.current_time) {
+                const d = new Date(data.current_time);
+                const pad = n => String(n).padStart(2, '0');
+                dtInput.value = `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+            }
+        } catch(e) { /* ignore */ }
+    }
+
+    async function _setSessionTime() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { _showInfo('admin-session-status', 'Select a session first', 'error'); return; }
+        const dtInput = document.getElementById('admin-session-time');
+        if (!dtInput || !dtInput.value) { _showInfo('admin-session-status', 'Enter a date/time first', 'error'); return; }
+        try {
+            const isoTime = new Date(dtInput.value).toISOString();
+            const resp = await fetch(`/api/admin/sessions/${sid}/set-time`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ current_time: isoTime }),
+            });
+            if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || resp.status);
+            const data = await resp.json();
+            _showInfo('admin-session-status', `✓ Game time set to ${dtInput.value}`, 'success');
+            // Update the game clock display
+            KMap.setGameTime(data.tick, data.current_time);
         } catch (err) {
             _showInfo('admin-session-status', `✗ ${err.message}`, 'error');
         }
@@ -1380,12 +1524,20 @@ const KAdmin = (() => {
                 const data = await resp.json();
                 _showInfo('admin-scenario-change-status', `✓ ${data.message || 'Scenario applied'}`, 'success');
                 KGameLog.addEntry('Scenario changed (admin)', 'info');
-                // Reload grid and units on the map
+                // Full data refresh
                 const userSid = _getUserSessionId();
                 if (sid === userSid || _godViewEnabled) {
                     const map = KMap.getMap();
                     try { await KGrid.load(map, _getAdminSessionId()); } catch(e) {}
                     await refreshMapUnits();
+                    try { KContacts.clearAll(); await KContacts.load(sid, token); } catch(e) {}
+                    try { KOverlays.clearAll(); await KOverlays.loadFromServer(); } catch(e) {}
+                    try { KEvents.load(sid, token); } catch(e) {}
+                    try { KReports.load(sid, token); } catch(e) {}
+                    try { KMapObjects.clearAll(); KMapObjects.load(sid, token); } catch(e) {}
+                    try { KTerrain.load(sid, token); } catch(e) {}
+                    try { KOrders.clearRadio(); } catch(e) {}
+                    KMap.setGameTime(0, null);
                 }
                 await _loadUnitDashboard();
             } else {
@@ -1838,6 +1990,32 @@ const KAdmin = (() => {
                 }
             });
         });
+    }
+
+    /** Delete ALL units in the admin-selected session. */
+    async function deleteAllUnits() {
+        const token = _getToken(), sid = _getAdminSessionId();
+        if (!token || !sid) { await KDialogs.alert('Select a session first'); return; }
+        if (!await KDialogs.confirm('⚠ Delete ALL units in this session?\nThis cannot be undone.', {dangerous: true})) return;
+        try {
+            const resp = await fetch(`/api/admin/sessions/${sid}/units`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                _dashboardUnits = [];
+                const el = document.getElementById('admin-unit-dashboard');
+                if (el) el.innerHTML = '<div class="admin-info">No units</div>';
+                KGameLog.addEntry(`All units deleted: ${data.deleted} (admin)`, 'info');
+                KUnits.invalidateAllViewsheds();
+                try { await refreshMapUnits(); } catch(e) {}
+                try { KContacts.clearAll(); } catch(e) {}
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                await KDialogs.alert(d.detail || 'Delete failed');
+            }
+        } catch (err) { await KDialogs.alert(err.message); }
     }
 
     async function _loadUnitDashboard() {
@@ -3789,6 +3967,8 @@ const KAdmin = (() => {
             _adminSelectedSessionId = sid;
             const sel = document.getElementById('admin-session-selector');
             if (sel) sel.value = sid;
+            // Pre-fill game-time input for the newly selected session
+            _populateSessionTimeInput(sid);
         }
         if (_adminUnlocked) {
             _loadAdminSessions();
@@ -4709,7 +4889,8 @@ const KAdmin = (() => {
         kickParticipant,
         renameUser, deleteUser, assignUserToSession,
         loadPublicCoC,
-        editUnit, focusUnit, deleteUnit, addUnit, adminSplitUnit, adminMergeUnit,
+        editUnit, focusUnit, deleteUnit, deleteAllUnits, addUnit, adminSplitUnit, adminMergeUnit,
+        saveSessionToScenario,
         editUnitType, removeUnitType,
         wizardRemoveParticipant: _wizardRemoveParticipant,
     };

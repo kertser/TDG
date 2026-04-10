@@ -4056,8 +4056,26 @@ button:hover { background: #1a5276; }
 .cmd-radio-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+.radio-clear-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    color: #999;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 3px 8px;
+    line-height: 1;
+    transition: color 0.2s, border-color 0.2s, background 0.2s;
+    flex-shrink: 0;
+    min-width: 24px;
+}
+.radio-clear-btn:hover {
+    color: #ef5350;
+    border-color: rgba(239, 83, 80, 0.4);
 }
 .cmd-radio-select {
     flex: 1;

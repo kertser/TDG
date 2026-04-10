@@ -431,13 +431,15 @@ async def admin_create_session(body: AdminSessionCreate, db: DB):
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
+    from backend.api.sessions import _get_scenario_start_time
+
     session = Session(
         scenario_id=scenario.id,
         name=scenario.title,  # default name from scenario
         status=SessionStatus.lobby,
         tick=0,
         tick_interval=60,
-        current_time=datetime.now(timezone.utc),
+        current_time=_get_scenario_start_time(scenario) or datetime.now(timezone.utc),
         settings=body.settings,
     )
     db.add(session)
@@ -748,6 +750,46 @@ async def admin_delete_unit(session_id: uuid.UUID, unit_id: uuid.UUID, db: DB, u
     await db.commit()
 
 
+@router.delete("/sessions/{session_id}/units", status_code=200)
+async def admin_delete_all_units(session_id: uuid.UUID, db: DB, user: CurrentUser):
+    """Admin: delete ALL units from a session."""
+    from sqlalchemy import update as sa_update
+
+    # Verify session exists
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Count units first
+    count_result = await db.execute(
+        select(func.count()).select_from(Unit).where(Unit.session_id == session_id)
+    )
+    unit_count = count_result.scalar() or 0
+    if unit_count == 0:
+        return {"deleted": 0, "message": "No units to delete"}
+
+    # Clean up FK references before bulk deletion
+    # Events: null out actor/target references
+    await db.execute(
+        sa_update(Event).where(Event.session_id == session_id, Event.actor_unit_id.isnot(None)).values(actor_unit_id=None)
+    )
+    await db.execute(
+        sa_update(Event).where(Event.session_id == session_id, Event.target_unit_id.isnot(None)).values(target_unit_id=None)
+    )
+    # Contacts: delete all for session
+    await db.execute(sa_delete(Contact).where(Contact.session_id == session_id))
+    # Reports: null out from_unit_id
+    await db.execute(
+        sa_update(Report).where(Report.session_id == session_id, Report.from_unit_id.isnot(None)).values(from_unit_id=None)
+    )
+    # Delete all units
+    await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
+    await db.commit()
+
+    return {"deleted": unit_count, "message": f"Deleted {unit_count} units"}
+
+
 @router.get("/sessions/{session_id}/units/{unit_id}/viewshed")
 async def admin_get_unit_viewshed(
     session_id: uuid.UUID,
@@ -1011,9 +1053,37 @@ async def admin_set_tick_interval(
     return {"tick_interval": session.tick_interval}
 
 
+class SetSessionTimeRequest(BaseModel):
+    current_time: str  # ISO 8601 datetime string
+
+
+@router.put("/sessions/{session_id}/set-time")
+async def admin_set_session_time(session_id: uuid.UUID, body: SetSessionTimeRequest, db: DB, user: CurrentUser):
+    """Admin: override the session's current game clock time."""
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        new_time = datetime.fromisoformat(body.current_time.replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid datetime format. Use ISO 8601.")
+    session.current_time = new_time
+    await db.flush()
+    return {
+        "current_time": session.current_time.isoformat(),
+        "tick": session.tick,
+    }
+
+
 @router.post("/sessions/{session_id}/reset")
 async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
-    """Admin: reset session to tick 0, re-create units from scenario."""
+    """Admin: reset session to tick 0, re-create units from scenario.
+    Preserves: map objects, terrain cells, elevation cells, planning overlays.
+    Clears: units, orders, events, reports, contacts, chat, red agents, grid.
+    """
+    from backend.models.chat_message import ChatMessage
+
     result = await db.execute(
         select(Session).options(selectinload(Session.scenario)).where(Session.id == session_id)
     )
@@ -1021,7 +1091,7 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Delete all game-state data
+    # Delete game-state data — but PRESERVE map objects, terrain cells, elevation cells
     await db.execute(sa_delete(LocationReference).where(LocationReference.session_id == session_id))
     await db.execute(sa_delete(Event).where(Event.session_id == session_id))
     await db.execute(sa_delete(Report).where(Report.session_id == session_id))
@@ -1029,20 +1099,22 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     await db.execute(sa_delete(Order).where(Order.session_id == session_id))
     await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.session_id == session_id))
     await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(ChatMessage).where(ChatMessage.session_id == session_id))
     await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
     await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
 
     # Reset session state
+    from backend.api.sessions import _get_scenario_start_time
     session.tick = 0
     session.status = SessionStatus.lobby
-    session.current_time = datetime.now(timezone.utc)
+    session.current_time = _get_scenario_start_time(session.scenario) or datetime.now(timezone.utc)
     await db.flush()
 
     # Re-initialize from scenario
     from backend.services.session_service import initialize_session_from_scenario
     await initialize_session_from_scenario(session, session.scenario, db)
 
-    return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0"}
+    return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0", "current_time": session.current_time.isoformat() if session.current_time else None}
 
 
 @router.post("/sessions/{session_id}/resync-units")
@@ -1095,6 +1167,11 @@ class ApplyScenarioRequest(BaseModel):
 @router.post("/sessions/{session_id}/apply-scenario")
 async def admin_apply_scenario(session_id: uuid.UUID, body: ApplyScenarioRequest, db: DB, user: CurrentUser):
     """Admin: change the scenario for an active session. Resets units/grid."""
+    from backend.models.chat_message import ChatMessage
+    from backend.models.map_object import MapObject
+    from backend.models.terrain_cell import TerrainCell
+    from backend.models.elevation_cell import ElevationCell
+
     result = await db.execute(select(Session).where(Session.id == session_id))
     session = result.scalar_one_or_none()
     if session is None:
@@ -1110,7 +1187,7 @@ async def admin_apply_scenario(session_id: uuid.UUID, body: ApplyScenarioRequest
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    # Delete all existing game-state data for this session
+    # Delete all existing game-state data for this session (comprehensive)
     await db.execute(sa_delete(LocationReference).where(LocationReference.session_id == session_id))
     await db.execute(sa_delete(Event).where(Event.session_id == session_id))
     await db.execute(sa_delete(Report).where(Report.session_id == session_id))
@@ -1118,14 +1195,19 @@ async def admin_apply_scenario(session_id: uuid.UUID, body: ApplyScenarioRequest
     await db.execute(sa_delete(Order).where(Order.session_id == session_id))
     await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.session_id == session_id))
     await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(ChatMessage).where(ChatMessage.session_id == session_id))
+    await db.execute(sa_delete(MapObject).where(MapObject.session_id == session_id))
+    await db.execute(sa_delete(TerrainCell).where(TerrainCell.session_id == session_id))
+    await db.execute(sa_delete(ElevationCell).where(ElevationCell.session_id == session_id))
     await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
     await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
 
     # Update session to point to new scenario
+    from backend.api.sessions import _get_scenario_start_time as _gst2
     session.scenario_id = scenario_uuid
     session.tick = 0
     session.status = SessionStatus.lobby
-    session.current_time = datetime.now(timezone.utc)
+    session.current_time = _gst2(scenario) or datetime.now(timezone.utc)
     await db.flush()
 
     # Re-initialize from new scenario
@@ -1285,6 +1367,11 @@ async def admin_change_scenario(
     session_id: uuid.UUID, body: AdminChangeScenario, db: DB, user: CurrentUser,
 ):
     """Admin: change the scenario for a session, resetting units and grid."""
+    from backend.models.chat_message import ChatMessage
+    from backend.models.map_object import MapObject
+    from backend.models.terrain_cell import TerrainCell
+    from backend.models.elevation_cell import ElevationCell
+
     result = await db.execute(select(Session).where(Session.id == session_id))
     session = result.scalar_one_or_none()
     if session is None:
@@ -1300,7 +1387,7 @@ async def admin_change_scenario(
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
 
-    # Delete existing game-state data (units, grid, orders, etc.)
+    # Delete existing game-state data (comprehensive)
     await db.execute(sa_delete(LocationReference).where(LocationReference.session_id == session_id))
     await db.execute(sa_delete(Event).where(Event.session_id == session_id))
     await db.execute(sa_delete(Report).where(Report.session_id == session_id))
@@ -1308,14 +1395,19 @@ async def admin_change_scenario(
     await db.execute(sa_delete(Order).where(Order.session_id == session_id))
     await db.execute(sa_delete(PlanningOverlay).where(PlanningOverlay.session_id == session_id))
     await db.execute(sa_delete(RedAgent).where(RedAgent.session_id == session_id))
+    await db.execute(sa_delete(ChatMessage).where(ChatMessage.session_id == session_id))
+    await db.execute(sa_delete(MapObject).where(MapObject.session_id == session_id))
+    await db.execute(sa_delete(TerrainCell).where(TerrainCell.session_id == session_id))
+    await db.execute(sa_delete(ElevationCell).where(ElevationCell.session_id == session_id))
     await db.execute(sa_delete(Unit).where(Unit.session_id == session_id))
     await db.execute(sa_delete(GridDefinition).where(GridDefinition.session_id == session_id))
 
     # Update session
+    from backend.api.sessions import _get_scenario_start_time as _gst3
     session.scenario_id = scenario_uid
     session.tick = 0
     session.status = SessionStatus.lobby
-    session.current_time = datetime.now(timezone.utc)
+    session.current_time = _gst3(scenario) or datetime.now(timezone.utc)
     session.name = scenario.title
     await db.flush()
 
@@ -1330,3 +1422,154 @@ async def admin_change_scenario(
         "name": session.name,
         "message": "Scenario changed, units and grid reset",
     }
+
+
+# ══════════════════════════════════════════════════════
+# ── Save Session State to Scenario ───────────────────
+# ══════════════════════════════════════════════════════
+
+@router.post("/sessions/{session_id}/save-to-scenario")
+async def admin_save_session_to_scenario(session_id: uuid.UUID, db: DB, user: CurrentUser):
+    """Admin: overwrite the linked scenario with the current session state (units + grid).
+
+    Snapshots all current units (positions, stats, types) and grid settings
+    back into the scenario's initial_units and grid_settings fields.
+    This allows the admin to tweak unit placement in a live session and
+    save it as the new scenario baseline.
+    """
+    import math
+    from geoalchemy2.shape import to_shape
+
+    result = await db.execute(
+        select(Session).options(selectinload(Session.scenario)).where(Session.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.scenario is None:
+        raise HTTPException(status_code=400, detail="Session has no linked scenario")
+
+    scenario = session.scenario
+
+    # ── Snapshot grid settings ─────────────────────
+    grid_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    grid_def = grid_result.scalar_one_or_none()
+    if grid_def:
+        origin_point = to_shape(grid_def.origin) if grid_def.origin else None
+        origin_lat = origin_point.y if origin_point else 0
+        origin_lon = origin_point.x if origin_point else 0
+        scenario.grid_settings = {
+            "origin_lat": origin_lat,
+            "origin_lon": origin_lon,
+            "orientation_deg": grid_def.orientation_deg or 0,
+            "base_square_size_m": grid_def.base_square_size_m or 1000,
+            "columns": grid_def.columns or 8,
+            "rows": grid_def.rows or 8,
+            "labeling_scheme": grid_def.labeling_scheme or "alphanumeric",
+        }
+    else:
+        origin_lat = 0
+        origin_lon = 0
+
+    # ── Snapshot units ─────────────────────────────
+    units_result = await db.execute(
+        select(Unit).where(Unit.session_id == session_id, Unit.is_destroyed == False)
+    )
+    units = units_result.scalars().all()
+
+    blue_units = []
+    red_units = []
+
+    for u in units:
+        unit_point = to_shape(u.position) if u.position else None
+        lat = unit_point.y if unit_point else 0
+        lon = unit_point.x if unit_point else 0
+
+        # Compute grid-relative offsets from grid origin
+        grid_offset_x = None
+        grid_offset_y = None
+        if origin_lat and origin_lon:
+            lat_rad = math.radians(origin_lat)
+            m_per_deg_lat = 111320.0
+            m_per_deg_lon = 111320.0 * math.cos(lat_rad) if lat_rad else 111320.0
+            grid_offset_x = (lon - origin_lon) * m_per_deg_lon
+            grid_offset_y = (lat - origin_lat) * m_per_deg_lat
+
+        unit_data = {
+            "name": u.name,
+            "unit_type": u.unit_type,
+            "sidc": u.sidc or "",
+            "lat": lat,
+            "lon": lon,
+            "grid_offset_x": grid_offset_x,
+            "grid_offset_y": grid_offset_y,
+            "strength": u.strength if u.strength is not None else 1.0,
+            "ammo": u.ammo if u.ammo is not None else 1.0,
+            "morale": u.morale if u.morale is not None else 0.9,
+            "move_speed_mps": u.move_speed_mps or 4.0,
+            "detection_range_m": u.detection_range_m or 1500,
+            "capabilities": u.capabilities or {},
+        }
+
+        if u.side == "blue":
+            blue_units.append(unit_data)
+        else:
+            red_units.append(unit_data)
+
+    # Snapshot Red Agents
+    ra_result = await db.execute(
+        select(RedAgent).where(RedAgent.session_id == session_id)
+    )
+    red_agents = ra_result.scalars().all()
+    red_agents_data = []
+    for ra in red_agents:
+        ra_data = {
+            "name": ra.name,
+            "doctrine_profile": ra.doctrine_profile,
+            "mission_intent": ra.mission_intent,
+            "risk_posture": ra.risk_posture if isinstance(ra.risk_posture, str) else (ra.risk_posture.value if ra.risk_posture else "balanced"),
+            "controlled_units": [],
+        }
+        # Resolve controlled unit IDs to names
+        if ra.controlled_unit_ids:
+            for uid in ra.controlled_unit_ids:
+                for u in units:
+                    if str(u.id) == str(uid):
+                        ra_data["controlled_units"].append(u.name)
+                        break
+        red_agents_data.append(ra_data)
+
+    scenario.initial_units = {
+        "blue": blue_units,
+        "red": red_units,
+        "red_agents": red_agents_data,
+    }
+
+    # Update map center from grid center if available
+    if grid_def and origin_lat and origin_lon:
+        from geoalchemy2.shape import from_shape
+        from shapely.geometry import Point as ShapelyPoint
+        gs = scenario.grid_settings
+        center_lat = origin_lat + (gs["rows"] * gs["base_square_size_m"] / 2) / 111320
+        center_lon = origin_lon + (gs["columns"] * gs["base_square_size_m"] / 2) / (111320 * math.cos(math.radians(origin_lat)))
+        scenario.map_center = from_shape(ShapelyPoint(center_lon, center_lat), srid=4326)
+
+    # Save session current_time as scenario start_time in environment
+    if session.current_time:
+        env = dict(scenario.environment or {})
+        env["start_time"] = session.current_time.isoformat()
+        scenario.environment = env
+
+    await db.flush()
+
+    return {
+        "scenario_id": str(scenario.id),
+        "scenario_title": scenario.title,
+        "blue_units": len(blue_units),
+        "red_units": len(red_units),
+        "red_agents": len(red_agents_data),
+        "message": f"Scenario '{scenario.title}' updated with {len(blue_units)} blue + {len(red_units)} red units from current session.",
+    }
+

@@ -524,7 +524,7 @@ class ResponseGenerator:
         language: str = "en",
         situation: dict | None = None,
     ) -> str:
-        """Build a brief situation line for ack/wilco responses (position + key threats)."""
+        """Build a brief situation line for ack/wilco responses (position + key threats + tactical assessment)."""
         if not situation:
             return ""
 
@@ -545,6 +545,12 @@ class ResponseGenerator:
                 c = close[0]
                 ctype = self._translate_unit_type(c.get("type", "противник"), "ru")
                 parts.append(f"{ctype} ~{c.get('distance_m', '?')}м")
+
+            # Tactical assessment based on terrain and situation
+            tactical = self._tactical_assessment(unit, situation, "ru")
+            if tactical:
+                parts.append(tactical)
+
             return ". ".join(parts) if parts else ""
         else:
             parts = []
@@ -563,7 +569,92 @@ class ResponseGenerator:
                 c = close[0]
                 ctype = self._translate_unit_type(c.get("type", "enemy"), "en")
                 parts.append(f"{ctype} ~{c.get('distance_m', '?')}m")
+
+            # Tactical assessment
+            tactical = self._tactical_assessment(unit, situation, "en")
+            if tactical:
+                parts.append(tactical)
+
             return ". ".join(parts) if parts else ""
+
+    def _tactical_assessment(
+        self,
+        unit: dict,
+        situation: dict,
+        lang: str,
+    ) -> str:
+        """
+        Generate a short tactical observation based on field manual doctrine.
+        Considers: terrain, enemy proximity, task type, unit strength, elevation.
+        """
+        task = unit.get("current_task") or {}
+        task_type = task.get("type", "")
+        terrain_type = situation.get("terrain_type", "open")
+        elevation_m = situation.get("elevation_m")
+        contacts = situation.get("contacts", [])
+        close_enemies = [c for c in contacts if c.get("distance_m", 99999) < 2000]
+        strength = unit.get("strength", 1.0)
+        unit_type = unit.get("unit_type", "")
+
+        # Tactical assessment based on context
+        if lang == "ru":
+            # Moving through open terrain toward enemy — warn about exposure
+            if task_type in ("move", "advance") and terrain_type == "open" and close_enemies:
+                return "внимание: открытая местность, противник рядом — рекомендую перестроение"
+            # In forest — good concealment
+            if task_type in ("move", "advance") and terrain_type == "forest":
+                return "местность закрытая, обеспечивает маскировку"
+            # Attacking from low ground
+            if task_type in ("attack", "engage") and elevation_m is not None:
+                for c in close_enemies:
+                    c_elev = c.get("elevation_m")
+                    if c_elev and c_elev > elevation_m + 30:
+                        return "противник на господствующей высоте — ожидаем усиленное сопротивление"
+            # Defending in good terrain
+            if task_type == "defend" and terrain_type in ("urban", "forest"):
+                return "местность благоприятна для обороны"
+            # Defending in open terrain
+            if task_type == "defend" and terrain_type == "open":
+                return "открытая позиция — необходимо окапывание"
+            # Heavy casualties — tactical warning
+            if strength < 0.4 and close_enemies:
+                return "необходимо подкрепление или отход"
+            # Recon unit near enemy — stay concealed
+            if unit_type in ("recon_team", "recon_section", "sniper_team", "observation_post"):
+                if close_enemies:
+                    return "наблюдаем противника, сохраняем скрытность"
+            # High ground advantage
+            if elevation_m is not None and elevation_m > 200:
+                for c in close_enemies:
+                    c_elev = c.get("elevation_m")
+                    if c_elev and elevation_m > c_elev + 30:
+                        return "занимаем господствующую высоту"
+        else:
+            if task_type in ("move", "advance") and terrain_type == "open" and close_enemies:
+                return "caution: open ground with enemy nearby — recommend formation change"
+            if task_type in ("move", "advance") and terrain_type == "forest":
+                return "good concealment in current terrain"
+            if task_type in ("attack", "engage") and elevation_m is not None:
+                for c in close_enemies:
+                    c_elev = c.get("elevation_m")
+                    if c_elev and c_elev > elevation_m + 30:
+                        return "enemy on higher ground — expect strong resistance"
+            if task_type == "defend" and terrain_type in ("urban", "forest"):
+                return "terrain favorable for defense"
+            if task_type == "defend" and terrain_type == "open":
+                return "open position — recommend digging in"
+            if strength < 0.4 and close_enemies:
+                return "need reinforcement or withdrawal"
+            if unit_type in ("recon_team", "recon_section", "sniper_team", "observation_post"):
+                if close_enemies:
+                    return "observing enemy, maintaining concealment"
+            if elevation_m is not None and elevation_m > 200:
+                for c in close_enemies:
+                    c_elev = c.get("elevation_m")
+                    if c_elev and elevation_m > c_elev + 30:
+                        return "holding dominant high ground"
+
+        return ""
 
 
 # Singleton

@@ -122,6 +122,20 @@ async def _run_order_pipeline(
                 outgoing_text = f"📋 {issuer_name} → {to_str}: {order_text}"
 
                 now_order = datetime.now(timezone.utc)
+
+                # Get game time from session for display
+                _game_time_str = None
+                _game_time_dt = None
+                try:
+                    from backend.models.session import Session as _Sess
+                    _sess_r = await db.execute(select(_Sess.current_time).where(_Sess.id == session_id))
+                    _game_t = _sess_r.scalar_one_or_none()
+                    if _game_t:
+                        _game_time_dt = _game_t
+                        _game_time_str = _game_t.isoformat()
+                except Exception:
+                    pass
+
                 try:
                     order_chat = ChatMessage(
                         session_id=session_id,
@@ -130,6 +144,7 @@ async def _run_order_pipeline(
                         side=issuer_side,
                         recipient="all",
                         text=outgoing_text,
+                        game_time=_game_time_dt,
                         created_at=now_order,
                     )
                     db.add(order_chat)
@@ -143,6 +158,7 @@ async def _run_order_pipeline(
                     "recipient": "all",
                     "side": issuer_side,
                     "timestamp": now_order.isoformat(),
+                    "game_time": _game_time_str,
                     "is_order": True,
                     "is_unit_response": False,
                 }
@@ -165,6 +181,7 @@ async def _run_order_pipeline(
                             side=issuer_side,
                             recipient="all",
                             text=resp.text,
+                            game_time=_game_time_dt,
                             created_at=now,
                         )
                         db.add(chat_msg)
@@ -179,6 +196,7 @@ async def _run_order_pipeline(
                         "recipient": "all",
                         "side": issuer_side,
                         "timestamp": now.isoformat(),
+                        "game_time": _game_time_str,
                         "is_unit_response": True,
                         "response_type": resp.response_type.value,
                     }
@@ -472,6 +490,17 @@ async def cancel_unit_orders(
     now = datetime.now(timezone.utc)
     radio_broadcast = []
 
+    # Get game time from session
+    _cancel_game_time_dt = None
+    try:
+        from backend.models.session import Session as _Sess
+        _sess_r = await db.execute(select(_Sess.current_time).where(_Sess.id == session_id))
+        _cancel_gt = _sess_r.scalar_one_or_none()
+        if _cancel_gt:
+            _cancel_game_time_dt = _cancel_gt
+    except Exception:
+        pass
+
     # Resolve grid references for unit positions
     grid_service = None
     try:
@@ -507,6 +536,7 @@ async def cancel_unit_orders(
             side=side_val,
             recipient="all",
             text=msg_text,
+            game_time=_cancel_game_time_dt,
             created_at=now,
         )
         db.add(chat)
@@ -518,6 +548,7 @@ async def cancel_unit_orders(
             "recipient": "all",
             "side": side_val,
             "timestamp": now.isoformat(),
+            "game_time": _cancel_game_time_dt.isoformat() if _cancel_game_time_dt else None,
             "is_unit_response": True,
             "response_type": "sitrep",
         })
@@ -568,6 +599,7 @@ async def list_chat_messages(
             "recipient": m.recipient,
             "side": m.side,
             "timestamp": m.created_at.isoformat() if m.created_at else None,
+            "game_time": m.game_time.isoformat() if m.game_time else None,
             "own": m.sender_id == my_user_id,
             "is_unit_response": bool(m.sender_name and m.sender_name.startswith("📻")),
             "is_order": bool(m.sender_name and m.sender_name.startswith("📋")),

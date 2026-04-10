@@ -20,13 +20,13 @@ const KReports = (() => {
     };
 
     const CHANNEL_LABELS = {
-        spotrep:  'SPOTREP',
-        shelrep:  'SHELREP',
-        sitrep:   'SITREP',
-        intsum:   'INTSUM',
-        casrep:   'CASREP',
-        contactrep: 'CONTACT',
-        custom:   'REPORT',
+        spotrep:  'РАЗВЕДДОНЕСЕНИЕ',
+        shelrep:  'ОБСТРЕЛ',
+        sitrep:   'ОБСТАНОВКА',
+        intsum:   'РАЗВЕД.СВОДКА',
+        casrep:   'ПОТЕРИ',
+        contactrep: 'КОНТАКТ',
+        custom:   'ДОКЛАД',
     };
 
     const CHANNEL_COLORS = {

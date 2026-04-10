@@ -1093,17 +1093,25 @@ def check_artillery_ceasefire_coordination(
 def process_artillery_support(
     all_units: list,
     terrain: TerrainService | None = None,
+    under_fire: set | None = None,
 ) -> list[dict]:
     """
-    Auto-assign idle artillery units to support attacking units in their CoC.
+    Auto-assign idle artillery units to support attacking units OR units under fire in their CoC.
 
-    Walks up each attacking unit's parent chain to find artillery siblings
+    Walks up each requesting unit's parent chain to find artillery siblings
     (children of the same parent). If found and idle with ammo, assigns
-    a fire task targeting the attacker's target.
+    a fire task targeting the attacker's target or the source of incoming fire.
+
+    Triggers:
+      - Unit has attack/engage/fire task → support their attack
+      - Unit is under fire (in under_fire set) → counter-battery / suppressive fire
+      - Unit has auto_return_fire task → support their defensive fight
 
     Returns list of event dicts.
     """
     events = []
+    if under_fire is None:
+        under_fire = set()
 
     # Build lookup maps
     units_by_id = {str(u.id): u for u in all_units if not u.is_destroyed}
@@ -1118,19 +1126,36 @@ def process_artillery_support(
     # Track which artillery units have already been tasked this tick
     tasked_artillery = set()
 
+    # Collect units that need artillery support
+    # (attacking units + units under fire that have a target)
+    requesting_units = []
     for unit in all_units:
         if unit.is_destroyed:
             continue
         task = unit.current_task
         if not task:
+            # Unit is idle but under fire — look for attackers to counter
+            if unit.id in under_fire:
+                requesting_units.append((unit, None, None, "defensive_support"))
             continue
         task_type = task.get("type", "")
-        if task_type not in ("attack", "engage", "fire"):
-            continue
+        if task_type in ("attack", "engage", "fire"):
+            target_loc = task.get("target_location")
+            target_uid = task.get("target_unit_id")
+            requesting_units.append((unit, target_loc, target_uid, "offensive_support"))
+        elif task_type == "defend" and unit.id in under_fire:
+            # Defending unit under fire — needs suppressive support
+            target_uid = task.get("target_unit_id")
+            target_loc = task.get("target_location")
+            requesting_units.append((unit, target_loc, target_uid, "defensive_support"))
+        elif task.get("auto_return_fire") and unit.id in under_fire:
+            # Unit auto-returning fire — also needs support
+            target_uid = task.get("target_unit_id")
+            target_loc = task.get("target_location")
+            requesting_units.append((unit, target_loc, target_uid, "defensive_support"))
 
-        # Get the target location
-        target_loc = task.get("target_location")
-        target_uid = task.get("target_unit_id")
+    for unit, target_loc, target_uid, support_type in requesting_units:
+        # Resolve target location
         if not target_loc and target_uid:
             # Resolve from the target unit's position
             tgt = units_by_id.get(str(target_uid))
@@ -1138,6 +1163,39 @@ def process_artillery_support(
                 tgt_pos = _get_position(tgt)
                 if tgt_pos:
                     target_loc = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+
+        if not target_loc and support_type == "defensive_support":
+            # For defensive support without a known target,
+            # find the nearest enemy that is attacking this unit
+            unit_pos = _get_position(unit)
+            if unit_pos:
+                unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+                nearest_enemy_dist = float('inf')
+                nearest_enemy_pos = None
+                nearest_enemy_id = None
+                for enemy in all_units:
+                    if enemy.is_destroyed:
+                        continue
+                    e_side = enemy.side.value if hasattr(enemy.side, 'value') else str(enemy.side)
+                    if e_side == unit_side:
+                        continue
+                    e_task = enemy.current_task
+                    if not e_task:
+                        continue
+                    # Check if this enemy is attacking our unit or our area
+                    e_target_uid = e_task.get("target_unit_id")
+                    if e_target_uid and str(e_target_uid) == str(unit.id):
+                        e_pos = _get_position(enemy)
+                        if e_pos:
+                            d = _distance_m(unit_pos[0], unit_pos[1], e_pos[0], e_pos[1])
+                            if d < nearest_enemy_dist:
+                                nearest_enemy_dist = d
+                                nearest_enemy_pos = e_pos
+                                nearest_enemy_id = str(enemy.id)
+                if nearest_enemy_pos:
+                    target_loc = {"lat": nearest_enemy_pos[0], "lon": nearest_enemy_pos[1]}
+                    target_uid = nearest_enemy_id
+
         if not target_loc:
             continue
 
@@ -1208,18 +1266,21 @@ def process_artillery_support(
                     "target_location": target_loc,
                     "target_unit_id": target_uid,
                     "support_for": str(unit.id),
+                    "support_type": support_type,
                     "salvos_remaining": DEFAULT_FIRE_SALVOS,
                 }
                 tasked_artillery.add(str(sib.id))
 
+                support_label = "supporting" if support_type == "offensive_support" else "defending"
                 events.append({
                     "event_type": "artillery_support",
                     "actor_unit_id": sib.id,
                     "target_unit_id": uuid.UUID(target_uid) if target_uid else None,
-                    "text_summary": f"{sib.name} firing in support of {unit.name}",
+                    "text_summary": f"{sib.name} firing in support of {unit.name} ({support_label})",
                     "payload": {
                         "artillery_id": str(sib.id),
                         "supported_unit_id": str(unit.id),
+                        "support_type": support_type,
                         "target_lat": target_loc["lat"],
                         "target_lon": target_loc["lon"],
                     },

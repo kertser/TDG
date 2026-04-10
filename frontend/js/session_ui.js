@@ -221,8 +221,18 @@ const KSessionUI = (() => {
                 html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ff9800;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Mission / Task</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;white-space:pre-wrap;background:rgba(255,152,0,0.06);border-left:3px solid #ff9800;padding:8px 12px;border-radius:0 4px 4px 0;">${_escBriefing(taskText)}</div></div>`;
             }
 
-            // Environment
+            // Operation Start Time
             const env = _scenarioEnvironment || {};
+            if (env.start_time) {
+                try {
+                    const startDate = new Date(env.start_time);
+                    const dateStr = startDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                    const timeStr = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ce93d8;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Operation Start</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;background:rgba(206,147,216,0.08);border-left:3px solid #ce93d8;padding:8px 12px;border-radius:0 4px 4px 0;"><span style="font-size:12px;color:#b0b0b0;">📅</span> ${_escBriefing(dateStr)} &nbsp;&nbsp;<span style="font-size:12px;color:#b0b0b0;">⏰</span> ${_escBriefing(timeStr)}</div></div>`;
+                } catch (e) {}
+            }
+
+            // Environment
             const envKeys = ['weather', 'visibility', 'wind', 'precipitation', 'light_level', 'temperature'];
             const hasEnv = envKeys.some(k => env[k] != null);
             if (hasEnv) {

@@ -11,6 +11,7 @@ import uuid
 import json
 import logging
 import math
+import copy
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -31,12 +32,15 @@ router = APIRouter()
 # ── In-memory peaks cache per session ────────────────────────
 # Avoids recomputing peaks (expensive 8-ray algorithm) on every request.
 # Invalidated when terrain is analyzed or cleared.
+# DB-backed: results are also persisted in GridDefinition.settings_json['peaks_cache']
+# so they survive server restarts and are only recomputed when terrain changes.
 import time as _time
 _peaks_cache: dict[str, dict] = {}  # session_id → {"data": {...}, "ts": float, "params": (prom, dist)}
-_PEAKS_CACHE_TTL = 86400  # 24 hours
+_PEAKS_CACHE_TTL = 86400  # 24 hours (in-memory TTL)
 
 
 def _invalidate_peaks_cache(session_id: str):
+    """Invalidate the in-memory peaks cache for a session."""
     _peaks_cache.pop(session_id, None)
 
 
@@ -54,6 +58,55 @@ def _get_peaks_cache(session_id: str, prominence: float, distance: float) -> dic
 
 def _set_peaks_cache(session_id: str, prominence: float, distance: float, data: dict):
     _peaks_cache[session_id] = {"data": data, "ts": _time.time(), "params": (prominence, distance)}
+
+
+async def _load_db_peaks_cache(session_id: uuid.UUID, prominence: float, distance: float, db: DB) -> dict | None:
+    """Load persisted peaks from GridDefinition.settings_json. Returns None on miss/mismatch."""
+    result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = result.scalar_one_or_none()
+    if not gd or not gd.settings_json:
+        return None
+    db_cache = gd.settings_json.get("peaks_cache")
+    if not db_cache:
+        return None
+    stored_params = db_cache.get("params")
+    if stored_params != [prominence, distance]:
+        return None
+    return db_cache.get("data")
+
+
+async def _save_db_peaks_cache(session_id: uuid.UUID, prominence: float, distance: float, data: dict, db: DB):
+    """Persist computed peaks into GridDefinition.settings_json."""
+    result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = result.scalar_one_or_none()
+    if gd is None:
+        return
+    new_settings = copy.deepcopy(gd.settings_json or {})
+    new_settings["peaks_cache"] = {
+        "params": [prominence, distance],
+        "data": data,
+        "computed_at": _time.time(),
+    }
+    # Reassign to trigger SQLAlchemy dirty tracking on JSONB column
+    gd.settings_json = new_settings
+    await db.flush()
+
+
+async def _clear_db_peaks_cache(session_id: uuid.UUID, db: DB):
+    """Remove persisted peaks cache from GridDefinition.settings_json."""
+    result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = result.scalar_one_or_none()
+    if gd and gd.settings_json and "peaks_cache" in gd.settings_json:
+        new_settings = copy.deepcopy(gd.settings_json)
+        del new_settings["peaks_cache"]
+        gd.settings_json = new_settings
+        await db.flush()
 
 
 # ── Pydantic schemas ─────────────────────────────────────────
@@ -102,10 +155,11 @@ async def analyze_terrain(
             force=body.force,
             skip_elevation=body.skip_elevation,
         )
-        # Invalidate terrain cache after analysis
+        # Invalidate terrain cache after analysis (in-memory + DB)
         from backend.engine.terrain import clear_terrain_cache
         clear_terrain_cache(str(session_id))
         _invalidate_peaks_cache(str(session_id))
+        await _clear_db_peaks_cache(session_id, db)
         return summary
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -130,6 +184,10 @@ async def analyze_terrain_stream(
     """
     from backend.services.terrain_analysis.service import analyze_grid_streaming
 
+    # Invalidate peaks cache at analysis start (in-memory + DB)
+    _invalidate_peaks_cache(str(session_id))
+    await _clear_db_peaks_cache(session_id, db)
+
     async def event_generator():
         try:
             async for progress in analyze_grid_streaming(
@@ -139,6 +197,10 @@ async def analyze_terrain_stream(
                 force=force,
                 skip_elevation=skip_elevation,
             ):
+                # Also invalidate terrain engine cache on completion
+                if progress.get("step") == "complete":
+                    from backend.engine.terrain import clear_terrain_cache
+                    clear_terrain_cache(str(session_id))
                 yield f"data: {json.dumps(progress)}\n\n"
         except Exception as e:
             logger.error(f"Terrain analysis stream error: {e}", exc_info=True)
@@ -572,10 +634,11 @@ async def clear_terrain(
         delete(ElevationCell).where(ElevationCell.session_id == session_id)
     )
 
-    # Invalidate terrain cache
+    # Invalidate terrain cache (in-memory + DB peaks cache)
     from backend.engine.terrain import clear_terrain_cache
     clear_terrain_cache(str(session_id))
     _invalidate_peaks_cache(str(session_id))
+    await _clear_db_peaks_cache(session_id, db)
 
     return {"deleted": deleted_count, "kept_manual": keep_manual}
 
@@ -719,12 +782,25 @@ async def get_elevation_peaks(
       4. Dynamic prominence threshold adapts to terrain relief — ensures
          peaks are significant relative to the landscape, not just noise.
       5. Dedup: within min_distance_m, only the highest peak is kept.
+
+    Results are persisted in GridDefinition.settings_json['peaks_cache'] so they
+    survive server restarts and are only recomputed when terrain data changes.
     """
-    # ── Check cache first ──
+    # ── Tier 1: in-memory cache (fastest) ──
     sid = str(session_id)
     cached = _get_peaks_cache(sid, min_prominence_m, min_distance_m)
     if cached is not None:
         return cached
+
+    # ── Tier 2: DB-persisted cache (survives restarts) ──
+    db_cached = await _load_db_peaks_cache(session_id, min_prominence_m, min_distance_m, db)
+    if db_cached is not None:
+        logger.debug(f"Peaks cache hit (DB) for session {sid}")
+        _set_peaks_cache(sid, min_prominence_m, min_distance_m, db_cached)
+        return db_cached
+
+    # ── Tier 3: Compute from ElevationCell data ──
+    logger.info(f"Computing elevation peaks for session {sid} (no cache hit)")
 
     result = await db.execute(
         select(ElevationCell).where(ElevationCell.session_id == session_id)
@@ -871,7 +947,15 @@ async def get_elevation_peaks(
             deduped.append(peak)
 
     response_data = {"peaks": deduped}
+
+    # Store in both in-memory cache and DB (for persistence across restarts)
     _set_peaks_cache(sid, min_prominence_m, min_distance_m, response_data)
+    try:
+        await _save_db_peaks_cache(session_id, min_prominence_m, min_distance_m, response_data, db)
+        logger.info(f"Peaks computed and persisted for session {sid}: {len(deduped)} peaks")
+    except Exception as e:
+        logger.warning(f"Could not persist peaks cache to DB: {e}")
+
     return response_data
 
 
