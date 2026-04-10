@@ -1290,6 +1290,12 @@ Red AI operates with **limited information**:
 | `AREA_FIRE_BLAST_RADIUS_M` | 150m | `combat.py` |
 | `DEFAULT_FIRE_SALVOS` | 3 | `combat.py` |
 | `COVER_SEARCH_RADIUS` | 800m | `movement.py` |
+| `CEASEFIRE_REQUEST_RADIUS_M` | 250m | `combat.py` |
+| `SUPPRESS_HOLD_RANGE_FRACTION` | 0.80 (80% of weapon range) | `combat.py` |
+| `SUPPRESS_DAMAGE_MOD` | ×0.6 | `combat.py` |
+| `SUPPRESS_SUPPRESSION_RATE` | 0.045 (×1.5) | `combat.py` |
+| `FLANK_DAMAGE_MOD` | ×0.85 | `combat.py` |
+| `FLANK_ANGLE_OFFSET` | 60° | `combat.py` |
 
 ---
 
@@ -1642,14 +1648,30 @@ When a target is outside the area of operations:
 - Designate a **base of fire** (typically heavier weapons, artillery, or a fixing element) to suppress the enemy.
 - The **maneuver element** (typically infantry or armor) moves to a flanking or assault position while the enemy is suppressed.
 - The base of fire shifts or lifts fire when the maneuver element is about to assault.
+- **Suppressing units hold at range** — they do NOT advance to point-blank. They maintain fire from 80% of their weapon range (e.g. infantry platoon at ~480m, tank company at ~2000m).
+- **Assault units close in** — only 1-2 designated assault elements advance to close combat.
+- **Flanking units approach from 60°** offset — terrain-aware, seeking covered approach routes.
 
 #### C.2.3 Fire Support Coordination
 - Artillery/mortar units should fire in **support of** attacking units, not independently.
 - Request fire BEFORE the assault to suppress defenders (preparatory fires).
 - Shift fires to depth targets or flanks as the assault begins.
 - **Danger close**: Never fire within 50m of friendly troops. Cease fire if friendlies advance into the beaten zone.
+- **Proactive ceasefire**: When assault infantry approaches within 250m of the bombardment zone, they halt and request cease-fire. Artillery finishes its last salvo then stops. Infantry resumes advance only after confirming artillery has ceased. This prevents friendly fire during the critical fire-to-assault transition.
+- **Three-tier friendly fire prevention**: (1) Proactive ceasefire at 250m, (2) Danger-close auto-stop at 50m, (3) Area-fire blast zone exclusion at 150m.
 
-#### C.2.4 Combined Arms Principles
+#### C.2.4 Combat Role Coordination
+When **multiple units engage the same enemy**, they automatically coordinate:
+
+1. **Suppress** (~40% of attacking group): Stay at weapon range, provide covering fire. Damage reduced (×0.6) but suppression increased (×1.5). Preferred unit types: tanks, AT teams, mortars, mechanized infantry. **Do NOT advance to point-blank.**
+2. **Assault** (1-2 units): Strongest infantry units close with the enemy. Full damage. Close to engagement range.
+3. **Flank** (remainder): Approach from 60° offset angle, using terrain for concealment. Slightly reduced damage (×0.85) while maneuvering.
+
+**Key principle**: Not all units storm the enemy position. Suppressing units maintain fire superiority from range while assault elements close in. This mirrors real-world fire-and-maneuver doctrine and prevents fratricide.
+
+Radio coordination: units announce their roles ("providing suppressive fire" / "moving to flank" / "moving to assault position") so adjacent units are aware.
+
+#### C.2.5 Combined Arms Principles
 
 | Unit Type | Primary Role | Employment Principle |
 |-----------|-------------|---------------------|
@@ -1675,10 +1697,11 @@ When a target is outside the area of operations:
 - Requires preparation: reconnaissance, fire plan, coordinated timing.
 - Phases:
   1. **Isolation** — cut off enemy reinforcement/retreat
-  2. **Suppression** — neutralize enemy fires with artillery/mortar (preparatory fires)
-  3. **Assault** — close with and destroy (maneuver element attacks, base of fire supports)
+  2. **Suppression** — neutralize enemy fires with artillery/mortar (preparatory fires). Designate suppression group (~40% of force) to maintain covering fire from weapon range.
+  3. **Assault** — 1-2 assault elements close with the enemy while suppressors maintain fire. Flanking elements approach from 60° offset through covered terrain. **Request artillery cease-fire** before assault elements enter the bombardment zone (250m threshold).
   4. **Consolidation** — secure the objective, prepare for counterattack
 - Attack ratio: minimum **3:1** local superiority at the point of attack.
+- **Not all units charge point-blank**: Suppressing units hold at range. Only designated assault/flank elements close in.
 
 #### C.3.3 Hasty Attack
 - Seize a fleeting opportunity before the enemy can prepare.
@@ -1767,6 +1790,8 @@ When a target is outside the area of operations:
 - Units operate within their chain of command (CoC).
 - Artillery support is requested through CoC — parent walks up 3 levels to find artillery siblings.
 - Peer support: units in same CoC (siblings) can be called for mutual assistance when under fire.
+- **Combat coordination**: Units attacking the same target automatically coordinate roles (suppress/flank/assault) by radio. Suppressing units announce covering fire, assault units announce approach, flanking units announce offset movement.
+- **Ceasefire coordination**: Assault infantry approaching a friendly bombardment zone requests cease-fire from artillery. Artillery acknowledges and finishes last salvo. Infantry confirms and resumes advance.
 - When no CoC assignments exist, any same-side player can command any unit.
 
 ### C.7 Terrain Utilization Doctrine
@@ -1871,25 +1896,27 @@ When making tactical decisions, evaluate:
 
 <!-- DOCTRINE:BRIEF:START -->
 #### Key Tactical Principles
-- **Fire and Maneuver**: One element suppresses while another moves. Never advance without covering fire.
+- **Fire and Maneuver**: One element suppresses while another moves. Never advance without covering fire. Suppressing units hold at weapon range (80%), only assault elements close in.
+- **Combat Role Coordination**: Multiple units attacking the same enemy auto-coordinate — ~40% suppress (stay at range, ×1.5 suppression), 1-2 assault (close in), rest flank (60° offset). Not everyone storms point-blank.
 - **Combined Arms**: Infantry clears complex terrain, armor provides shock in open terrain, artillery suppresses from range, recon finds the enemy.
 - **Concentration of Force**: Attack with local superiority (3:1 minimum). Never spread forces evenly.
 - **Terrain**: Use cover (forest 1.4× protection, urban 1.5×) and concealment (forest 0.4 vis, urban 0.5 vis). Higher ground = advantage.
 - **Security**: Always screen flanks. Recon forward before advancing. Never advance blind.
+- **Ceasefire Coordination**: Assault units approaching a friendly bombardment zone (within 250m) halt and request cease-fire. Artillery finishes last salvo then stops. Infantry resumes only after confirmation.
 
 #### Order Types and Implied Tasks
 - **Move**: Maintain comms, report arrival, expect contact en route.
-- **Attack**: Suppress enemy, establish fire superiority, consolidate after assault.
+- **Attack**: Suppress enemy, establish fire superiority, coordinate roles (suppress/assault/flank), consolidate after assault. Request artillery cease-fire before storming bombarded positions.
 - **Defend**: Dig in, improve positions, prepare fire plan, establish OPs.
 - **Observe**: Maintain concealment, report contacts, avoid engagement.
-- **Fire**: Compute fire solution, observe and adjust. Danger close = 50m.
+- **Fire**: Compute fire solution, observe and adjust. Danger close = 50m. Cease fire when friendly infantry within 250m of target.
 - **Withdraw**: Maintain contact while disengaging, establish rally point.
 - **Disengage**: Break contact immediately, seek covered position, suppress during withdrawal.
 
 #### Unit Employment
-- Infantry: assault complex terrain, hold ground, patrol.
-- Armor: attack in open terrain, exploit breakthroughs, counterattack.
-- Artillery/mortar: support attacks from range (area fire: 150m blast radius). Max 3 salvos per fire mission.
+- Infantry: assault complex terrain, hold ground, patrol. In coordinated attacks: assault or flank role.
+- Armor: attack in open terrain, exploit breakthroughs, counterattack. In coordinated attacks: often suppress role (heavy firepower from range).
+- Artillery/mortar: support attacks from range (area fire: 150m blast radius). Max 3 salvos per fire mission. **Cease fire when friendly assault troops approach within 250m.**
 - Recon/sniper/OP: find enemy, report. Nearly undetectable when concealed and stationary (300m max detection). Do NOT engage decisively.
 - Engineers: breach obstacles, lay mines, deploy bridges.
 
@@ -1898,7 +1925,8 @@ When making tactical decisions, evaluate:
 2. Cannot attack with no ammo (< 10%).
 3. Broken units (morale < 15%) do not respond.
 4. Use terrain advantage — height, cover, concealment.
-5. Coordinate fires with maneuver.
+5. Coordinate fires with maneuver — suppress before assault, cease fire before storming.
+6. Units attacking same target coordinate roles: suppress/flank/assault.
 <!-- DOCTRINE:BRIEF:END -->
 
 ---
@@ -1962,5 +1990,5 @@ doctrine.py (posture profiles)
 ---
 
 *Last updated: 2026-04-10*
-*Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/prompts/tactical_doctrine.py`*
+*Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/prompts/tactical_doctrine.py`, `backend/engine/radio_chatter.py`*
 

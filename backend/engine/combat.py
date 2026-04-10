@@ -304,6 +304,7 @@ def process_combat(
             if best_target is not None:
                 target = best_target
                 # Update task with found target for future ticks
+                task = dict(task)  # new dict for SQLAlchemy JSONB change detection
                 task["target_unit_id"] = str(target.id)
                 attacker.current_task = task
 
@@ -328,6 +329,7 @@ def process_combat(
         if dist > weapon_range:
             # Out of range — set target location so movement engine advances unit
             if not task.get("target_location"):
+                task = dict(task)  # new dict for SQLAlchemy JSONB change detection
                 task["target_location"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
                 attacker.current_task = task
             continue  # Will move toward target via movement engine
@@ -380,6 +382,15 @@ def process_combat(
             * terrain_mod
         )
 
+        # ── Combat role modifiers ──
+        combat_role = task.get("combat_role")
+        if combat_role == "suppress":
+            # Suppressing fire: reduced damage but increased suppression
+            fire_effectiveness *= 0.6
+        elif combat_role == "flank":
+            # Flanking: slightly reduced effectiveness while maneuvering
+            fire_effectiveness *= 0.85
+
         # Target protection
         tgt_terrain = terrain.protection_factor(tgt_pos[1], tgt_pos[0])
         tgt_task = target.current_task or {}
@@ -401,7 +412,10 @@ def process_combat(
         target.strength = max(0.0, (target.strength or 1.0) - damage)
 
         # Apply suppression
-        suppression_inflicted = fire_effectiveness * 0.03
+        suppression_rate = 0.03
+        if combat_role == "suppress":
+            suppression_rate = 0.045  # Suppressing units generate 50% more suppression
+        suppression_inflicted = fire_effectiveness * suppression_rate
         target.suppression = min(1.0, (target.suppression or 0.0) + suppression_inflicted)
 
         under_fire.add(target.id)
@@ -640,6 +654,15 @@ def _process_area_fire(
         if target.strength <= 0.01:
             target.is_destroyed = True
             target.current_task = None
+            # Clear all other units' engage tasks targeting this destroyed unit
+            involved_ids = [str(attacker.id)]
+            for u in all_units:
+                if u.is_destroyed or u.id == attacker.id:
+                    continue
+                u_task = u.current_task
+                if u_task and u_task.get("target_unit_id") == str(target.id):
+                    involved_ids.append(str(u.id))
+                    u.current_task = None
             events.append({
                 "event_type": "unit_destroyed",
                 "actor_unit_id": attacker.id,
@@ -648,6 +671,7 @@ def _process_area_fire(
                 "payload": {
                     "attacker": str(attacker.id),
                     "target": str(target.id),
+                    "involved_unit_ids": involved_ids,
                     "target_lat": tgt_pos[0],
                     "target_lon": tgt_pos[1],
                     "is_artillery": True,
@@ -705,6 +729,365 @@ ARTILLERY_TYPES = {
     "artillery_battery", "artillery_platoon",
     "mortar_section", "mortar_team",
 }
+
+# ── Combat coordination: cease-fire request radius ──
+# When friendly infantry is within this distance of an artillery target,
+# the infantry halts and requests cease-fire before storming.
+CEASEFIRE_REQUEST_RADIUS_M = 250.0
+
+# ── Combat role assignment ──
+# Unit types best suited for suppression (support weapons, lower mobility)
+SUPPRESSION_PREFERRED_TYPES = {
+    "mortar_section", "mortar_team", "at_team", "mech_platoon",
+    "mech_company", "tank_platoon", "tank_company",
+    "observation_post", "sniper_team",
+}
+
+# Minimum weapon range fraction at which suppressing units hold position
+SUPPRESS_HOLD_RANGE_FRACTION = 0.80
+
+# Re-evaluate combat roles every N ticks to prevent oscillation
+COMBAT_ROLE_REASSIGN_INTERVAL = 3
+
+
+def assign_combat_roles(
+    all_units: list,
+    terrain: TerrainService,
+) -> list[dict]:
+    """
+    Assign combat roles (suppress/assault/flank) to groups of units
+    attacking the same target. This creates tactical coordination so
+    units don't all charge to point-blank range.
+
+    Rules:
+    - Groups of 1 unit: no role assignment needed (they do everything).
+    - Groups of 2+:
+        - ~40% assigned "suppress" (stay at range, provide covering fire)
+        - 1-2 assigned "assault" (close in for the kill — strongest infantry)
+        - remainder assigned "flank" (approach from an offset angle)
+    - Roles stored in unit.current_task["combat_role"]
+    - Role reassignment throttled to every COMBAT_ROLE_REASSIGN_INTERVAL ticks.
+
+    Returns list of radio chatter event dicts.
+    """
+    events = []
+
+    # Group attackers by target_unit_id
+    target_groups: dict[str, list] = {}  # target_id → [attacking_units]
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        task = u.current_task
+        if not task:
+            continue
+        task_type = task.get("type", "")
+        if task_type not in ("attack", "engage"):
+            continue
+        # Skip artillery — they have their own fire missions
+        if u.unit_type in ARTILLERY_TYPES:
+            continue
+        target_id = task.get("target_unit_id")
+        if target_id:
+            target_groups.setdefault(str(target_id), []).append(u)
+
+    # Build target lookup
+    units_by_id = {str(u.id): u for u in all_units if not u.is_destroyed}
+
+    for target_id, attackers in target_groups.items():
+        if len(attackers) < 2:
+            # Solo attacker — no coordination needed, clear any stale role
+            if attackers[0].current_task and attackers[0].current_task.get("combat_role"):
+                task = dict(attackers[0].current_task)
+                del task["combat_role"]
+                attackers[0].current_task = task
+            continue
+
+        target = units_by_id.get(target_id)
+        if not target:
+            continue
+
+        tgt_pos = _get_position(target)
+        if not tgt_pos:
+            continue
+
+        # Check if roles were recently assigned — throttle reassignment
+        any_has_role = any(
+            (u.current_task or {}).get("combat_role") for u in attackers
+        )
+        if any_has_role:
+            # Check tick of last assignment
+            assign_tick = max(
+                (u.current_task or {}).get("combat_role_assigned_tick", 0)
+                for u in attackers
+            )
+            # If all attackers have roles and it's recent, skip
+            all_have_role = all(
+                (u.current_task or {}).get("combat_role") for u in attackers
+            )
+            if all_have_role and assign_tick > 0:
+                continue  # roles are still valid, don't reassign yet
+
+        # Sort attackers: those with long range / heavy weapons suppress,
+        # strongest infantry assaults
+        attacker_info = []
+        for u in attackers:
+            u_pos = _get_position(u)
+            if not u_pos:
+                continue
+            dist = _distance_m(u_pos[0], u_pos[1], tgt_pos[0], tgt_pos[1])
+            w_range = WEAPON_RANGE.get(u.unit_type, 800)
+            fp = BASE_FIREPOWER.get(u.unit_type, 5)
+            attacker_info.append({
+                "unit": u,
+                "dist": dist,
+                "weapon_range": w_range,
+                "firepower": fp,
+                "is_suppress_type": u.unit_type in SUPPRESSION_PREFERRED_TYPES,
+            })
+
+        if len(attacker_info) < 2:
+            continue
+
+        # Determine roles:
+        # 1. Units already at good range with heavy weapons → suppress
+        # 2. Strongest / closest infantry-type → assault (max 1-2)
+        # 3. Rest → flank (approach from offset angle)
+
+        n_suppress = max(1, len(attacker_info) * 2 // 5)  # ~40%
+        n_assault = min(2, max(1, len(attacker_info) - n_suppress))
+        n_flank = len(attacker_info) - n_suppress - n_assault
+
+        # Score for suppression: prefer units at range + suppression types + high firepower
+        for info in attacker_info:
+            range_score = min(1.0, info["dist"] / info["weapon_range"]) if info["weapon_range"] > 0 else 0
+            info["suppress_score"] = (
+                range_score * 0.4
+                + (1.0 if info["is_suppress_type"] else 0.0) * 0.4
+                + min(1.0, info["firepower"] / 30.0) * 0.2
+            )
+
+        # Score for assault: prefer close units with medium firepower (infantry)
+        for info in attacker_info:
+            closeness = max(0, 1.0 - info["dist"] / 2000.0)
+            is_infantry = not info["is_suppress_type"]
+            info["assault_score"] = (
+                closeness * 0.5
+                + (1.0 if is_infantry else 0.3) * 0.3
+                + min(1.0, (info["unit"].strength or 1.0)) * 0.2
+            )
+
+        # Assign suppressors first (highest suppress_score)
+        sorted_suppress = sorted(attacker_info, key=lambda x: x["suppress_score"], reverse=True)
+        suppressors = sorted_suppress[:n_suppress]
+        remaining = sorted_suppress[n_suppress:]
+
+        # From remaining, assign assaulters (highest assault_score)
+        sorted_assault = sorted(remaining, key=lambda x: x["assault_score"], reverse=True)
+        assaulters = sorted_assault[:n_assault]
+        flankers = sorted_assault[n_assault:]
+
+        # Apply roles
+        for info in suppressors:
+            _apply_combat_role(info["unit"], "suppress", info["dist"], info["weapon_range"], tgt_pos)
+        for info in assaulters:
+            _apply_combat_role(info["unit"], "assault", info["dist"], info["weapon_range"], tgt_pos)
+        for info in flankers:
+            _apply_combat_role(info["unit"], "flank", info["dist"], info["weapon_range"], tgt_pos, terrain)
+
+    return events
+
+
+def _apply_combat_role(unit, role: str, dist: float, weapon_range: float,
+                       tgt_pos: tuple, terrain: TerrainService | None = None):
+    """Apply a combat role to a unit's current task."""
+    task = dict(unit.current_task) if unit.current_task else {"type": "engage"}
+    task["combat_role"] = role
+    task["combat_role_assigned_tick"] = 0  # Will be filled with tick number by tick.py
+
+    if role == "suppress":
+        # Suppressing units hold at ~80% of their weapon range
+        hold_dist = weapon_range * SUPPRESS_HOLD_RANGE_FRACTION
+        if dist <= hold_dist:
+            # Already within suppression range — remove target_location to stop advancing
+            task.pop("target_location", None)
+
+    elif role == "flank":
+        # Flanking units get their target_location offset 60° from direct line
+        if tgt_pos and unit.position is not None:
+            try:
+                pt = to_shape(unit.position)
+                cur_lat, cur_lon = pt.y, pt.x
+                # Compute bearing from unit to target
+                dy = (tgt_pos[0] - cur_lat) * METERS_PER_DEG_LAT
+                dx = (tgt_pos[1] - cur_lon) * METERS_PER_DEG_LON_AT_48
+                bearing_rad = math.atan2(dx, dy)
+                # Offset by 60° (try both sides, pick one with better protection)
+                offset_rad = math.radians(60)
+                flank_dist_m = max(200, min(dist * 0.7, 500))
+                best_pos = None
+                best_prot = 0
+                for sign in (1, -1):
+                    flank_bearing = bearing_rad + sign * offset_rad
+                    flank_lat = tgt_pos[0] + flank_dist_m * math.cos(flank_bearing) / METERS_PER_DEG_LAT
+                    flank_lon = tgt_pos[1] + flank_dist_m * math.sin(flank_bearing) / METERS_PER_DEG_LON_AT_48
+                    prot = 0
+                    if terrain:
+                        prot = terrain.protection_factor(flank_lon, flank_lat)
+                    if best_pos is None or prot > best_prot:
+                        best_prot = prot
+                        best_pos = (flank_lat, flank_lon)
+                if best_pos:
+                    task["target_location"] = {"lat": best_pos[0], "lon": best_pos[1]}
+                    task["flank_target"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+            except Exception:
+                pass
+
+    unit.current_task = task
+
+
+def check_artillery_ceasefire_coordination(
+    all_units: list,
+    terrain: TerrainService,
+) -> list[dict]:
+    """
+    Check if assault units approaching a bombarded target need to request
+    cease-fire from friendly artillery before storming.
+
+    When a non-artillery unit with assault role (or engage/attack task) is within
+    CEASEFIRE_REQUEST_RADIUS_M of a location being bombarded by friendly artillery,
+    the infantry halts and the artillery finishes its current salvo then ceases fire.
+
+    Also handles the resume: units with awaiting_ceasefire flag resume when
+    no friendly artillery is still firing at that area.
+
+    Returns list of event dicts (radio chatter).
+    """
+    events = []
+
+    # Build maps of artillery firing positions
+    arty_targets: dict[str, list] = {}  # serialized target area → [artillery units]
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        if u.unit_type not in ARTILLERY_TYPES:
+            continue
+        task = u.current_task
+        if not task:
+            continue
+        if task.get("type") != "fire":
+            continue
+        target_loc = task.get("target_location")
+        if not target_loc:
+            continue
+        # Key by approximate area (round to ~50m grid)
+        key = f"{round(target_loc['lat'], 4)}_{round(target_loc['lon'], 4)}"
+        arty_targets.setdefault(key, []).append(u)
+
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        if u.unit_type in ARTILLERY_TYPES:
+            continue
+
+        task = u.current_task
+        if not task:
+            continue
+
+        task_type = task.get("type", "")
+
+        # ── Resume check: units waiting for cease-fire ──
+        if task.get("awaiting_ceasefire"):
+            ceasefire_target = task.get("ceasefire_target")
+            if ceasefire_target:
+                key = f"{round(ceasefire_target['lat'], 4)}_{round(ceasefire_target['lon'], 4)}"
+                arty_still_firing = key in arty_targets
+                if not arty_still_firing:
+                    # Artillery has ceased — resume advance
+                    new_task = dict(task)
+                    del new_task["awaiting_ceasefire"]
+                    del new_task["ceasefire_target"]
+                    u.current_task = new_task
+                    side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+                    events.append({
+                        "event_type": "ceasefire_cleared",
+                        "actor_unit_id": u.id,
+                        "text_summary": f"{u.name} — artillery cease-fire confirmed, resuming advance",
+                        "payload": {
+                            "unit_id": str(u.id),
+                            "reason": "ceasefire_cleared",
+                        },
+                    })
+            continue  # Don't process further while waiting
+
+        # ── Check if this unit is approaching a bombarded area ──
+        if task_type not in ("attack", "engage", "advance"):
+            continue
+
+        u_pos = _get_position(u)
+        if not u_pos:
+            continue
+
+        u_side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+
+        # Check all friendly artillery targets
+        for key, arty_units in arty_targets.items():
+            # Check if any arty is same side
+            same_side_arty = [
+                a for a in arty_units
+                if (a.side.value if hasattr(a.side, 'value') else str(a.side)) == u_side
+            ]
+            if not same_side_arty:
+                continue
+
+            arty_task = same_side_arty[0].current_task
+            if not arty_task:
+                continue
+            arty_target = arty_task.get("target_location")
+            if not arty_target:
+                continue
+
+            # Is this unit close enough to the bombardment area?
+            dist_to_bombardment = _distance_m(
+                u_pos[0], u_pos[1],
+                arty_target["lat"], arty_target["lon"]
+            )
+
+            if dist_to_bombardment <= CEASEFIRE_REQUEST_RADIUS_M:
+                # Halt the unit and request cease-fire
+                new_task = dict(task)
+                new_task["awaiting_ceasefire"] = True
+                new_task["ceasefire_target"] = arty_target
+                u.current_task = new_task
+
+                # Signal artillery to finish current salvo and cease
+                for arty in same_side_arty:
+                    arty_t = arty.current_task
+                    if arty_t and arty_t.get("type") == "fire":
+                        arty_t_new = dict(arty_t)
+                        # Set salvos to 1 so it fires this last round then stops
+                        current_salvos = arty_t_new.get("salvos_remaining", 1)
+                        arty_t_new["salvos_remaining"] = min(current_salvos, 1)
+                        arty_t_new["ceasefire_requested_by"] = str(u.id)
+                        arty.current_task = arty_t_new
+
+                events.append({
+                    "event_type": "ceasefire_requested",
+                    "actor_unit_id": u.id,
+                    "text_summary": (
+                        f"{u.name} requesting cease-fire from {same_side_arty[0].name} — "
+                        f"infantry approaching bombardment zone ({dist_to_bombardment:.0f}m)"
+                    ),
+                    "payload": {
+                        "unit_id": str(u.id),
+                        "artillery_id": str(same_side_arty[0].id),
+                        "distance_to_target_m": round(dist_to_bombardment, 1),
+                        "target_lat": arty_target["lat"],
+                        "target_lon": arty_target["lon"],
+                    },
+                })
+                break  # One ceasefire request per unit per tick
+
+    return events
 
 
 def process_artillery_support(

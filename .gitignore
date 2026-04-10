@@ -14,3 +14,4 @@ node_modules/
 *.db
 *.sqlite3
 
+/TODO.text

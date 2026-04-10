@@ -1332,8 +1332,8 @@ const KMapObjects = (() => {
         const label = obj.label || obj.object_type.replace(/_/g, ' ');
         const status = obj.is_active ? '✓ Active' : '✗ Inactive';
         const prot = obj.definition ? obj.definition.protection_bonus : 1.0;
-        const rotDeg = (obj.properties && obj.properties.rotation_deg) ? ` · ↻${obj.properties.rotation_deg}°` : '';
-        const lenM = (obj.properties && obj.properties.length_m) ? ` · ${obj.properties.length_m}m` : '';
+        const rotDeg = (_isAdminOpen() && obj.properties && obj.properties.rotation_deg) ? ` · ↻${obj.properties.rotation_deg}°` : '';
+        const lenM = (_isAdminOpen() && obj.properties && obj.properties.length_m) ? ` · ${obj.properties.length_m}m` : '';
         let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}${rotDeg}${lenM}</span>`;
         // Show discovery status in admin mode
         if (_isAdminOpen()) {

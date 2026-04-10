@@ -316,6 +316,223 @@ def generate_casualty_radio_messages(
     return messages
 
 
+# ── Templates for combat role coordination ──
+
+ROLE_SUPPRESS_RU = [
+    "Здесь {unit}. Обеспечиваю подавление, район {grid}. Прикрываю {ally}.",
+    "{unit}, приём. Веду огонь на подавление, квадрат {grid}.",
+]
+
+ROLE_SUPPRESS_EN = [
+    "This is {unit}. Providing suppressive fire at grid {grid}. Covering {ally}.",
+    "{unit}, over. Suppressing target at {grid}.",
+]
+
+ROLE_FLANK_RU = [
+    "Здесь {unit}. Выхожу на фланг, район {grid}. Прошу продолжать подавление.",
+    "{unit}, приём. Обхожу позицию противника с фланга. Не прекращайте огонь!",
+]
+
+ROLE_FLANK_EN = [
+    "This is {unit}. Moving to flank position, grid {grid}. Continue suppression.",
+    "{unit}, over. Flanking enemy position. Maintain covering fire!",
+]
+
+ROLE_ASSAULT_RU = [
+    "Здесь {unit}. Выдвигаюсь на штурм, район {grid}. Прикройте!",
+    "{unit}, приём. Иду на сближение с противником. Огнём поддержите!",
+]
+
+ROLE_ASSAULT_EN = [
+    "This is {unit}. Moving to assault position at grid {grid}. Cover me!",
+    "{unit}, over. Closing in on enemy position. Keep them suppressed!",
+]
+
+CEASEFIRE_REQUEST_RU = [
+    "Здесь {unit}! Прошу прекратить огонь по цели, пехота выходит на штурм! Район {grid}.",
+    "{unit}, приём! Прекратите огонь! Мы выходим на рубеж атаки, район {grid}!",
+]
+
+CEASEFIRE_REQUEST_EN = [
+    "This is {unit}! Requesting cease fire on target — infantry moving to assault! Grid {grid}.",
+    "{unit}, over! Check fire, check fire! We are approaching the target area, grid {grid}!",
+]
+
+CEASEFIRE_ACK_RU = [
+    "Здесь {unit}. Принял, прекращаю огонь. Последний залп — отбой.",
+    "{unit}, приём. Огонь прекращаю, подтверждаю. Удачи на штурме.",
+]
+
+CEASEFIRE_ACK_EN = [
+    "This is {unit}. Copy, ceasing fire. Last round — check fire.",
+    "{unit}, roger. Cease fire confirmed. Good luck on the assault.",
+]
+
+CEASEFIRE_CLEAR_RU = [
+    "Здесь {unit}. Артиллерия прекратила огонь, продолжаю выдвижение.",
+    "{unit}, приём. Огонь прекращён, возобновляем движение.",
+]
+
+CEASEFIRE_CLEAR_EN = [
+    "This is {unit}. Artillery cease-fire confirmed, resuming advance.",
+    "{unit}, over. Fire cleared, continuing movement.",
+]
+
+
+def generate_combat_coordination_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+) -> list[dict]:
+    """
+    Generate radio messages for combat coordination events:
+    - Role assignments (suppress/flank/assault)
+    - Cease-fire requests and acknowledgments
+    - Cease-fire cleared messages
+
+    Returns list of chat message dicts.
+    """
+    messages = []
+
+    units_by_id = {str(u.id): u for u in all_units}
+
+    # ── Cease-fire requests ──
+    ceasefire_templates = CEASEFIRE_REQUEST_RU if language == "ru" else CEASEFIRE_REQUEST_EN
+    ceasefire_ack_templates = CEASEFIRE_ACK_RU if language == "ru" else CEASEFIRE_ACK_EN
+    ceasefire_clear_templates = CEASEFIRE_CLEAR_RU if language == "ru" else CEASEFIRE_CLEAR_EN
+
+    for evt in tick_events:
+        etype = evt.get("event_type", "")
+        payload = evt.get("payload", {})
+        actor_id = evt.get("actor_unit_id")
+
+        if etype == "ceasefire_requested":
+            unit = units_by_id.get(str(actor_id)) if actor_id else None
+            arty_id = payload.get("artillery_id")
+            arty_unit = units_by_id.get(arty_id) if arty_id else None
+
+            if unit and not unit.is_destroyed:
+                grid = _resolve_grid(unit, grid_service, language)
+                side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+                ally = arty_unit.name if arty_unit else "artillery"
+                text = random.choice(ceasefire_templates).format(
+                    unit=unit.name, grid=grid, ally=ally
+                )
+                messages.append({
+                    "sender_name": unit.name,
+                    "side": side,
+                    "text": text,
+                    "is_unit_response": True,
+                    "response_type": "ceasefire_request",
+                })
+
+                # Artillery acknowledges
+                if arty_unit and not arty_unit.is_destroyed:
+                    ack_text = random.choice(ceasefire_ack_templates).format(unit=arty_unit.name)
+                    messages.append({
+                        "sender_name": arty_unit.name,
+                        "side": side,
+                        "text": ack_text,
+                        "is_unit_response": True,
+                        "response_type": "ceasefire_ack",
+                    })
+
+        elif etype == "ceasefire_cleared":
+            unit = units_by_id.get(str(actor_id)) if actor_id else None
+            if unit and not unit.is_destroyed:
+                side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+                text = random.choice(ceasefire_clear_templates).format(unit=unit.name)
+                messages.append({
+                    "sender_name": unit.name,
+                    "side": side,
+                    "text": text,
+                    "is_unit_response": True,
+                    "response_type": "ceasefire_clear",
+                })
+
+    # ── Combat role assignment announcements ──
+    # Only announce when roles are newly assigned this tick
+    suppress_templates = ROLE_SUPPRESS_RU if language == "ru" else ROLE_SUPPRESS_EN
+    flank_templates = ROLE_FLANK_RU if language == "ru" else ROLE_FLANK_EN
+    assault_templates = ROLE_ASSAULT_RU if language == "ru" else ROLE_ASSAULT_EN
+
+    announced_units = set()
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        task = u.current_task
+        if not task:
+            continue
+        role = task.get("combat_role")
+        assign_tick = task.get("combat_role_assigned_tick", 0)
+        if not role or assign_tick != tick:
+            continue  # Only announce on the tick roles are assigned
+
+        uid_str = str(u.id)
+        if uid_str in announced_units:
+            continue
+        announced_units.add(uid_str)
+
+        comms = u.comms_status
+        if hasattr(comms, 'value'):
+            comms = comms.value
+        if comms == "offline":
+            continue
+
+        grid = _resolve_grid(u, grid_service, language)
+        side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+
+        # Find an ally name for context
+        target_id = task.get("target_unit_id")
+        ally_name = ""
+        if target_id:
+            for other in all_units:
+                if other.is_destroyed or str(other.id) == uid_str:
+                    continue
+                other_task = other.current_task
+                if other_task and other_task.get("target_unit_id") == target_id:
+                    ally_name = other.name
+                    break
+
+        if role == "suppress":
+            text = random.choice(suppress_templates).format(
+                unit=u.name, grid=grid, ally=ally_name or "assault team"
+            )
+        elif role == "flank":
+            text = random.choice(flank_templates).format(unit=u.name, grid=grid)
+        elif role == "assault":
+            text = random.choice(assault_templates).format(unit=u.name, grid=grid)
+        else:
+            continue
+
+        messages.append({
+            "sender_name": u.name,
+            "side": side,
+            "text": text,
+            "is_unit_response": True,
+            "response_type": f"combat_role_{role}",
+        })
+
+    return messages
+
+
+def _resolve_grid(unit, grid_service, language: str) -> str:
+    """Helper to resolve a unit's position to a grid reference."""
+    grid = "текущем районе" if language == "ru" else "current area"
+    if grid_service and unit.position is not None:
+        try:
+            from geoalchemy2.shape import to_shape
+            pt = to_shape(unit.position)
+            snail = grid_service.point_to_snail(pt.y, pt.x, depth=2)
+            if snail:
+                grid = snail
+        except Exception:
+            pass
+    return grid
+
+
 # ── Templates for contact detection radio messages ──
 
 CONTACT_REPORT_RU = [
@@ -443,5 +660,4 @@ def generate_contact_radio_messages(
         reported_units.add(observer_id_str)
 
     return messages
-
 

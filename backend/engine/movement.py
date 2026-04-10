@@ -472,6 +472,27 @@ def process_movement(
         if task_type == "fire" and unit.unit_type in INDIRECT_FIRE_UNIT_TYPES:
             continue
 
+        # ── Awaiting cease-fire: halt until artillery clears ──
+        if task.get("awaiting_ceasefire"):
+            continue
+
+        # ── Suppress role: hold position at weapon range, don't advance ──
+        combat_role = task.get("combat_role")
+        if combat_role == "suppress" and task_type in ("attack", "engage"):
+            # Suppressing units stay at range — only move if out of weapon range
+            from backend.engine.combat import WEAPON_RANGE, SUPPRESS_HOLD_RANGE_FRACTION
+            weapon_range = WEAPON_RANGE.get(unit.unit_type, 800)
+            hold_dist = weapon_range * SUPPRESS_HOLD_RANGE_FRACTION
+            target_loc = task.get("target_location")
+            if target_loc and unit.position is not None:
+                try:
+                    pt = to_shape(unit.position)
+                    dist_to_target = _distance_m(pt.y, pt.x, target_loc["lat"], target_loc["lon"])
+                    if dist_to_target <= hold_dist:
+                        continue  # Already in suppression position — hold
+                except Exception:
+                    pass
+
         # ── Disengage: find nearest covered position if not yet assigned ──
         if task_type == "disengage" and not task.get("target_location"):
             if unit.position is None:
