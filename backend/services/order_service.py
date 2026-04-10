@@ -465,38 +465,53 @@ class OrderService:
                     unit_dict, session_id, issuer_side, units_context,
                     db, grid_service,
                 )
+                lang = parsed.language.value
+                own_grid = situation.get("grid_ref", "")
+
                 if resp_type == ResponseType.status:
                     # Full status report
                     status_text = response_generator.generate_status_report(
-                        unit_dict, parsed.language.value, situation=situation,
+                        unit_dict, lang, situation=situation,
                     )
-                elif resp_type == ResponseType.wilco_fire and task:
-                    # For fire orders, include TARGET location in confirmation (not own position)
-                    lang = parsed.language.value
-                    target_snail = task.get("target_snail", "")
-                    target_loc = task.get("target_location", {})
-                    salvos = task.get("salvos_remaining", 3)
+                elif resp_type == ResponseType.wilco_fire:
+                    # Fire order: own position + target/readiness
+                    target_snail = (task or {}).get("target_snail", "")
+                    target_loc = (task or {}).get("target_location") or {}
+                    salvos = (task or {}).get("salvos_remaining", 3)
+                    pos_ru = f"нахожусь квадрат {own_grid}. " if own_grid else ""
+                    pos_en = f"at grid {own_grid}. " if own_grid else ""
                     if target_snail:
                         if lang == "ru":
-                            status_text = f"Цель: {target_snail}. {salvos} залпов."
+                            status_text = f"{pos_ru}готов открыть огонь по квадрату {target_snail}. {salvos} залпов."
                         else:
-                            status_text = f"Target: {target_snail}. {salvos} salvos."
+                            status_text = f"{pos_en}ready to fire on grid {target_snail}. {salvos} salvos."
                     elif target_loc.get("lat") is not None:
                         tgt_lat = round(target_loc["lat"], 4)
                         tgt_lon = round(target_loc["lon"], 4)
                         if lang == "ru":
-                            status_text = f"Цель: {tgt_lat}, {tgt_lon}. {salvos} залпов."
+                            status_text = f"{pos_ru}готов открыть огонь по {tgt_lat}, {tgt_lon}. {salvos} залпов."
                         else:
-                            status_text = f"Target: {tgt_lat}, {tgt_lon}. {salvos} salvos."
+                            status_text = f"{pos_en}ready to fire on {tgt_lat}, {tgt_lon}. {salvos} salvos."
                     else:
-                        status_text = response_generator.generate_brief_sitrep(
-                            unit_dict, parsed.language.value, situation=situation,
-                        )
+                        # Generic fire support — no specific target yet
+                        if lang == "ru":
+                            status_text = f"{pos_ru}готов открыть огонь по противнику по мере обнаружения."
+                        else:
+                            status_text = f"{pos_en}ready to engage targets of opportunity."
                 else:
                     # Brief situation for acknowledgments (position + key info)
-                    status_text = response_generator.generate_brief_sitrep(
-                        unit_dict, parsed.language.value, situation=situation,
-                    )
+                    order_type_val = parsed.order_type.value if parsed.order_type else ""
+                    task_target_snail = (task or {}).get("target_snail", "")
+                    if order_type_val in ("move", "advance") and task_target_snail and own_grid:
+                        # Move order: show current position + destination grid
+                        if lang == "ru":
+                            status_text = f"нахожусь квадрат {own_grid}. Выдвигаемся в квадрат {task_target_snail}"
+                        else:
+                            status_text = f"at grid {own_grid}. Moving to grid {task_target_snail}"
+                    else:
+                        status_text = response_generator.generate_brief_sitrep(
+                            unit_dict, lang, situation=situation,
+                        )
 
             resp = response_generator.generate_response(
                 parsed=parsed,

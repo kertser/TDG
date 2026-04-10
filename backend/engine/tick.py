@@ -393,11 +393,30 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         # Find the nearest attacker
         attacker_ids = attacking_map[uid_str]
         if attacker_ids:
-            u.current_task = {
+            # Resolve attacker's position from FOW contacts (not exact server position)
+            u_side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+            attacker_contact_loc = None
+            for contact in existing_contacts:
+                if (contact.target_unit_id
+                        and str(contact.target_unit_id) == str(attacker_ids[0])):
+                    c_side = (contact.observing_side.value
+                              if hasattr(contact.observing_side, 'value')
+                              else str(contact.observing_side))
+                    if c_side == u_side and contact.location_estimate:
+                        try:
+                            c_pt = to_shape(contact.location_estimate)
+                            attacker_contact_loc = {"lat": c_pt.y, "lon": c_pt.x}
+                        except Exception:
+                            pass
+                        break
+            engage_task = {
                 "type": "engage",
                 "target_unit_id": attacker_ids[0],
                 "auto_return_fire": True,
             }
+            if attacker_contact_loc:
+                engage_task["target_location"] = attacker_contact_loc
+            u.current_task = engage_task
 
     # ── 4e. Artillery support (auto-assign idle artillery in CoC) ──
     # Build preliminary under_fire set from attacking_map (who is being targeted)

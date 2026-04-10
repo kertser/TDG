@@ -238,9 +238,19 @@ const KAdmin = (() => {
             if (_adminUnlocked) {
                 try { KUnits.setAdminDrag(true); } catch(e) {}
                 try { KMapObjects.render(); } catch(e) {}
-                // Refresh god view to ensure map is up-to-date
+                // Auto-enable god view when admin panel opens
                 if (_godViewEnabled) {
                     _refreshGodView();
+                } else {
+                    const _autoSid = _getAdminSessionId();
+                    const _autoToken = _getToken();
+                    if (_autoSid && _autoToken) {
+                        _toggleGodView().catch(e => console.warn('Admin open: auto god view failed:', e));
+                    } else {
+                        // Session not selected yet — mark pending
+                        _pendingGodViewEnable = true;
+                        _tryAutoEnableGodView();
+                    }
                 }
             }
         } else {

@@ -1155,47 +1155,9 @@ def process_artillery_support(
             requesting_units.append((unit, target_loc, target_uid, "defensive_support"))
 
     for unit, target_loc, target_uid, support_type in requesting_units:
-        # Resolve target location
-        if not target_loc and target_uid:
-            # Resolve from the target unit's position
-            tgt = units_by_id.get(str(target_uid))
-            if tgt:
-                tgt_pos = _get_position(tgt)
-                if tgt_pos:
-                    target_loc = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
-
-        if not target_loc and support_type == "defensive_support":
-            # For defensive support without a known target,
-            # find the nearest enemy that is attacking this unit
-            unit_pos = _get_position(unit)
-            if unit_pos:
-                unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
-                nearest_enemy_dist = float('inf')
-                nearest_enemy_pos = None
-                nearest_enemy_id = None
-                for enemy in all_units:
-                    if enemy.is_destroyed:
-                        continue
-                    e_side = enemy.side.value if hasattr(enemy.side, 'value') else str(enemy.side)
-                    if e_side == unit_side:
-                        continue
-                    e_task = enemy.current_task
-                    if not e_task:
-                        continue
-                    # Check if this enemy is attacking our unit or our area
-                    e_target_uid = e_task.get("target_unit_id")
-                    if e_target_uid and str(e_target_uid) == str(unit.id):
-                        e_pos = _get_position(enemy)
-                        if e_pos:
-                            d = _distance_m(unit_pos[0], unit_pos[1], e_pos[0], e_pos[1])
-                            if d < nearest_enemy_dist:
-                                nearest_enemy_dist = d
-                                nearest_enemy_pos = e_pos
-                                nearest_enemy_id = str(enemy.id)
-                if nearest_enemy_pos:
-                    target_loc = {"lat": nearest_enemy_pos[0], "lon": nearest_enemy_pos[1]}
-                    target_uid = nearest_enemy_id
-
+        # Only fire at a location that is already known (from the requesting unit's task).
+        # Do NOT resolve enemy positions from server state (that would bypass fog-of-war).
+        # target_loc must already be set (from a player order or from a FOW contact lookup).
         if not target_loc:
             continue
 
