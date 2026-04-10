@@ -1155,6 +1155,7 @@ async def _upsert_contacts(
                 contact.last_seen_tick = tick
                 contact.last_seen_at = game_time
                 contact.estimated_type = cd["estimated_type"]
+                contact.estimated_size = cd.get("estimated_size")
                 contact.is_stale = False
                 contact.source = cd.get("source", "visual")
                 updated = True
@@ -1167,6 +1168,7 @@ async def _upsert_contacts(
                             "observing_side": cd["observing_side"],
                             "observing_unit_id": str(cd["observing_unit_id"]) if cd.get("observing_unit_id") else None,
                             "estimated_type": cd.get("estimated_type"),
+                            "estimated_size": cd.get("estimated_size"),
                             "lat": cd["lat"],
                             "lon": cd["lon"],
                             "confidence": cd["confidence"],
@@ -1205,6 +1207,7 @@ async def _upsert_contacts(
                     "observing_side": cd["observing_side"],
                     "observing_unit_id": str(cd["observing_unit_id"]) if cd.get("observing_unit_id") else None,
                     "estimated_type": cd.get("estimated_type"),
+                    "estimated_size": cd.get("estimated_size"),
                     "lat": cd["lat"],
                     "lon": cd["lon"],
                     "confidence": cd["confidence"],

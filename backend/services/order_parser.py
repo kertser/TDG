@@ -336,8 +336,28 @@ class OrderParser:
 
         # Determine order type for all command-classified messages
         if classification == MessageClassification.command:
+            # ── Standby / ready-for-support detection ──
+            # "Get ready for fire support on request" / "Будьте готовы к огневой поддержке по запросу"
+            # should NOT be an immediate fire order — unit should stand by (observe)
+            _standby_kw = [
+                "get ready", "stand by", "standby", "be ready", "on request",
+                "on call", "when called", "when requested", "prepare to support",
+                "ready to support", "prepare for support",
+                "готовность", "готовьтесь", "будьте готовы", "по запросу",
+                "по вызову", "по команде", "ожидайте", "ждите",
+                "приготовьтесь", "приготовиться", "в готовности",
+            ]
+            _is_standby = any(kw in text_lower for kw in _standby_kw)
+
             # Determine order type — check fire BEFORE attack to avoid "fire" matching "engage"
-            if any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
+            if _is_standby and any(kw in text_lower for kw in [
+                "fire support", "support fire", "artillery support",
+                "огневая поддержк", "артподдержк", "поддержк огн",
+                "fire", "огонь", "огневой"
+            ]):
+                # Standby for fire support → observe/wait, NOT immediate fire
+                order_type = "observe"
+            elif any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
                                                  "огонь по", "огонь на", "открыть огонь", "стреляй",
                                                  "suppress", "подавить", "подавляющ",
                                                  "suppressive", "подавляющий",

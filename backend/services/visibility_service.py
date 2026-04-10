@@ -240,8 +240,10 @@ async def get_visible_units(
 
     - Own-side units: always visible (full detail)
     - Admin/observer: all units visible
-    - Opposing units: only if within detection range of any friendly unit
-      (fog-of-war via PostGIS ST_DWithin)
+    - Opposing units: only if there is an active (non-stale) contact for them
+      from this side, OR if within guaranteed close visual range (200m) of
+      any friendly unit. This prevents showing enemies that haven't actually
+      been detected by the detection engine's probability roll.
     """
     if side in ("admin", "observer"):
         # See everything
@@ -271,14 +273,24 @@ async def get_visible_units(
     # Opposing side
     opposing_side = "red" if side == "blue" else "blue"
 
-    # Fog-of-war: find enemy units within detection range of any own unit
-    # Using PostGIS ST_DWithin with geography cast for meter-based distance
-    # Subquery: all own unit positions with their detection ranges
-    # Default detection range of 1500m if not set
+    # ── Contact-based fog-of-war ──
+    # 1. Find enemy unit IDs that have active (non-stale) contacts from our side
+    contact_result = await db.execute(
+        select(Contact.target_unit_id).where(
+            Contact.session_id == session_id,
+            Contact.observing_side == side,
+            Contact.is_stale == False,
+            Contact.target_unit_id.isnot(None),
+        ).distinct()
+    )
+    contacted_unit_ids = {row[0] for row in contact_result.all()}
+
+    # 2. Also find enemies within guaranteed close visual range (200m)
+    #    At this distance, visual contact is virtually certain.
+    GUARANTEED_VISUAL_RANGE_M = 200.0
     own_observer = (
         select(
             Unit.position.label("obs_pos"),
-            func.coalesce(Unit.detection_range_m, 1500.0).label("det_range"),
         )
         .where(
             Unit.session_id == session_id,
@@ -289,9 +301,8 @@ async def get_visible_units(
         .subquery()
     )
 
-    # Find opposing units within detection range of ANY observer
-    enemy_query = (
-        select(Unit)
+    close_enemy_query = (
+        select(Unit.id)
         .where(
             Unit.session_id == session_id,
             Unit.side == opposing_side,
@@ -299,32 +310,36 @@ async def get_visible_units(
             Unit.position.isnot(None),
         )
         .where(
-            Unit.id.in_(
-                select(Unit.id)
-                .where(
-                    Unit.session_id == session_id,
-                    Unit.side == opposing_side,
-                    Unit.is_destroyed == False,
-                    Unit.position.isnot(None),
-                )
-                .where(
-                    func.ST_DWithin(
-                        cast(Unit.position, Geography),
-                        cast(own_observer.c.obs_pos, Geography),
-                        own_observer.c.det_range,
-                    )
-                )
+            func.ST_DWithin(
+                cast(Unit.position, Geography),
+                cast(own_observer.c.obs_pos, Geography),
+                GUARANTEED_VISUAL_RANGE_M,
             )
         )
     )
 
     try:
-        enemy_result = await db.execute(enemy_query)
-        enemy_units = enemy_result.scalars().all()
+        close_result = await db.execute(close_enemy_query)
+        close_unit_ids = {row[0] for row in close_result.all()}
     except Exception:
-        # If the spatial query fails (e.g., no PostGIS, no positions),
-        # fall back to no enemy visibility
-        enemy_units = []
+        close_unit_ids = set()
+
+    # Combine: units with active contacts OR within close visual range
+    visible_enemy_ids = contacted_unit_ids | close_unit_ids
+
+    if not visible_enemy_ids:
+        return [_serialize_unit(u) for u in own_units]
+
+    # Fetch the actual enemy unit records
+    enemy_result = await db.execute(
+        select(Unit).where(
+            Unit.session_id == session_id,
+            Unit.side == opposing_side,
+            Unit.is_destroyed == False,
+            Unit.id.in_(visible_enemy_ids),
+        )
+    )
+    enemy_units = enemy_result.scalars().all()
 
     # ── LOS filtering: verify each enemy unit has line-of-sight from
     # at least one friendly observer (terrain/elevation blocks visibility) ──

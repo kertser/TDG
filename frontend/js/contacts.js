@@ -78,9 +78,17 @@ const KContacts = (() => {
             });
 
             // Popup
+            let typeStr = '';
+            if (c.estimated_type) {
+                // Format type: capitalize and replace underscores with spaces
+                typeStr = c.estimated_type.replace(/_/g, ' ');
+                typeStr = typeStr.charAt(0).toUpperCase() + typeStr.slice(1);
+                if (c.estimated_size) {
+                    typeStr += ` (~${c.estimated_size})`;
+                }
+            }
             let popupHtml = `<b>Contact</b><br>`;
-            if (c.estimated_type) popupHtml += `Type: ${c.estimated_type}<br>`;
-            if (c.estimated_size) popupHtml += `Size: ${c.estimated_size}<br>`;
+            if (typeStr) popupHtml += `Type: ${typeStr}<br>`;
             popupHtml += `Confidence: ${(confidence * 100).toFixed(0)}%<br>`;
             popupHtml += `Source: ${c.source || 'unknown'}<br>`;
             if (isStale) popupHtml += `<span style="color:#ff9800">⚠ STALE</span><br>`;

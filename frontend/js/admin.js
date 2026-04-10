@@ -3154,9 +3154,13 @@ const KAdmin = (() => {
         }
 
         // Bind bulk action bar (admin only)
+        // NOTE: use el.querySelector instead of document.getElementById because
+        // both admin and public CoC trees share _renderCoCTree and may create
+        // duplicate IDs when _adminUnlocked is true. Scoping to `el` ensures
+        // we bind to the correct container's elements.
         if (_adminUnlocked) {
             // Populate bulk user select from cached participants (exclude observers)
-            const bulkUserSel = document.getElementById('coc-bulk-user-select');
+            const bulkUserSel = el.querySelector('#coc-bulk-user-select');
             if (bulkUserSel && _cachedParticipants.length > 0) {
                 bulkUserSel.innerHTML = '<option value="">— Select user —</option>';
                 _cachedParticipants.filter(p => p.side !== 'observer' && p.role !== 'observer').forEach(p => {
@@ -3195,20 +3199,20 @@ const KAdmin = (() => {
                 }
             }
 
-            // Select-all checkbox
-            const selectAllCb = document.getElementById('coc-bulk-select-all');
+            // Select-all checkbox (scoped to this container)
+            const selectAllCb = el.querySelector('#coc-bulk-select-all');
             if (selectAllCb) {
                 selectAllCb.addEventListener('change', () => {
                     el.querySelectorAll('.coc-bulk-cb').forEach(cb => { cb.checked = selectAllCb.checked; });
                 });
             }
 
-            // Bulk assign button
-            const bulkAssignBtn = document.getElementById('coc-bulk-assign-btn');
+            // Bulk assign button (scoped to this container)
+            const bulkAssignBtn = el.querySelector('#coc-bulk-assign-btn');
             if (bulkAssignBtn) bulkAssignBtn.addEventListener('click', _doBulkAssign);
 
-            // Bulk unassign button
-            const bulkUnassignBtn = document.getElementById('coc-bulk-unassign-btn');
+            // Bulk unassign button (scoped to this container)
+            const bulkUnassignBtn = el.querySelector('#coc-bulk-unassign-btn');
             if (bulkUnassignBtn) bulkUnassignBtn.addEventListener('click', _doBulkUnassign);
         }
     }
@@ -3428,11 +3432,17 @@ const KAdmin = (() => {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
 
-        const bulkUserSel = document.getElementById('coc-bulk-user-select');
+        // Scope to admin CoC container to avoid picking up public CoC elements
+        const adminCoCContainer = document.getElementById('admin-coc-tree');
+        const bulkUserSel = adminCoCContainer
+            ? adminCoCContainer.querySelector('#coc-bulk-user-select')
+            : document.getElementById('coc-bulk-user-select');
         const userId = bulkUserSel ? bulkUserSel.value : '';
         if (!userId) { await KDialogs.alert('Select a user to assign'); return; }
 
-        const checkedBoxes = document.querySelectorAll('.coc-bulk-cb:checked');
+        const checkedBoxes = adminCoCContainer
+            ? adminCoCContainer.querySelectorAll('.coc-bulk-cb:checked')
+            : document.querySelectorAll('.coc-bulk-cb:checked');
         if (checkedBoxes.length === 0) { await KDialogs.alert('No units selected'); return; }
 
         const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);
@@ -3470,7 +3480,11 @@ const KAdmin = (() => {
         const token = _getToken(), sid = _getAdminSessionId();
         if (!token || !sid) return;
 
-        const checkedBoxes = document.querySelectorAll('.coc-bulk-cb:checked');
+        // Scope to admin CoC container to avoid picking up public CoC elements
+        const adminCoCContainer = document.getElementById('admin-coc-tree');
+        const checkedBoxes = adminCoCContainer
+            ? adminCoCContainer.querySelectorAll('.coc-bulk-cb:checked')
+            : document.querySelectorAll('.coc-bulk-cb:checked');
         if (checkedBoxes.length === 0) { await KDialogs.alert('No units selected'); return; }
 
         const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);

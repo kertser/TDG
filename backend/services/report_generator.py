@@ -174,6 +174,7 @@ def generate_spotreps(
         payload = evt.get("payload", {})
         obs_side = payload.get("observing_side", "blue")
         est_type = payload.get("estimated_type", "unknown")
+        est_size = payload.get("estimated_size")
         lat = payload.get("lat")
         lon = payload.get("lon")
         confidence = payload.get("confidence", 0.5)
@@ -199,6 +200,16 @@ def generate_spotreps(
                 pass
 
         type_display = _unit_type_display(est_type, lang)
+        # Append size estimate if available (medium range)
+        if est_size:
+            size_ru = {"battalion": "батальон", "company": "рота", "platoon": "взвод",
+                       "section": "отделение", "team": "группа"}
+            size_en = {"battalion": "battalion", "company": "company", "platoon": "platoon",
+                       "section": "section", "team": "team"}
+            if lang == "ru":
+                type_display += f", ~{size_ru.get(est_size, est_size)}"
+            else:
+                type_display += f", ~{size_en.get(est_size, est_size)}"
         conf_pct = int(confidence * 100)
 
         # Compute bearing from observer to contact

@@ -345,6 +345,43 @@ Concealment is broken immediately when a unit:
 
 Concealment also affects fog-of-war filtering in the visibility service. Concealed enemies won't appear on the map unless an observer is very close, using the same reduced detection ranges.
 
+### 3.11 Distance-Based Unit Identification
+
+The accuracy of unit type identification depends on the distance between observer and target, and the observer's capabilities. At greater distances, only general information can be determined.
+
+#### Identification Ranges
+
+| Range Category | Standard Units | Recon/OP Units | Information Available |
+|---|---|---|---|
+| **Close** (≤300m / ≤500m recon) | Full identification | Full identification | Exact unit type (e.g. "infantry_squad"), exact size |
+| **Medium** (300–800m / 500–1200m recon) | Partial identification | Partial identification | Category + approximate size (e.g. "infantry, ~team") |
+| **Long** (>800m / >1200m recon) | Minimal identification | Minimal identification | Category only (e.g. "infantry") — no size estimate |
+
+#### Categories
+
+| Category | Includes |
+|---|---|
+| `infantry` | Infantry, mechanized infantry (all echelons) |
+| `armor` | Tank units (all echelons) |
+| `artillery` | Artillery batteries/platoons, mortar sections/teams |
+| `recon` | Recon teams/sections, snipers, observation posts |
+| `engineer` | Engineers, mine layers, breachers, AVLB |
+| `support` | Logistics units |
+| `command` | HQ, command posts |
+
+#### Radio Contact Reports
+
+When units report enemy contacts over radio, the type description reflects the observer's actual identification capability:
+- **Long range**: *"Contact! Infantry spotted at grid F8-4-2, ~858m"*
+- **Medium range**: *"Contact! Infantry, ~team observed at grid F8-4-2, ~450m"*
+- **Close range**: *"Contact! Infantry squad detected at grid F8-4-2, ~200m"*
+
+Recon/observation units have extended identification ranges due to superior optics and training.
+
+#### Identification Improvement
+
+As units close the distance to a detected contact, subsequent detection ticks update the contact record with progressively more detailed type information. The contact's `estimated_type` and `estimated_size` fields are refreshed each tick a detection roll succeeds.
+
 ---
 
 ## 4. Line of Sight
@@ -749,14 +786,15 @@ Ammo can be restored by:
 When detection succeeds, a Contact record is created with:
 - `observing_side`, `observing_unit_id` — who detected
 - `target_unit_id` — the actual enemy unit (internal tracking)
-- `estimated_type` — observed unit type
+- `estimated_type` — observed unit type (distance-degraded: category at long range, full type at close range; see [Section 3.11](#311-distance-based-unit-identification))
+- `estimated_size` — approximate echelon (e.g. "team", "platoon") when identifiable; `null` at long range
 - `location_estimate` — position with accuracy error
 - `confidence` — detection probability
 - `source` — `"visual"` or `"recon"`
 
 ### 10.2 Contact Update
 
-If a contact for the **same target unit** already exists (matched by `target_unit_id`), it is updated rather than duplicated.
+If a contact for the **same target unit** already exists (matched by `target_unit_id`), it is updated rather than duplicated. Both `estimated_type` and `estimated_size` are refreshed — meaning identification improves as units close the distance.
 
 ### 10.3 Contact Staleness
 
@@ -1015,9 +1053,19 @@ Non-admin players only receive map objects discovered by their side in API respo
 
 Always **fully visible** with all stats (strength, ammo, morale, suppression, comms, task).
 
-### 18.2 Enemy Units
+### 18.2 Enemy Units — Contact-Based Visibility
 
-Only visible if within detection range of at least one friendly unit AND LOS is clear. Visible enemy units show:
+Enemy units are visible on the map **only** when one of these conditions is met:
+
+1. **Active contact exists**: The detection engine has successfully detected the enemy (probability roll succeeded) and the contact is not stale. The Contact record links the detected enemy to the map.
+2. **Guaranteed visual range**: The enemy is within **200m** of any friendly unit. At this distance, visual contact is virtually certain regardless of detection probability.
+
+This means:
+- An enemy at 800m **will not** appear on the map until a friendly unit successfully detects it (detection probability roll succeeds on a tick).
+- Once detected, the enemy remains visible until the contact becomes stale (10+ ticks since last observation).
+- Moving closer improves detection probability and eventually guarantees visibility at 200m.
+
+Visible enemy units show:
 - Position (with uncertainty based on detection accuracy)
 - **Generalized type** (broad category only: "infantry", "armor", "artillery", "recon", "engineer", "support", "command" — exact echelon hidden)
 - **Masked SIDC** (echelon indicator set to "unspecified" — no squad/platoon/company bar visible)
@@ -1055,12 +1103,26 @@ Enemy unit strength is quantized:
 ### 18.6 Contact Circles vs Unit Markers
 
 When an enemy unit is detected, two visual elements may appear:
-- **Unit marker** (NATO symbol via milsymbol.js) — shown when the unit is within fog-of-war detection range
-- **Contact circle** (red uncertainty circle from detection system) — represents the contact record
+- **Unit marker** (NATO symbol via milsymbol.js) — shown when an active contact exists for this enemy unit
+- **Contact circle** (red uncertainty circle from detection system) — represents the contact record with location accuracy radius
+
+The **red circle** around an enemy unit represents **detection uncertainty** — the estimated area where the enemy is believed to be. The radius equals the `location_accuracy_m` field from the contact (higher at long range, lower at close range).
 
 To avoid confusion, **contact circles are not rendered when the enemy unit marker is already visible** (within ~110m proximity). Contact circles only appear for:
 - Stale contacts (enemy moved away but last known position recorded)
 - Contacts without a currently visible corresponding unit
+
+### 18.7 Visibility Flow
+
+```
+Detection engine (probability roll) → Contact record created
+    → Contact-based fog-of-war shows enemy unit on map
+    → Contact radio reports generated
+    → SPOTREP auto-generated
+
+Contact decays → stale after 10 ticks → circle turns gray
+    → expires after 30 ticks → removed from map
+```
 
 ---
 
@@ -1949,10 +2011,12 @@ When making tactical decisions, evaluate:
 - **Move**: Maintain comms, report arrival, expect contact en route.
 - **Attack**: Suppress enemy, establish fire superiority, coordinate roles (suppress/assault/flank), consolidate after assault. Request artillery cease-fire before storming bombarded positions.
 - **Defend**: Dig in, improve positions, prepare fire plan, establish OPs.
-- **Observe**: Maintain concealment, report contacts, avoid engagement.
+- **Observe**: Maintain concealment, report contacts, avoid engagement. Also used for **standby orders** (e.g., "get ready for fire support on request" → unit waits for explicit fire commands rather than firing immediately).
 - **Fire**: Compute fire solution, observe and adjust. Danger close = 50m. Cease fire when friendly infantry within 250m of target.
 - **Withdraw**: Maintain contact while disengaging, establish rally point.
 - **Disengage**: Break contact immediately, seek covered position, suppress during withdrawal.
+
+> **Standby Order Handling**: When an artillery/mortar unit receives an order like "get ready for fire support on request", "stand by for fire mission", or "будьте готовы к огневой поддержке по запросу", this is classified as `observe` (standby), NOT `fire`. The unit acknowledges and waits for explicit fire orders with target coordinates. Standby keywords (EN: "get ready", "stand by", "on request", "on call", "be ready"; RU: "готовность", "будьте готовы", "по запросу", "по вызову", "ожидайте") take precedence over fire keywords.
 
 #### Unit Employment
 - Infantry: assault complex terrain, hold ground, patrol. In coordinated attacks: assault or flank role.

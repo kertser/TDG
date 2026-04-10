@@ -53,6 +53,12 @@ Use order_type="attack" when units are to physically advance and engage the enem
   - "capture", "seize", "take", "occupy" (захватить, занять, овладеть) = attack + move to location
   - "hit any enemy", "engage any target", "fire at will" = attack with engagement_rules="fire_at_will" (engage targets of opportunity, no specific location needed)
   - "подавить любые цели", "огонь по любым целям в зоне видимости" = attack with fire_at_will
+Use order_type="observe" when a unit is told to **stand by / get ready / be prepared** for fire support or any other task without immediate execution:
+  - "Get ready for fire support on request" = observe (stand by, do NOT fire yet)
+  - "Stand by for fire mission" = observe (wait for further orders)
+  - "Будьте готовы к огневой поддержке по запросу" = observe (standby)
+  - "Приготовьтесь к огню по вызову" = observe (standby)
+  - These are NOT fire orders. The unit should observe/wait, not fire immediately.
 Use order_type="disengage" when units are told to break contact, disengage, or exit combat ("разорвать контакт", "выйти из боя", "break contact", "disengage"). The unit stops fighting and seeks covered position.
 Use order_type="resupply" when units are ordered to resupply, rearm, or replenish ammunition. Examples:
   - "resupply at the nearest supply point", "go resupply", "rearm" = resupply (no specific location needed — auto-finds nearest)
@@ -362,6 +368,46 @@ PARSED:
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []
+}
+
+---
+MESSAGE: "Mortar, get ready for fire support the infantry on request."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Mortar"],
+  "sender_ref": null,
+  "order_type": "observe",
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "standby for fire support on request",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["no immediate fire target — unit should stand by and wait for fire orders"]
+}
+
+---
+MESSAGE: "Миномётная секция, будьте готовы к огневой поддержке по запросу!"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Миномётная секция"],
+  "sender_ref": null,
+  "order_type": "observe",
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "standby for fire support on request",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["unit should wait for specific fire orders, not fire now"]
 }
 
 ---

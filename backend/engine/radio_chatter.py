@@ -614,6 +614,62 @@ UNIT_TYPE_NAMES_RU = {
     "sniper_team": "снайперская пара", "headquarters": "штаб",
 }
 
+# Category-level type names for distance-degraded identification
+CATEGORY_NAMES_RU = {
+    "infantry": "пехота", "armor": "бронетехника", "artillery": "артиллерия",
+    "recon": "разведка", "engineer": "инженерные", "support": "тыловые",
+    "command": "командный пункт", "unknown": "противник",
+}
+CATEGORY_NAMES_EN = {
+    "infantry": "infantry", "armor": "armor", "artillery": "artillery",
+    "recon": "recon", "engineer": "engineers", "support": "support",
+    "command": "command", "unknown": "enemy force",
+}
+
+# Size-level descriptors
+SIZE_NAMES_RU = {
+    "battalion": "батальон", "company": "рота", "platoon": "взвод",
+    "section": "отделение", "team": "группа",
+}
+SIZE_NAMES_EN = {
+    "battalion": "battalion", "company": "company", "platoon": "platoon",
+    "section": "section", "team": "team",
+}
+
+
+def _format_contact_type_desc(contact_type: str, contact_size: str | None, lang: str) -> str:
+    """Format a human-readable type description from estimated_type and estimated_size.
+
+    The detection engine returns estimated_type that may be:
+    - Full type (e.g. 'infantry_squad') at close range
+    - Category only (e.g. 'infantry') at medium/long range
+    estimated_size may be 'team', 'platoon', 'company', etc. or None at long range.
+    """
+    if not contact_type:
+        return "противник" if lang == "ru" else "enemy unit"
+
+    if lang == "ru":
+        # Try exact match first (close range full type)
+        if contact_type in UNIT_TYPE_NAMES_RU:
+            return UNIT_TYPE_NAMES_RU[contact_type]
+        # Category-level
+        cat_name = CATEGORY_NAMES_RU.get(contact_type, contact_type.replace("_", " "))
+        if contact_size:
+            size_name = SIZE_NAMES_RU.get(contact_size, contact_size)
+            return f"{cat_name}, ~{size_name}"
+        return cat_name
+    else:
+        # English
+        # Try exact match first (close range full type)
+        if "_" in contact_type and contact_type not in CATEGORY_NAMES_EN:
+            # Full type like 'infantry_squad' — format nicely
+            return contact_type.replace("_", " ")
+        cat_name = CATEGORY_NAMES_EN.get(contact_type, contact_type.replace("_", " "))
+        if contact_size:
+            size_name = SIZE_NAMES_EN.get(contact_size, contact_size)
+            return f"{cat_name}, ~{size_name}"
+        return cat_name
+
 
 def generate_contact_radio_messages(
     all_units: list,
@@ -670,6 +726,7 @@ def generate_contact_radio_messages(
 
         # Get contact info
         contact_type = payload.get("estimated_type", "")
+        contact_size = payload.get("estimated_size")
         contact_lat = payload.get("lat")
         contact_lon = payload.get("lon")
 
@@ -683,11 +740,8 @@ def generate_contact_radio_messages(
             except Exception:
                 pass
 
-        # Type description
-        if lang == "ru":
-            type_desc = type_names.get(contact_type, contact_type.replace("_", " ") if contact_type else "противник")
-        else:
-            type_desc = contact_type.replace("_", " ") if contact_type else "enemy unit"
+        # Type description (distance-aware: detection engine provides estimated type)
+        type_desc = _format_contact_type_desc(contact_type, contact_size, lang)
 
         # Distance
         dist = "?"

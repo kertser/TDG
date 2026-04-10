@@ -109,6 +109,64 @@ def _posture_modifier(target_task: dict | None) -> float:
     return 0.6  # stationary
 
 
+def _estimate_unit_type(actual_type: str, distance_m: float, is_recon_observer: bool) -> tuple[str, str | None]:
+    """Estimate what an observer can identify about a target based on distance.
+
+    Returns (estimated_type, estimated_size):
+    - Close range (<300m, or <500m for recon): full type + size (e.g. "infantry_squad")
+    - Medium range (300-800m, or 500-1200m for recon): category + size (e.g. "infantry", "team")
+    - Long range (>800m, or >1200m for recon): only category (e.g. "infantry", None)
+
+    Recon/observation units have better optics and training, extending identification range.
+    """
+    t = (actual_type or "").lower()
+
+    # Determine category
+    if "infantry" in t or "mech" in t:
+        category = "infantry"
+    elif "tank" in t:
+        category = "armor"
+    elif "artillery" in t or "mortar" in t:
+        category = "artillery"
+    elif "recon" in t or "sniper" in t or "observation" in t:
+        category = "recon"
+    elif "engineer" in t or "mine" in t or "breacher" in t or "avlb" in t:
+        category = "engineer"
+    elif "logistics" in t:
+        category = "support"
+    elif "command" in t or "headquarters" in t:
+        category = "command"
+    else:
+        category = "unknown"
+
+    # Determine size label
+    size = None
+    if "battalion" in t:
+        size = "battalion"
+    elif "company" in t or "battery" in t:
+        size = "company"
+    elif "platoon" in t:
+        size = "platoon"
+    elif "section" in t:
+        size = "section"
+    elif "team" in t or "squad" in t:
+        size = "team"
+
+    # Distance thresholds (recon observers have better optics)
+    close_range = 500.0 if is_recon_observer else 300.0
+    medium_range = 1200.0 if is_recon_observer else 800.0
+
+    if distance_m <= close_range:
+        # Close range: full identification
+        return actual_type, size
+    elif distance_m <= medium_range:
+        # Medium range: category + approximate size
+        return category, size
+    else:
+        # Long range: only general category, no size
+        return category, None
+
+
 def _is_in_smoke(lat: float, lon: float, map_objects: list | None) -> bool:
     """Check if a point is inside an active visibility-reducing effect (smoke, fog, chemical cloud)."""
     if not map_objects:
@@ -259,12 +317,13 @@ def process_detection(
                     roll = _deterministic_roll(tick, observer.id, target.id)
                     if roll < prob:
                         accuracy = max(80.0, dist * 0.1 + (1.0 - prob) * 300.0)
+                        est_type, est_size = _estimate_unit_type(target.unit_type, dist, is_recon)
                         new_contacts.append({
                             "observing_side": obs_side,
                             "observing_unit_id": observer.id,
                             "target_unit_id": target.id,
-                            "estimated_type": target.unit_type,
-                            "estimated_size": None,
+                            "estimated_type": est_type,
+                            "estimated_size": est_size,
                             "lat": tgt_lat,
                             "lon": tgt_lon,
                             "location_accuracy_m": accuracy,
@@ -334,13 +393,15 @@ def process_detection(
                     # Detection successful!
                     # Add some inaccuracy to position estimate
                     accuracy = max(50.0, dist * 0.05 + (1.0 - prob) * 200.0)
+                    # Estimate unit type based on distance and observer capabilities
+                    est_type, est_size = _estimate_unit_type(target.unit_type, dist, is_recon)
 
                     new_contacts.append({
                         "observing_side": obs_side,
                         "observing_unit_id": observer.id,
                         "target_unit_id": target.id,
-                        "estimated_type": target.unit_type,
-                        "estimated_size": None,
+                        "estimated_type": est_type,
+                        "estimated_size": est_size,
                         "lat": tgt_lat,
                         "lon": tgt_lon,
                         "location_accuracy_m": accuracy,
