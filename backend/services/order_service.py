@@ -460,7 +460,7 @@ class OrderService:
                         f"need to advance at least {range_info['deficit_m']}m."
                     )
             elif resp_type in (ResponseType.status, ResponseType.wilco, ResponseType.wilco_fire,
-                               ResponseType.wilco_disengage, ResponseType.ack):
+                               ResponseType.wilco_disengage, ResponseType.wilco_resupply, ResponseType.ack):
                 situation = await self._build_unit_situation(
                     unit_dict, session_id, issuer_side, units_context,
                     db, grid_service,
@@ -776,8 +776,9 @@ class OrderService:
         if parsed.engagement_rules:
             task["engagement_rules"] = parsed.engagement_rules
 
-        # For commands that don't need a location (halt, regroup, report_status, disengage)
-        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage"):
+        # For commands that don't need a location (halt, regroup, report_status, disengage, resupply)
+        # Resupply target is auto-resolved by the resupply engine to the nearest supply source
+        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "resupply"):
             return task
 
         # Commands that need a location but don't have one — still valid for

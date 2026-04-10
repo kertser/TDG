@@ -357,6 +357,15 @@ class OrderParser:
                 order_type = "withdraw"
             elif any(kw in text_lower for kw in ["halt", "stop", "стой", "стоп"]):
                 order_type = "halt"
+            elif any(kw in text_lower for kw in [
+                "resupply", "re-supply", "rearm", "reload", "replenish",
+                "пополн", "боеприпас", "снабж", "перезаряд", "дозаправ",
+                "боекомплект", "пополнить бк", "пополни бк",
+                "ammunition", "ammo", "supply point",
+                "к складу", "на склад", "ближайш снабж",
+                "nearest supply", "supply cache",
+            ]):
+                order_type = "resupply"
 
         # Extract snail/grid references with regex
         import re

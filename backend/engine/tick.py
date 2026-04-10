@@ -60,6 +60,7 @@ from backend.engine.suppression import process_suppression_recovery
 from backend.engine.events import create_event
 from backend.engine.engineering import process_engineering
 from backend.engine.structures import process_structures
+from backend.engine.resupply import process_resupply
 
 
 async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
@@ -79,6 +80,11 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     session = result.scalar_one_or_none()
     if session is None:
         raise ValueError(f"Session {session_id} not found")
+    if session.status == SessionStatus.finished:
+        raise ValueError("Session is finished — reset it first")
+    # Auto-resume paused/lobby sessions so the tick button always works
+    if session.status in (SessionStatus.paused, SessionStatus.lobby):
+        session.status = SessionStatus.running
     if session.status != SessionStatus.running:
         raise ValueError(f"Session not running (status={session.status.value})")
 
@@ -490,6 +496,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     struct_events = process_structures(all_units, map_objects_list)
     all_events.extend(struct_events)
 
+    # ── 9b2. Resupply engine (supply caches within 50m, logistics units, resupply orders) ──
+    resupply_events = process_resupply(all_units, map_objects_list)
+    all_events.extend(resupply_events)
+
     # ── 9c. Transient effect damage (fire, chemical cloud) ────
     effect_damage_events = _process_effect_damage(all_units, map_objects_list)
     all_events.extend(effect_damage_events)
@@ -794,10 +804,14 @@ async def _process_orders(
 
             # Apply move speed from order if specified
             speed_label = task.get("speed")
-            if speed_label and task_type in ("move", "attack", "advance"):
+            if speed_label and task_type in ("move", "attack", "advance", "resupply"):
                 speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
                 if speed_label in speeds:
                     unit.move_speed_mps = speeds[speed_label]
+            # Default fast speed for resupply movement (get there quickly)
+            elif task_type == "resupply" and not speed_label:
+                speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+                unit.move_speed_mps = speeds.get("fast", speeds.get("slow", 3.0))
 
             # Apply formation if specified in the order
             formation = task.get("formation")
@@ -902,6 +916,9 @@ def _order_to_task(order: Order) -> dict | None:
             return {"type": "defend", "order_id": str(order.id)}
         if "observe" in text or "recon" in text:
             return {"type": "observe", "order_id": str(order.id)}
+        if any(kw in text for kw in ["resupply", "re-supply", "rearm", "ammo",
+                                       "пополн", "боеприпас", "снабж", "боекомплект"]):
+            return {"type": "resupply", "order_id": str(order.id)}
 
     return None
 

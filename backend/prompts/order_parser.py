@@ -22,7 +22,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 ## Your Tasks
 
 1. **Classify** the message into one of these categories:
-   - `command` — an actionable order (move, attack, fire, defend, observe, support, withdraw, disengage, halt, regroup, report_status)
+   - `command` — an actionable order (move, attack, fire, defend, observe, support, withdraw, disengage, halt, regroup, resupply, report_status)
    - `status_request` — asking a unit for their status ("доложите обстановку", "report status", "what's happening")
    - `acknowledgment` — confirming receipt of an order ("так точно", "roger", "wilco", "выполняем")
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
@@ -30,7 +30,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
-   - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, **disengage** (break contact and seek cover), halt, regroup, report_status
+    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
    - **Speed preference**: "slow" = cautious/tactical/stealthy movement; "fast" = rapid/urgent movement
      - Slow indicators (EN): slow, careful, cautious, stealth, tactical, sneak, quietly, covertly, low profile
@@ -54,6 +54,11 @@ Use order_type="attack" when units are to physically advance and engage the enem
   - "hit any enemy", "engage any target", "fire at will" = attack with engagement_rules="fire_at_will" (engage targets of opportunity, no specific location needed)
   - "подавить любые цели", "огонь по любым целям в зоне видимости" = attack with fire_at_will
 Use order_type="disengage" when units are told to break contact, disengage, or exit combat ("разорвать контакт", "выйти из боя", "break contact", "disengage"). The unit stops fighting and seeks covered position.
+Use order_type="resupply" when units are ordered to resupply, rearm, or replenish ammunition. Examples:
+  - "resupply at the nearest supply point", "go resupply", "rearm" = resupply (no specific location needed — auto-finds nearest)
+  - "resupply at B4-3" = resupply at specific location
+  - "пополнить боеприпасы", "на пополнение", "к складу", "пополни БК" = resupply
+  - Logistics units ordered to "resupply units at [location]" = resupply at that location (they act as mobile supply)
 
 3. **Identify** the sender if the message includes self-identification ("Здесь первый взвод", "This is 2nd Platoon")
 

@@ -130,6 +130,9 @@ class ResponseGenerator:
             order_type = parsed.order_type.value if parsed.order_type else ""
             if order_type == "disengage":
                 return ResponseType.wilco_disengage, None
+            # Resupply order → use resupply-specific response
+            if order_type == "resupply":
+                return ResponseType.wilco_resupply, None
             return ResponseType.wilco, None
 
         return ResponseType.ack, None

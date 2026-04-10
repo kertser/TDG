@@ -464,7 +464,7 @@ def process_movement(
             continue
 
         task_type = task.get("type", "")
-        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage"):
+        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage", "resupply"):
             continue
 
         # Indirect fire units (artillery/mortar) with "fire" task should NOT move
@@ -643,6 +643,18 @@ def process_movement(
                     "event_type": "order_completed",
                     "actor_unit_id": unit.id,
                     "text_summary": f"{unit.name} disengaged and reached cover",
+                    "payload": {"lat": new_lat, "lon": new_lon},
+                })
+            elif task_type == "resupply":
+                # Arrived at supply source — keep task active for resupply engine
+                # to process the actual resupply. Clear target_location so we stop moving.
+                new_task = dict(task)
+                new_task.pop("target_location", None)
+                unit.current_task = new_task
+                events.append({
+                    "event_type": "movement",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} arrived at resupply point",
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
         else:

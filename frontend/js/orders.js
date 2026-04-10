@@ -779,10 +779,12 @@ const KOrders = (() => {
         });
         _renderRadioMessages();
 
-        // Check if radio tab is active; if not, increment unread
+        // Check if radio tab is active AND panel is visible; if not, increment unread
         const radioTabBtn = document.querySelector('.cmd-tab-btn[data-cmd-tab="cmd-radio"]');
+        const panel = document.getElementById('command-panel');
         const isRadioActive = radioTabBtn && radioTabBtn.classList.contains('active');
-        if (!isRadioActive) {
+        const isPanelVisible = panel && (panel.classList.contains('hovered') || panel.classList.contains('expanded'));
+        if (!isRadioActive || !isPanelVisible) {
             _radioUnread++;
             _updateRadioLed();
         }

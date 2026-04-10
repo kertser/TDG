@@ -36,6 +36,12 @@ TEMPLATES_RU = {
         "Здесь {unit}. Так точно, отрываемся от противника. {status_text}",
         "{unit} принял. Прекращаем огонь, уходим в укрытие. {status_text}",
     ],
+    "wilco_resupply": [
+        "Здесь {unit}. Принял, выдвигаемся на пополнение. {status_text}",
+        "{unit}, приём. Так точно, следуем к пункту снабжения. {status_text}",
+        "Здесь {unit}. Принял. Выходим на пополнение боеприпасов. {status_text}",
+        "{unit} принял. Начинаем пополнение запасов. {status_text}",
+    ],
     "unable": [
         "Здесь {unit}. Не могу выполнить! {reason}",
         "{unit}, приём. Выполнение невозможно. {reason}",
@@ -96,6 +102,12 @@ TEMPLATES_EN = {
         "{unit}, copy. Disengaging, seeking cover. {status_text}",
         "This is {unit}. Wilco, pulling back to covered position. {status_text}",
         "{unit}, breaking contact now. Moving to cover. {status_text}",
+    ],
+    "wilco_resupply": [
+        "This is {unit}. Roger, moving to resupply point. {status_text}",
+        "{unit}, copy. Heading to supply cache for rearm. {status_text}",
+        "This is {unit}. Wilco, proceeding to resupply. {status_text}",
+        "{unit}, moving to logistics point for ammunition resupply. {status_text}",
     ],
     "unable": [
         "This is {unit}. Unable to comply! {reason}",

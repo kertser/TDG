@@ -42,6 +42,7 @@ class OrderType(str, enum.Enum):
     disengage = "disengage"
     halt = "halt"
     regroup = "regroup"
+    resupply = "resupply"
     report_status = "report_status"
 
 
@@ -55,6 +56,7 @@ class ResponseType(str, enum.Enum):
     wilco = "wilco"                   # will comply
     wilco_fire = "wilco_fire"         # will comply — fire mission (artillery/mortar)
     wilco_disengage = "wilco_disengage"  # will comply — disengage/break contact
+    wilco_resupply = "wilco_resupply"    # will comply — resupply mission
     unable = "unable"                 # cannot comply
     unable_range = "unable_range"     # cannot comply — target beyond max fire range
     unable_area = "unable_area"       # cannot comply — target outside operations area

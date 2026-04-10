@@ -31,6 +31,7 @@ _IMPLIED_TASKS = {
     "disengage": ["break contact immediately", "seek nearest covered position", "suppress enemy during withdrawal", "report clear"],
     "halt": ["establish local security", "report status"],
     "regroup": ["consolidate personnel", "redistribute ammunition", "report readiness"],
+    "resupply": ["move to nearest supply point", "resupply ammunition", "report readiness when complete"],
     "report_status": ["assess unit condition", "count personnel and equipment"],
 }
 
@@ -161,7 +162,7 @@ class IntentInterpreter:
             return None
 
         # Defensive postures don't suggest movement formations
-        if order_type in ("defend", "observe", "halt", "regroup", "report_status"):
+        if order_type in ("defend", "observe", "halt", "regroup", "report_status", "resupply"):
             return None
 
         # Recon units → staggered column (cautious) or wedge
@@ -304,6 +305,7 @@ class IntentInterpreter:
         simple = {
             "halt": "halt",
             "regroup": "regroup",
+            "resupply": "resupply",
             "report_status": "observe",
         }
         return simple.get(order_type, "movement_to_contact")
@@ -334,6 +336,7 @@ class IntentInterpreter:
             "withdraw": "disengage and withdraw to new position",
             "disengage": "break contact and seek covered position",
             "regroup": "consolidate and reorganize",
+            "resupply": "move to supply point and replenish ammunition",
             "halt": "halt movement, establish security",
         }
         return defaults.get(action, f"execute {order_type}")
