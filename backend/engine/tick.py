@@ -454,6 +454,11 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 new_task["target_location"] = {"lat": best_lat, "lon": best_lon}
                 if best_target_uid:
                     new_task["target_unit_id"] = best_target_uid
+                # ── Auto-request artillery support when first acquiring a target ──
+                # Infantry units should call for fire support when they detect enemies
+                # Only set this flag if unit doesn't have a target already
+                if not task.get("target_unit_id") and best_target_uid:
+                    new_task["request_artillery"] = True
                 unit.current_task = new_task
 
     # ── 4. Decay stale contacts ──────────────────────────────────
@@ -538,7 +543,49 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
             if str(u.id) == target_id_str and not u.is_destroyed:
                 preliminary_under_fire.add(u.id)
                 break
-    arty_events = process_artillery_support(all_units, terrain, under_fire=preliminary_under_fire)
+
+    # ── Build fire requests from units with request_fire tasks ──
+    fire_requests = []
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        task = unit.current_task
+        if not task:
+            continue
+        # Check for explicit fire request task
+        if task.get("type") == "request_fire":
+            target_loc = task.get("target_location")
+            target_uid = task.get("target_unit_id")
+            if target_loc:
+                fire_requests.append({
+                    "unit_id": str(unit.id),
+                    "target_location": target_loc,
+                    "target_unit_id": target_uid,
+                })
+                # Clear the request task after processing
+                unit.current_task = None
+        # Also generate fire requests for units with attack tasks that detect enemies
+        # This implements "initiative" — units calling for fire support when engaging
+        elif task.get("type") in ("attack", "engage") and task.get("request_artillery", False):
+            target_uid = task.get("target_unit_id")
+            target_loc = task.get("target_location")
+            if target_uid and target_loc:
+                fire_requests.append({
+                    "unit_id": str(unit.id),
+                    "target_location": target_loc,
+                    "target_unit_id": target_uid,
+                })
+                # Clear the flag so we don't request repeatedly
+                new_task = dict(task)
+                new_task.pop("request_artillery", None)
+                unit.current_task = new_task
+
+    arty_events = process_artillery_support(
+        all_units, terrain,
+        under_fire=preliminary_under_fire,
+        attacking_map=attacking_map,
+        fire_requests=fire_requests,
+    )
     all_events.extend(arty_events)
 
     # ── 5. Execute combat ────────────────────────────────────────
@@ -1052,6 +1099,41 @@ def _order_to_task(order: Order) -> dict | None:
             return {"type": "halt", "order_id": str(order.id)}
         if any(kw in text for kw in ["disengage", "break contact", "разорвать контакт", "выйти из боя"]):
             return {"type": "disengage", "order_id": str(order.id)}
+
+        # ── Standby / ready-for-support detection ──
+        # "Get ready for fire support on request" / "Будьте готовы к огневой поддержке"
+        # should NOT be a fire order — unit should observe/stand by
+        _standby_kw = [
+            "get ready", "stand by", "standby", "be ready", "on request",
+            "on call", "when called", "when requested", "prepare to support",
+            "ready to support", "prepare for support",
+            "готовность", "готовьтесь", "будьте готовы", "по запросу",
+            "по вызову", "по команде", "ожидайте", "ждите",
+            "приготовьтесь", "приготовиться", "в готовности",
+        ]
+        _is_standby = any(kw in text for kw in _standby_kw)
+        if _is_standby and any(kw in text for kw in [
+            "fire support", "support fire", "artillery support",
+            "огневая поддержк", "артподдержк", "поддержк огн",
+            "fire", "огонь", "огневой",
+        ]):
+            return {"type": "observe", "order_id": str(order.id)}
+
+        # ── Request fire detection ──
+        # "Request fire support", "Call for fire", "Direct artillery at enemy"
+        # Creates a fire request to CoC artillery
+        _request_fire_kw = [
+            "request fire", "call for fire", "request artillery", "call artillery",
+            "direct artillery", "need fire support", "need artillery",
+            "наведите артиллерию", "наведи артиллерию", "запросите огонь",
+            "запроси огонь", "вызовите огонь", "вызови огонь",
+            "свяжитесь с артиллерией", "свяжись с артиллерией",
+            "свяжитесь с миномёт", "свяжись с миномёт",
+            "свяжитесь с mortar", "свяжись с mortar",
+        ]
+        if any(kw in text for kw in _request_fire_kw):
+            return {"type": "request_fire", "order_id": str(order.id)}
+
         if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй",
                                       "artillery support", "fire support", "support fire",
                                       "артподдержк", "огневая поддержк"]):

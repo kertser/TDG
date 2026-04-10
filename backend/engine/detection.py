@@ -149,7 +149,9 @@ def _estimate_unit_type(actual_type: str, distance_m: float, is_recon_observer: 
         size = "platoon"
     elif "section" in t:
         size = "section"
-    elif "team" in t or "squad" in t:
+    elif "squad" in t:
+        size = "squad"
+    elif "team" in t:
         size = "team"
 
     # Distance thresholds (recon observers have better optics)

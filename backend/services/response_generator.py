@@ -118,16 +118,18 @@ class ResponseGenerator:
 
         # Normal acknowledgment
         if parsed.classification == MessageClassification.command:
+            order_type = parsed.order_type.value if parsed.order_type else ""
+
             # Fire mission for artillery/mortar → use fire-specific response
+            # BUT only if the order is actually a fire order, not observe/standby
             unit_type = unit.get("unit_type", "")
             is_fire_unit = unit_type in (
                 "artillery_battery", "artillery_platoon",
                 "mortar_section", "mortar_team",
             )
-            if is_fire_unit:
+            if is_fire_unit and order_type == "fire":
                 return ResponseType.wilco_fire, None
             # Disengage order → use disengage-specific response
-            order_type = parsed.order_type.value if parsed.order_type else ""
             if order_type == "disengage":
                 return ResponseType.wilco_disengage, None
             # Resupply order → use resupply-specific response

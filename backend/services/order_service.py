@@ -143,6 +143,27 @@ class OrderService:
             # Mixed or ambiguous → use stored language to prevent mixing
             parsed.language = DetectedLanguage(stored_lang)
 
+        # ── 2c. Post-LLM standby safety check ─────────────────
+        # If the LLM returned fire/attack but original text contains standby
+        # keywords, override to observe. LLMs frequently ignore standby context.
+        if parsed.classification == MessageClassification.command and parsed.order_type:
+            from backend.schemas.order import OrderType
+            if parsed.order_type.value == "fire":
+                text_lower = original_text.lower()
+                _standby_kw = [
+                    "get ready", "stand by", "standby", "be ready", "on request",
+                    "on call", "when called", "when requested", "prepare to support",
+                    "ready to support", "prepare for support",
+                    "готовность", "готовьтесь", "будьте готовы", "по запросу",
+                    "по вызову", "по команде", "ожидайте", "ждите",
+                    "приготовьтесь", "приготовиться", "в готовности",
+                ]
+                if any(kw in text_lower for kw in _standby_kw):
+                    logger.info(
+                        "OrderService: LLM returned fire but text has standby keywords → overriding to observe"
+                    )
+                    parsed.order_type = OrderType.observe
+
         # Save parsed order immediately
         order.parsed_order = parsed.model_dump(mode="json", exclude_none=True)
 

@@ -1131,6 +1131,8 @@ def process_artillery_support(
     all_units: list,
     terrain: TerrainService | None = None,
     under_fire: set | None = None,
+    attacking_map: dict | None = None,
+    fire_requests: list[dict] | None = None,
 ) -> list[dict]:
     """
     Auto-assign idle artillery units to support attacking units OR units under fire in their CoC.
@@ -1143,12 +1145,22 @@ def process_artillery_support(
       - Unit has attack/engage/fire task → support their attack
       - Unit is under fire (in under_fire set) → counter-battery / suppressive fire
       - Unit has auto_return_fire task → support their defensive fight
+      - Fire request from a unit (e.g., "request artillery support on grid X")
+
+    Args:
+        all_units: All units in the session
+        terrain: TerrainService for terrain queries
+        under_fire: Set of unit IDs currently being attacked
+        attacking_map: Dict mapping victim_id → list of attacker_ids (who is attacking whom)
+        fire_requests: List of explicit fire support requests {unit_id, target_location, target_unit_id}
 
     Returns list of event dicts.
     """
     events = []
     if under_fire is None:
         under_fire = set()
+    if fire_requests is None:
+        fire_requests = []
 
     # Build lookup maps
     units_by_id = {str(u.id): u for u in all_units if not u.is_destroyed}
@@ -1163,6 +1175,114 @@ def process_artillery_support(
     # Track which artillery units have already been tasked this tick
     tasked_artillery = set()
 
+    # ── Process explicit fire requests FIRST (highest priority) ──
+    for req in fire_requests:
+        req_unit_id = req.get("unit_id")
+        req_target_loc = req.get("target_location")
+        req_target_uid = req.get("target_unit_id")
+        
+        if not req_unit_id or not req_target_loc:
+            continue
+            
+        unit = units_by_id.get(str(req_unit_id))
+        if not unit:
+            continue
+            
+        unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+        
+        # Find artillery to fulfill this request (walk CoC)
+        visited = set()
+        current_id = str(unit.id)
+        for _ in range(3):
+            current = units_by_id.get(current_id)
+            if not current or not current.parent_unit_id:
+                break
+            parent_id = str(current.parent_unit_id)
+            if parent_id in visited:
+                break
+            visited.add(parent_id)
+
+            siblings = children_by_parent.get(parent_id, [])
+            for sib in siblings:
+                if str(sib.id) in tasked_artillery:
+                    continue
+                if sib.unit_type not in ARTILLERY_TYPES:
+                    continue
+                sib_side = sib.side.value if hasattr(sib.side, 'value') else str(sib.side)
+                if sib_side != unit_side:
+                    continue
+                if sib.is_destroyed:
+                    continue
+                if (sib.ammo or 0) <= 0:
+                    continue
+
+                # IMPORTANT: For explicit fire requests, override observe/standby tasks
+                # The whole point of "be ready on request" is to respond to requests!
+                sib_task = sib.current_task
+                if sib_task:
+                    sib_task_type = sib_task.get("type", "")
+                    if sib_task_type in ("fire", "attack", "engage"):
+                        # Already actively firing at something
+                        if sib_task.get("target_location") or sib_task.get("target_unit_id"):
+                            continue  # Actually busy
+
+                # Check range
+                sib_pos = _get_position(sib)
+                if not sib_pos:
+                    continue
+                weapon_range = WEAPON_RANGE.get(sib.unit_type, 5000)
+                dist = _distance_m(sib_pos[0], sib_pos[1], req_target_loc["lat"], req_target_loc["lon"])
+                if dist > weapon_range:
+                    continue
+
+                # Danger-close check
+                friendly_danger = False
+                for fu in all_units:
+                    if fu.is_destroyed or fu.id == sib.id:
+                        continue
+                    fu_side = fu.side.value if hasattr(fu.side, 'value') else str(fu.side)
+                    if fu_side != unit_side:
+                        continue
+                    fu_pos = _get_position(fu)
+                    if fu_pos is None:
+                        continue
+                    d_friendly = _distance_m(fu_pos[0], fu_pos[1], req_target_loc["lat"], req_target_loc["lon"])
+                    if d_friendly <= DANGER_CLOSE_RADIUS_M:
+                        friendly_danger = True
+                        break
+                if friendly_danger:
+                    continue
+
+                # Assign fire mission (responding to explicit request)
+                sib.current_task = {
+                    "type": "fire",
+                    "target_location": req_target_loc,
+                    "target_unit_id": req_target_uid,
+                    "support_for": str(unit.id),
+                    "support_type": "fire_request",
+                    "salvos_remaining": DEFAULT_FIRE_SALVOS,
+                }
+                tasked_artillery.add(str(sib.id))
+
+                events.append({
+                    "event_type": "artillery_support",
+                    "actor_unit_id": sib.id,
+                    "target_unit_id": uuid.UUID(req_target_uid) if req_target_uid else None,
+                    "text_summary": f"{sib.name} responding to fire request from {unit.name}",
+                    "payload": {
+                        "artillery_id": str(sib.id),
+                        "supported_unit_id": str(unit.id),
+                        "support_type": "fire_request",
+                        "target_lat": req_target_loc["lat"],
+                        "target_lon": req_target_loc["lon"],
+                    },
+                })
+                break  # One artillery per request
+
+            current_id = parent_id
+
+    # ── Existing auto-support logic for attacking/under-fire units ──
+    # (rest of original code follows...)
     # Collect units that need artillery support
     # (attacking units + units under fire that have a target)
     requesting_units = []
@@ -1192,10 +1312,64 @@ def process_artillery_support(
             requesting_units.append((unit, target_loc, target_uid, "defensive_support"))
 
     for unit, target_loc, target_uid, support_type in requesting_units:
-        # Only fire at a location that is already known (from the requesting unit's task).
-        # Do NOT resolve enemy positions from server state (that would bypass fog-of-war).
-        # target_loc must already be set (from a player order or from a FOW contact lookup).
-        if not target_loc:
+        # IMPORTANT: For attack/engage tasks, the target_location is where the unit is
+        # GOING (destination), not where the enemy IS. We must NOT fire at the destination.
+        # Instead, we need to find the actual enemy position from:
+        # 1. For fire tasks: target_location is the actual fire target → use it
+        # 2. For attack/engage WITH target_unit_id: look up enemy's CURRENT position from units_by_id
+        # 3. For attack/engage WITHOUT target_unit_id: just movement destination → skip
+        # 4. For defensive_support when under_fire: look up who's attacking us from the attacking_map
+        task = unit.current_task
+        task_type = task.get("type", "") if task else ""
+
+        actual_fire_target = None
+        actual_target_uid = target_uid  # May be None
+
+        if task_type == "fire":
+            # Fire tasks have explicit target location — use it
+            actual_fire_target = target_loc
+        elif task_type in ("attack", "engage") and target_uid:
+            # Attack/engage task with a known target unit
+            # Look up the ENEMY'S CURRENT position (not our movement destination)
+            enemy_unit = units_by_id.get(str(target_uid))
+            if enemy_unit and not enemy_unit.is_destroyed:
+                enemy_pos = _get_position(enemy_unit)
+                if enemy_pos:
+                    actual_fire_target = {"lat": enemy_pos[0], "lon": enemy_pos[1]}
+                    actual_target_uid = str(target_uid)
+            # If we couldn't find the enemy, skip (fog of war - we don't know where they are)
+            if not actual_fire_target:
+                continue
+        elif support_type == "defensive_support" and attacking_map:
+            # Unit is under fire — find who's attacking us to counter-battery
+            attackers = attacking_map.get(unit.id, [])
+            if attackers:
+                # Target the nearest attacker
+                unit_pos = _get_position(unit)
+                if unit_pos:
+                    nearest = None
+                    nearest_dist = float('inf')
+                    for atk_id in attackers:
+                        atk_unit = units_by_id.get(str(atk_id))
+                        if atk_unit and not atk_unit.is_destroyed:
+                            atk_pos = _get_position(atk_unit)
+                            if atk_pos:
+                                dist = _distance_m(unit_pos[0], unit_pos[1], atk_pos[0], atk_pos[1])
+                                if dist < nearest_dist:
+                                    nearest_dist = dist
+                                    nearest = atk_unit
+                    if nearest:
+                        nearest_pos = _get_position(nearest)
+                        if nearest_pos:
+                            actual_fire_target = {"lat": nearest_pos[0], "lon": nearest_pos[1]}
+                            actual_target_uid = str(nearest.id)
+            if not actual_fire_target:
+                continue
+        else:
+            # No target_unit_id and not a fire task — this is just movement destination
+            continue
+
+        if not actual_fire_target:
             continue
 
         unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
@@ -1229,18 +1403,22 @@ def process_artillery_support(
 
                 # Check if artillery already has a task
                 sib_task = sib.current_task
-                if sib_task and sib_task.get("type") in ("fire", "attack", "engage"):
-                    # If the fire task has no target, the unit is on standby
-                    # (e.g. ordered "get ready to support") — still available
-                    if sib_task.get("target_location") or sib_task.get("target_unit_id"):
-                        continue  # Actually firing at a real target — skip
+                if sib_task:
+                    sib_task_type = sib_task.get("type", "")
+                    # Skip units with explicit observe/standby task (player ordered to wait)
+                    if sib_task_type == "observe" and sib_task.get("order_id"):
+                        continue  # Explicitly told to stand by — don't auto-assign
+                    if sib_task_type in ("fire", "attack", "engage"):
+                        # If the fire task has a specific target, unit is busy
+                        if sib_task.get("target_location") or sib_task.get("target_unit_id"):
+                            continue  # Actually firing at a real target — skip
 
                 # Check range
                 sib_pos = _get_position(sib)
                 if not sib_pos:
                     continue
                 weapon_range = WEAPON_RANGE.get(sib.unit_type, 5000)
-                dist = _distance_m(sib_pos[0], sib_pos[1], target_loc["lat"], target_loc["lon"])
+                dist = _distance_m(sib_pos[0], sib_pos[1], actual_fire_target["lat"], actual_fire_target["lon"])
                 if dist > weapon_range:
                     continue
 
@@ -1255,7 +1433,7 @@ def process_artillery_support(
                     fu_pos = _get_position(fu)
                     if fu_pos is None:
                         continue
-                    d_friendly = _distance_m(fu_pos[0], fu_pos[1], target_loc["lat"], target_loc["lon"])
+                    d_friendly = _distance_m(fu_pos[0], fu_pos[1], actual_fire_target["lat"], actual_fire_target["lon"])
                     if d_friendly <= DANGER_CLOSE_RADIUS_M:
                         friendly_danger = True
                         break
@@ -1265,8 +1443,8 @@ def process_artillery_support(
                 # Assign fire mission
                 sib.current_task = {
                     "type": "fire",
-                    "target_location": target_loc,
-                    "target_unit_id": target_uid,
+                    "target_location": actual_fire_target,
+                    "target_unit_id": actual_target_uid,
                     "support_for": str(unit.id),
                     "support_type": support_type,
                     "salvos_remaining": DEFAULT_FIRE_SALVOS,
@@ -1277,14 +1455,14 @@ def process_artillery_support(
                 events.append({
                     "event_type": "artillery_support",
                     "actor_unit_id": sib.id,
-                    "target_unit_id": uuid.UUID(target_uid) if target_uid else None,
+                    "target_unit_id": uuid.UUID(actual_target_uid) if actual_target_uid else None,
                     "text_summary": f"{sib.name} firing in support of {unit.name} ({support_label})",
                     "payload": {
                         "artillery_id": str(sib.id),
                         "supported_unit_id": str(unit.id),
                         "support_type": support_type,
-                        "target_lat": target_loc["lat"],
-                        "target_lon": target_loc["lon"],
+                        "target_lat": actual_fire_target["lat"],
+                        "target_lon": actual_fire_target["lon"],
                     },
                 })
                 break  # One artillery unit per requesting unit per tick

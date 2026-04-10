@@ -242,20 +242,12 @@ const KAdmin = (() => {
             if (_adminUnlocked) {
                 try { KUnits.setAdminDrag(true); } catch(e) {}
                 try { KMapObjects.render(); } catch(e) {}
-                // Auto-enable god view when admin panel opens
+                // Refresh god view if already enabled (user toggled it earlier)
                 if (_godViewEnabled) {
                     _refreshGodView();
-                } else {
-                    const _autoSid = _getAdminSessionId();
-                    const _autoToken = _getToken();
-                    if (_autoSid && _autoToken) {
-                        _toggleGodView().catch(e => console.warn('Admin open: auto god view failed:', e));
-                    } else {
-                        // Session not selected yet — mark pending
-                        _pendingGodViewEnable = true;
-                        _tryAutoEnableGodView();
-                    }
                 }
+                // NOTE: god-view is NOT auto-enabled on admin panel open.
+                // Admin must toggle it manually via the God View button.
             }
         } else {
             _closeAdminWindow();
@@ -358,12 +350,8 @@ const KAdmin = (() => {
         try { KUnits.setAdminDrag(true); } catch(e) {}
         // Re-render map objects so draggable markers become draggable
         try { KMapObjects.render(); } catch(e) {}
-        // Mark god view for auto-enable once a session is available
-        if (!_godViewEnabled) {
-            _pendingGodViewEnable = true;
-            // Try immediately if session already exists
-            _tryAutoEnableGodView();
-        }
+        // NOTE: god-view is NOT auto-enabled on admin unlock.
+        // Admin must toggle it manually via the God View button.
     }
 
     function isUnlocked() { return _adminUnlocked; }

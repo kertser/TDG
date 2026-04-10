@@ -553,7 +553,9 @@ const KUnits = (() => {
             const tooltipEyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
             const tooltipEyeTag = tooltipEyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${tooltipEyeH}m)</span>` : '';
             // Effective personnel: base × strength (floor to show even small casualties)
-            const _effPers = Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0)));
+            // For enemy units with generalized type (fog-of-war), personnel is unknown
+            const _persKnown = PERSONNEL.hasOwnProperty(u.unit_type);
+            const _effPers = _persKnown ? Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0))) : null;
             let tooltipHtml;
             if (_isEnemyTt && !_isAdminTt) {
                 // Enemy tooltip: show generic type estimate, NOT real unit name
@@ -563,7 +565,8 @@ const KUnits = (() => {
                     + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
                     + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${estimateLabel}</span>`;
             } else {
-                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${_effPers}p)</span>`
+                const _persDisplay = _effPers != null ? `${_effPers}p` : '?p';
+                tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${_persDisplay})</span>`
                     + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
                     + `<br>`
                     + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
@@ -1126,9 +1129,12 @@ const KUnits = (() => {
             html += `<div class="unit-info-name">${_enemyLabel}</div>`;
             html += `<div class="unit-info-type" style="color:#ef5350;">Enemy contact</div>`;
         } else {
-            const _effPers = Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0)));
+            // For enemy units with generalized type (fog-of-war), personnel is unknown
+            const _persKnown = PERSONNEL.hasOwnProperty(u.unit_type);
+            const _effPers = _persKnown ? Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0))) : null;
+            const _persStr = _persKnown ? `${_effPers}/${pers} personnel` : '? personnel';
             html += `<div class="unit-info-name">${u.name}</div>`;
-            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${_effPers}/${pers} personnel</div>`;
+            html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${_persStr}</div>`;
         }
         html += `</div>`;
         html += `<div class="unit-info-status"><span class="unit-status-badge" style="background:${statusBg};color:${statusColor};">${displayStatusIcon} ${displayStatus}</span></div>`;

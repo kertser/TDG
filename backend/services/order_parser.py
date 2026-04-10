@@ -349,7 +349,41 @@ class OrderParser:
             ]
             _is_standby = any(kw in text_lower for kw in _standby_kw)
 
-            # Determine order type — check fire BEFORE attack to avoid "fire" matching "engage"
+            # ── Coordination detection ──
+            # "Lead the attack", "coordinate artillery support" — these are attack orders
+            # with coordination intent, NOT fire orders for the receiving unit.
+            _coordination_kw = [
+                "coordinate", "lead the", "lead attack", "coordinate with",
+                "coordinate the", "organize the", "direct the", "command the",
+                "координируй", "возглав", "руковод", "организуй атаку",
+                "координируй огонь", "координируй поддержку",
+                "наведите", "наведи", "свяжитесь", "свяжись",
+                "запросите огонь", "запроси огонь", "вызовите огонь", "вызови огонь",
+            ]
+            _is_coordination = any(kw in text_lower for kw in _coordination_kw)
+            
+            # ── Request fire detection ──
+            # "Request fire support", "Call for fire", "Direct artillery at enemy"
+            # Unit should create a fire request to CoC artillery, not attack themselves
+            _request_fire_kw = [
+                "request fire", "call for fire", "request artillery", "call artillery",
+                "direct artillery", "need fire support", "need artillery",
+                "наведите артиллерию", "наведи артиллерию", "запросите огонь",
+                "запроси огонь", "вызовите огонь", "вызови огонь",
+                "свяжитесь с артиллерией", "свяжись с артиллерией",
+                "свяжитесь с миномёт", "свяжись с миномёт",
+                "свяжитесь с mortar", "свяжись с mortar",
+            ]
+            _is_request_fire = any(kw in text_lower for kw in _request_fire_kw)
+
+            # Determine order type — logic order matters!
+            # 1. Standby for support → observe
+            # 2. Request fire from CoC artillery → request_fire
+            # 3. Coordination orders that mention attack → attack (not fire)
+            # 4. Direct fire commands → fire
+            # 5. Attack keywords → attack
+            # 6. Move keywords → move
+            # etc.
             if _is_standby and any(kw in text_lower for kw in [
                 "fire support", "support fire", "artillery support",
                 "огневая поддержк", "артподдержк", "поддержк огн",
@@ -357,13 +391,28 @@ class OrderParser:
             ]):
                 # Standby for fire support → observe/wait, NOT immediate fire
                 order_type = "observe"
+            elif _is_request_fire:
+                # "Request artillery support", "Direct artillery at enemy" → request_fire
+                # This creates a fire request to CoC artillery
+                order_type = "request_fire"
+            elif _is_coordination and any(kw in text_lower for kw in ["attack", "assault", "engage",
+                                                                       "атак", "штурм", "наступ"]):
+                # "Lead the attack", "coordinate the attack" → attack with coordination
+                order_type = "attack"
             elif any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
-                                                 "огонь по", "огонь на", "открыть огонь", "стреляй",
-                                                 "suppress", "подавить", "подавляющ",
-                                                 "suppressive", "подавляющий",
-                                                 "artillery support", "fire support", "support fire",
-                                                 "need support on", "support on",
-                                                 "артподдержк", "огневая поддержк", "поддержк огн"]):
+                                                 "огонь по", "огонь на", "открыть огонь", "стреляй"]):
+                # Direct fire commands → fire
+                order_type = "fire"
+            elif any(kw in text_lower for kw in ["suppress", "подавить", "подавляющ",
+                                                 "suppressive", "подавляющий"]):
+                # Suppression orders → fire
+                order_type = "fire"
+            elif not _is_coordination and any(kw in text_lower for kw in [
+                "artillery support", "fire support", "support fire",
+                "need support on", "support on",
+                "артподдержк", "огневая поддержк", "поддержк огн"
+            ]):
+                # "Request artillery support on grid X" → fire (but not if it's coordination)
                 order_type = "fire"
             elif any(kw in text_lower for kw in ["hit any", "hit enemy", "engage any",
                                                    "fire on any", "open fire",
@@ -635,6 +684,7 @@ class OrderParser:
             confidence=self._compute_keyword_confidence(
                 classification, order_type, location_refs,
                 target_unit_refs, speed, engagement_rules, formation,
+                original_text=text,
             ),
             ambiguities=["Parsed by keyword fallback — no LLM"],
         )
@@ -648,12 +698,15 @@ class OrderParser:
         speed: str | None,
         engagement_rules: str | None,
         formation: str | None = None,
+        original_text: str = "",
     ) -> float:
         """
         Compute confidence score for keyword-parsed result.
 
         Higher confidence when more elements are successfully extracted.
         This drives the 3-tier model routing decision.
+
+        Complex or ambiguous commands should have LOW confidence to trigger LLM parsing.
         """
         if classification == MessageClassification.unclear:
             return 0.15
@@ -693,7 +746,48 @@ class OrderParser:
             if formation:
                 conf += 0.03
 
-        return min(conf, 0.95)
+            # ── Reduce confidence for complex/ambiguous commands ──
+            # Multi-verb commands (move + attack, advance + eliminate, etc.) should
+            # be sent to LLM for proper intent resolution.
+            text_lower = original_text.lower()
+
+            # Check for multiple action verbs in the same command
+            move_verbs = ["move", "advance", "proceed", "выдвигай", "двигай", "марш", "движен"]
+            attack_verbs = ["attack", "engage", "eliminate", "destroy", "neutralize",
+                           "fire", "shoot", "suppress",
+                           "атак", "уничтож", "ликвидир", "поразить", "огонь", "подавить"]
+            defend_verbs = ["defend", "hold", "оборон", "удержи"]
+            observe_verbs = ["observe", "recon", "scout", "наблюда", "разведк"]
+            # Coordination/leadership verbs indicate complex multi-unit orders
+            coord_verbs = ["coordinate", "lead", "organize", "direct", "command",
+                          "координируй", "организуй", "возглав", "руковод", "командуй"]
+
+            has_move = any(v in text_lower for v in move_verbs)
+            has_attack = any(v in text_lower for v in attack_verbs)
+            has_defend = any(v in text_lower for v in defend_verbs)
+            has_observe = any(v in text_lower for v in observe_verbs)
+            has_coord = any(v in text_lower for v in coord_verbs)
+
+            verb_count = sum([has_move, has_attack, has_defend, has_observe])
+
+            if verb_count >= 2:
+                # Multiple action verbs → complex command → reduce confidence
+                # This ensures LLM parses the intent correctly
+                conf = min(conf, 0.65)  # cap at 0.65 to trigger nano model
+
+            # Coordination orders are inherently complex — always send to LLM
+            if has_coord:
+                conf = min(conf, 0.50)  # cap at 0.50 to trigger full model
+
+            # Long commands (>50 chars) are more likely to be complex
+            if len(original_text) > 50:
+                conf -= 0.05
+
+            # Commands with multiple sentences are complex
+            if original_text.count('.') >= 2:
+                conf -= 0.10
+
+        return min(max(conf, 0.15), 0.95)
 
 
 # Singleton
