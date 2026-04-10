@@ -162,9 +162,17 @@ class RedAIAgent:
         tick: int,
     ) -> list[dict]:
         """
-        Deterministic rule-based decision engine.
+        Deterministic rule-based decision engine applying tactical doctrine.
 
-        Behaviors based on mission type:
+        Doctrine principles applied:
+        - Fire and maneuver: artillery supports, infantry/armor assaults
+        - Combined arms: unit types employed per their role
+        - Terrain utilization: seek cover, use elevation advantage
+        - Force preservation: withdraw when strength drops below threshold
+        - Reconnaissance: recon units observe, don't fight
+        - Mutual support: keep units within support distance
+
+        Mission types:
         - "hold"/"defend": Stay at position, engage contacts in range
         - "patrol": Cycle between waypoints
         - "attack"/"advance": Move toward known enemy contacts
@@ -178,26 +186,27 @@ class RedAIAgent:
         mission_waypoints = mission.get("waypoints", [])
         terrain_around = knowledge.get("terrain_around_units", {})
 
+        # ── Classify units by type for combined arms coordination ──
+        artillery_units = []
+        recon_units = []
+        maneuver_units = []
         for unit in own_units:
             if unit.get("current_task"):
-                # Unit already has a task — don't override unless critical
                 task_type = unit["current_task"].get("type", "")
-                if task_type in ("move", "attack", "advance"):
-                    # Check if unit should divert due to new contact
+                # Skip units that already have active combat/movement tasks
+                # unless they need to divert for critical reasons
+                if task_type in ("move", "attack", "advance", "fire", "engage"):
                     if contacts and doctrine["advance_bias"] > 0.6:
                         nearest_contact = self._find_nearest_contact(unit, contacts)
                         if nearest_contact and nearest_contact.get("distance_to_nearest_m", 99999) < 500:
-                            # Contact very close — engage
                             orders.append(self._make_engage_order(unit, nearest_contact, doctrine))
-                    continue  # Keep current task
-
-            # ── Check unit condition: skip if broken or comms offline ──
+                    continue
+            # Skip broken/offline/destroyed units
             if unit.get("morale", 1.0) < 0.15:
-                continue  # Broken — not responding to orders
+                continue
             if unit.get("comms_status") == "offline":
-                continue  # Can't receive orders
-
-            # ── Retreat if critically damaged regardless of mission ──
+                continue
+            # Retreat critically damaged units
             if unit.get("strength", 1.0) < doctrine.get("retreat_threshold", 0.3):
                 if mission_target:
                     rally_lat = mission_target.get("lat")
@@ -210,26 +219,60 @@ class RedAIAgent:
                                 "order_type": "move",
                                 "target_location": {"lat": rally_lat, "lon": rally_lon},
                                 "speed": "fast",
-                                "reasoning": f"Withdrawing — strength at {unit.get('strength', 0):.0%}",
+                                "reasoning": f"Withdrawing — strength at {unit.get('strength', 0):.0%}, below retreat threshold",
                             })
                             continue
-                continue  # Too weak, no rally — hold
+                continue
 
-            # Unit is idle — assign based on mission
-            if mission_type in ("hold", "defend"):
+            # Classify by type
+            utype = unit.get("unit_type", "")
+            if any(k in utype for k in ("artillery", "mortar")):
+                artillery_units.append(unit)
+            elif any(k in utype for k in ("recon", "observation", "sniper")):
+                recon_units.append(unit)
+            else:
+                maneuver_units.append(unit)
+
+        # ── Apply doctrine by mission type ──
+        if mission_type in ("hold", "defend"):
+            # Doctrine: defense — recon observes, artillery supports, maneuver holds
+            for unit in recon_units:
+                orders.extend(self._decide_recon(unit, contacts, doctrine))
+            for unit in artillery_units:
+                orders.extend(self._decide_artillery_support(unit, contacts, maneuver_units, doctrine))
+            for unit in maneuver_units:
                 orders.extend(self._decide_hold(unit, contacts, doctrine))
 
-            elif mission_type in ("patrol",):
+        elif mission_type in ("patrol",):
+            for unit in recon_units:
+                orders.extend(self._decide_patrol(unit, contacts, doctrine, mission_waypoints, tick))
+            for unit in artillery_units:
+                orders.extend(self._decide_artillery_support(unit, contacts, maneuver_units, doctrine))
+            for unit in maneuver_units:
                 orders.extend(self._decide_patrol(unit, contacts, doctrine, mission_waypoints, tick))
 
-            elif mission_type in ("attack", "advance"):
+        elif mission_type in ("attack", "advance"):
+            # Doctrine: combined arms attack — recon finds, artillery suppresses, maneuver assaults
+            for unit in recon_units:
+                orders.extend(self._decide_recon(unit, contacts, doctrine))
+            for unit in artillery_units:
+                orders.extend(self._decide_artillery_support(unit, contacts, maneuver_units, doctrine))
+            for unit in maneuver_units:
                 orders.extend(self._decide_attack(unit, contacts, doctrine, mission_target))
 
-            elif mission_type in ("withdraw", "retreat"):
+        elif mission_type in ("withdraw", "retreat"):
+            for unit in own_units:
+                if unit.get("morale", 1.0) < 0.15 or unit.get("comms_status") == "offline":
+                    continue
                 orders.extend(self._decide_withdraw(unit, contacts, doctrine, mission_target))
 
-            else:
-                # Default: hold position
+        else:
+            # Default: hold
+            for unit in recon_units:
+                orders.extend(self._decide_recon(unit, contacts, doctrine))
+            for unit in artillery_units:
+                orders.extend(self._decide_artillery_support(unit, contacts, maneuver_units, doctrine))
+            for unit in maneuver_units:
                 orders.extend(self._decide_hold(unit, contacts, doctrine))
 
         return orders
@@ -256,6 +299,124 @@ class RedAIAgent:
             return [self._make_engage_order(unit, nearest, doctrine)]
 
         return []  # Hold and wait
+
+    def _decide_recon(
+        self,
+        unit: dict,
+        contacts: list[dict],
+        doctrine: dict,
+    ) -> list[dict]:
+        """
+        Recon/sniper/OP units: observe and report, maintain concealment.
+
+        Doctrine: Recon pulls, doesn't push. These units should:
+        - Observe enemy positions without engaging
+        - Break contact (disengage) if enemy is too close
+        - Never decisively engage — their value is intelligence
+        """
+        if not contacts:
+            return []  # Stay concealed, observe
+
+        nearest = self._find_nearest_contact(unit, contacts)
+        if not nearest:
+            return []
+
+        dist = nearest.get("distance_to_nearest_m", 99999)
+
+        # Enemy very close (< 400m) — disengage to maintain concealment
+        if dist < 400:
+            # Try to move away from the contact
+            if unit.get("lat") and unit.get("lon") and nearest.get("lat") and nearest.get("lon"):
+                # Move in opposite direction from contact
+                dlat = unit["lat"] - nearest["lat"]
+                dlon = unit["lon"] - nearest["lon"]
+                # Normalize and move ~500m away
+                import math
+                d = math.sqrt(dlat*dlat + dlon*dlon) or 0.001
+                escape_lat = unit["lat"] + (dlat / d) * 0.005  # ~500m
+                escape_lon = unit["lon"] + (dlon / d) * 0.007
+                return [{
+                    "unit_id": unit["id"],
+                    "order_type": "move",
+                    "target_location": {"lat": escape_lat, "lon": escape_lon},
+                    "speed": "fast",
+                    "reasoning": f"Recon disengaging — enemy at {dist}m, maintaining concealment per doctrine",
+                }]
+
+        # Within observation range but safe — stay and observe (implicit, no order needed)
+        return []
+
+    def _decide_artillery_support(
+        self,
+        unit: dict,
+        contacts: list[dict],
+        supported_units: list[dict],
+        doctrine: dict,
+    ) -> list[dict]:
+        """
+        Artillery/mortar units: fire in support of maneuver elements.
+
+        Doctrine: Artillery should support attacking units, not act independently.
+        Priority targets:
+        1. Contacts near friendly units under threat (< 1000m)
+        2. Contacts that are closest to any friendly maneuver unit
+        3. If no contacts, remain in position ready to fire
+        """
+        if not contacts:
+            return []  # No targets — stay ready
+
+        # Check ammo — can't fire without it
+        if unit.get("ammo", 1.0) < 0.1:
+            return []
+
+        # Find highest priority target: enemy closest to a friendly maneuver unit
+        best_target = None
+        best_priority = float("inf")
+
+        for contact in contacts:
+            if not contact.get("lat") or not contact.get("lon"):
+                continue
+
+            # Check proximity to supported units
+            min_dist_to_friendly = float("inf")
+            for friendly in supported_units:
+                if friendly.get("lat") and friendly.get("lon"):
+                    d = _approx_distance_m(friendly["lat"], friendly["lon"],
+                                           contact["lat"], contact["lon"])
+                    min_dist_to_friendly = min(min_dist_to_friendly, d)
+
+            # Priority: closer to friendlies = higher priority
+            if min_dist_to_friendly < best_priority and min_dist_to_friendly < 3000:
+                best_priority = min_dist_to_friendly
+                best_target = contact
+
+        if not best_target:
+            # Fall back: target the nearest contact overall
+            best_target = self._find_nearest_contact(unit, contacts)
+            if not best_target:
+                return []
+
+        # Check if target is within fire range (approximate)
+        if unit.get("lat") and unit.get("lon") and best_target.get("lat") and best_target.get("lon"):
+            fire_dist = _approx_distance_m(unit["lat"], unit["lon"],
+                                           best_target["lat"], best_target["lon"])
+            # Typical artillery range: 3500-5000m, mortar: 2000-3500m
+            max_range = 5000 if "artillery" in unit.get("unit_type", "") else 3500
+            if fire_dist > max_range:
+                return []  # Out of range — need to reposition (handled by attack/move logic)
+
+        return [{
+            "unit_id": unit["id"],
+            "order_type": "attack",
+            "target_location": {"lat": best_target["lat"], "lon": best_target["lon"]},
+            "speed": "slow",
+            "engagement_rules": "fire_at_will",
+            "reasoning": (
+                f"Fire support: suppressing {best_target.get('estimated_type', 'enemy')} "
+                f"at {best_target.get('distance_to_nearest_m', '?')}m from nearest friendly. "
+                f"Preparatory fires per combined arms doctrine."
+            ),
+        }]
 
     def _decide_patrol(
         self,

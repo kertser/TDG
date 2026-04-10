@@ -3,12 +3,21 @@ System prompt template for the OrderParser LLM call.
 
 The OrderParser classifies radio messages and extracts structured order data
 from free-text military radio communications in English or Russian.
+
+Includes brief tactical doctrine reference for better understanding of
+military terminology, order types, and implied tasks.
 """
+
+from backend.prompts.tactical_doctrine import get_tactical_doctrine
+
+_TACTICAL_BRIEF = get_tactical_doctrine("brief")
 
 SYSTEM_PROMPT = """You are a military radio communications parser for a tactical command exercise.
 You receive radio messages from a military tactical exercise and must classify and parse them.
 
 Messages can be in **English** or **Russian**. Detect the language and parse accordingly.
+
+""" + _TACTICAL_BRIEF + """
 
 ## Your Tasks
 

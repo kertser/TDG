@@ -1309,6 +1309,7 @@ if unit.ammo <= 0:
 7. **JSONB for flexibility**: Unit tasks, capabilities, order payloads, scenario config use JSONB columns.
 8. **Editable config over hardcode**: Unit type definitions (SIDC, speeds, personnel) in `frontend/config/unit_types.json` instead of JavaScript constants. Display/behavior constants (status icons, formations, movement arrows, selection params) in `frontend/config/units_config.json`. Backend `UNIT_TYPE_SPEEDS` mirrors config for engine use.
 9. **MIL-STD-2525D SIDC compliance**: All unit SIDCs follow 20-character 2525D format with correct echelon (pos 9-10), HQ indicator (pos 8), entity/type/subtype (pos 11-16), and standard identity (pos 4: 3=Friend, 6=Hostile).
+10. **Tactical doctrine drives AI (single source of truth)**: `FIELD_MANUAL.md` Appendix C is the **single source of truth** for all tactical doctrine. `backend/prompts/tactical_doctrine.py` reads from FIELD_MANUAL.md at import time via HTML comment markers (`<!-- DOCTRINE:FULL:START/END -->`, `<!-- DOCTRINE:BRIEF:START/END -->`). It contains NO hardcoded doctrine text — only a minimal fallback if the file is missing. Full doctrine → Red AI commander; brief doctrine → order parser. Doctrine profiles (`doctrine.py`) add posture-specific behavior on top. To update doctrine, edit FIELD_MANUAL.md only, then restart backend.
 
 ---
 
@@ -1416,7 +1417,8 @@ KShU/
 │   │   ├── __init__.py
 │   │   ├── order_parser.py        ← System prompt + few-shot examples for bilingual order parsing
 │   │   ├── intent_interpreter.py  ← Prompt for tactical intent extraction
-│   │   └── response_generator.py  ← Template-based + optional LLM unit radio response prompts
+│   │   ├── response_generator.py  ← Template-based + optional LLM unit radio response prompts
+│   │   └── tactical_doctrine.py   ← Condensed FIELD_MANUAL doctrine for LLM injection (full + brief)
 │   └── tests/
 │       ├── __init__.py
 │       ├── test_grid_service.py

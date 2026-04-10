@@ -41,6 +41,12 @@
 31. [Disengage Order](#31-disengage-order)
 32. [Grid Boundary Enforcement](#32-grid-boundary-enforcement)
 
+**Appendices:**
+- [A. Key Constants Quick Reference](#appendix-a-key-constants-quick-reference)
+- [B. Event Types](#appendix-b-event-types)
+- [C. Tactical Doctrine Reference](#appendix-c-tactical-doctrine-reference)
+- [D. LLM Integration Points](#appendix-d-llm-integration-points)
+
 ---
 
 ## 1. Tick Sequence
@@ -1603,6 +1609,358 @@ When a target is outside the area of operations:
 
 ---
 
-*Last updated: 2026-04-09*
-*Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`*
+## Appendix C: Tactical Doctrine Reference
+
+> **This section is the SINGLE SOURCE OF TRUTH for tactical doctrine.**
+> `backend/prompts/tactical_doctrine.py` reads this section at startup and injects it
+> into LLM prompts. All edits to tactical doctrine MUST be made here — never in Python code.
+>
+> HTML comment markers delimit the text extracted for LLM injection.
+> Do NOT remove or rename the DOCTRINE markers below.
+
+<!-- DOCTRINE:FULL:START -->
+### C.1 Principles of Combat
+
+1. **Concentration of Force**: Mass combat power at the decisive point. Never attack equally along the whole front — create local superiority (3:1 for assault, 6:1 for fortified positions).
+2. **Economy of Force**: Use minimum force on secondary objectives. Accept risk in less critical areas to concentrate strength where it matters.
+3. **Maneuver**: Position forces to gain advantage. Avoid frontal assaults when flanking or envelopment is possible. Movement creates opportunity.
+4. **Unity of Command**: Coordinate all elements toward a single objective. Supporting fires, maneuver, and reserves must work together.
+5. **Security**: Protect your force. Maintain reconnaissance ahead and on flanks. Never advance without knowing what is in front of you.
+6. **Surprise**: Strike where and when the enemy does not expect. Use terrain, timing, and deception.
+7. **Simplicity**: Clear, simple plans are more reliable than complex ones under stress.
+
+### C.2 Fire and Maneuver
+
+**Fire and maneuver is the fundamental tactic of combined arms combat.**
+
+#### C.2.1 Bounding Overwatch
+- One element moves while another provides covering fire.
+- The moving element advances to a position, then covers the other element's movement.
+- Use when contact is expected or in open terrain.
+
+#### C.2.2 Base of Fire + Maneuver Element
+- Designate a **base of fire** (typically heavier weapons, artillery, or a fixing element) to suppress the enemy.
+- The **maneuver element** (typically infantry or armor) moves to a flanking or assault position while the enemy is suppressed.
+- The base of fire shifts or lifts fire when the maneuver element is about to assault.
+
+#### C.2.3 Fire Support Coordination
+- Artillery/mortar units should fire in **support of** attacking units, not independently.
+- Request fire BEFORE the assault to suppress defenders (preparatory fires).
+- Shift fires to depth targets or flanks as the assault begins.
+- **Danger close**: Never fire within 50m of friendly troops. Cease fire if friendlies advance into the beaten zone.
+
+#### C.2.4 Combined Arms Principles
+
+| Unit Type | Primary Role | Employment Principle |
+|-----------|-------------|---------------------|
+| **Infantry** | Close combat, hold terrain | Assault complex terrain (forest, urban), defend, patrol. Slow but protected in close terrain. |
+| **Armor** (tanks, mech) | Shock action, breakthrough | Attack in open terrain, exploit success, counterattack. Vulnerable in close terrain. |
+| **Artillery/mortar** | Fires, suppression, area denial | Support attacks from range, suppress defenders before assault, area fire. Most effective vs stationary targets. |
+| **Recon/sniper/OP** | Intelligence, observation | Find the enemy. Recon pulls, it does not push. Avoid decisive engagement. Concealment mode makes them nearly invisible. |
+| **Engineers** | Mobility/counter-mobility | Breach obstacles (3-10 ticks), lay mines, build bridges (2 ticks). Enable and deny movement. |
+| **Logistics** | Sustainment | Resupply ammo. Position near supply caches. Protect from enemy action. |
+| **HQ/Command** | Command and control | Central position, near command post structures (prevents comms degradation). Must be protected. |
+
+### C.3 Offensive Operations
+
+#### C.3.1 Movement to Contact
+- Use when enemy position is unknown.
+- Advance with reconnaissance forward, main body following.
+- Formation: advance guard (1/3 force), main body (2/3 force).
+- On contact: fix with advance guard, develop the situation, then attack with main body.
+- Speed: typically "slow" for advance guard (concealment), "fast" for main body on commitment.
+
+#### C.3.2 Deliberate Attack
+- Used against known, prepared enemy positions.
+- Requires preparation: reconnaissance, fire plan, coordinated timing.
+- Phases:
+  1. **Isolation** — cut off enemy reinforcement/retreat
+  2. **Suppression** — neutralize enemy fires with artillery/mortar (preparatory fires)
+  3. **Assault** — close with and destroy (maneuver element attacks, base of fire supports)
+  4. **Consolidation** — secure the objective, prepare for counterattack
+- Attack ratio: minimum **3:1** local superiority at the point of attack.
+
+#### C.3.3 Hasty Attack
+- Seize a fleeting opportunity before the enemy can prepare.
+- Minimal preparation, speed is paramount.
+- Accept higher risk for speed of action.
+- Particularly effective immediately after enemy withdrawal or during confusion.
+
+#### C.3.4 Flanking Maneuver
+- Avoid the enemy's strength (frontal defenses), strike the flank or rear.
+- Requires a **fixing element** to hold the enemy's attention from the front.
+- The flanking element must move concealed (use terrain: forests, folds in ground, defilade).
+- Timing is critical — attack simultaneously from front and flank.
+- Combined arms: armor flanks in open terrain, infantry flanks through close terrain.
+
+#### C.3.5 Pursuit
+- When enemy begins to withdraw, transition to pursuit immediately.
+- Maintain pressure to prevent enemy from reorganizing.
+- Direct pressure (follow the retreating enemy) + encirclement (cut off retreat routes).
+- Use fastest units (armor, mechanized) for pursuit on open terrain.
+
+### C.4 Defensive Operations
+
+#### C.4.1 Hasty Defense
+- Occupy the best available terrain quickly.
+- Prioritize: fields of fire, cover and concealment, obstacle integration.
+- Dig in immediately — each tick of digging improves protection (+20% per level, up to +100% at level 5, capped at 2.5× total).
+- Select reverse slope positions when possible (protected from direct fire, observer on crest).
+
+#### C.4.2 Deliberate Defense
+- Time to prepare: dig in fully (15 ticks = 5 levels), site weapons, plan fires, prepare obstacles.
+- Organize in depth: security zone (forward) → main battle area → reserve.
+- Integrate obstacles (minefields, wire) with fire — obstacles without covering fire are merely a delay.
+- Prepare counterattack plans for when the enemy is weakened.
+
+#### C.4.3 Defense in Depth
+- Multiple defensive lines, each with mutual support.
+- The enemy breaks through one line but faces the next.
+- Trade space for time, wear down the attacker.
+- Mutual support radius: 500m between units provides morale bonus.
+
+#### C.4.4 Key Terrain
+- Control terrain that provides advantage:
+  - **Hilltops**: observation (+10% detection per 50m), fields of fire (+15% effectiveness per 50m)
+  - **Road junctions**: movement control, block enemy mobility corridors
+  - **Bridges**: chokepoints, deny water crossing to enemy
+  - **Forest edges**: concealment (0.4 visibility) with fields of fire into open terrain
+  - **Urban areas**: best protection (1.5×), favors defenders heavily
+- Deny key terrain to the enemy even at cost. Terrain advantage multiplies combat power.
+
+### C.5 Reconnaissance and Security
+
+#### C.5.1 Reconnaissance Principles
+- **Recon pulls**: reconnaissance units advance to find the enemy, not push through them.
+- Report all contacts immediately — intelligence is their primary product.
+- Maintain concealment: stationary recon/sniper/OP units in concealment mode are nearly undetectable (max 300m detection range).
+- Do NOT decisively engage — recon units break contact when discovered (disengage order).
+- Concealment-capable types: `recon_team`, `recon_section`, `sniper_team`, `observation_post`, `engineer_recon_team`.
+
+#### C.5.2 Screening
+- Observe and report enemy activity along a front or flank.
+- Provide early warning of enemy approach.
+- Engage only to delay; withdraw before being decisively engaged.
+
+#### C.5.3 Flank Security
+- Always protect exposed flanks, especially during offensive operations.
+- Assign observation posts or recon elements to watch flanks.
+- Move reserves to threatened flanks rapidly.
+
+### C.6 Command and Control
+
+#### C.6.1 Commander's Intent
+- Every order should convey: (1) the objective, (2) the method, (3) the endstate.
+- Subordinates who lose communications should act in accordance with the last known commander's intent.
+
+#### C.6.2 Decentralized Execution
+- Issue mission-type orders: tell subordinates WHAT to achieve, not HOW to do it.
+- Subordinate leaders make tactical decisions within the commander's intent.
+
+#### C.6.3 Communications Discipline
+- Keep radio messages brief, clear, and authenticated.
+- Report: (1) position, (2) activity, (3) status, (4) contacts, (5) requests.
+- Degraded/offline comms: unit continues last task, cannot receive new orders.
+- Units with `offline` comms do NOT respond to orders — they execute last known task.
+
+#### C.6.4 Chain of Command
+- Units operate within their chain of command (CoC).
+- Artillery support is requested through CoC — parent walks up 3 levels to find artillery siblings.
+- Peer support: units in same CoC (siblings) can be called for mutual assistance when under fire.
+- When no CoC assignments exist, any same-side player can command any unit.
+
+### C.7 Terrain Utilization Doctrine
+
+#### C.7.1 Cover and Concealment
+- **Cover** protects from fire: forest (1.4×), urban (1.5×), mountain (1.5×), entrenchment (2.0×), pillbox (3.0×).
+- **Concealment** hides from observation: forest (0.4 vis), urban (0.5 vis), scrub (0.7 vis).
+- Best positions combine both: forest edge looking across open ground.
+
+#### C.7.2 Fields of Fire
+- Open terrain provides clear fields of fire but no protection.
+- Position on terrain edges: forest edge → open ground, hilltop → slopes.
+- Weapon systems dictate optimal engagement ranges (infantry 300-800m, tanks 2000-2500m, artillery 3500-5000m).
+
+#### C.7.3 Mobility Corridors
+- Roads: fastest (1.0×) but predictable, exposed, vulnerable to ambush.
+- Open: good (0.8×) with maneuver options.
+- Forest/urban: slow (0.4-0.5×) but concealed approach.
+- Water: impassable (0.05×) without bridge. Bridges are critical infrastructure.
+- Marsh: very slow (0.3×), poor protection. Avoid for maneuver forces.
+
+#### C.7.4 Obstacle Integration
+- Obstacles (minefields, wire, ditches) are most effective when covered by fire.
+- An uncovered obstacle is merely a delay — the enemy will breach it.
+- Layer obstacles in depth: slow the enemy, channel them into kill zones.
+- Engineering units breach obstacles (3-10 ticks depending on type).
+- Discovered minefields cause units to halt — engineering support required.
+
+### C.8 Smoke and Obscurants
+
+- Artillery/mortar can fire smoke screens (3-tick duration, 100m radius).
+- Smoke reduces detection to ×0.1 — effectively blinds the area.
+- Tactical uses:
+  1. **Conceal movement** across open terrain (smoke between own forces and enemy observation)
+  2. **Screen a withdrawal** (smoke between retreating units and pursuing enemy)
+  3. **Isolate** part of enemy position before assault (smoke flanking positions, assault center)
+- Smoke costs 0.05 ammo per round — use judiciously.
+- Movement in smoke is slightly reduced (×0.9).
+
+### C.9 Night Operations
+
+- Night (21:00-05:00): detection ×0.3 — dramatic reduction in visibility.
+- Dawn/dusk (05:00-07:00, 19:00-21:00): detection ×0.6.
+- Units with NVG capability: night penalty halved (×0.65 instead of ×0.3).
+- Night favors: infiltration, recon, surprise attacks, withdrawal.
+- Night disadvantages: navigation harder, coordination more difficult, friendly fire risk.
+
+### C.10 Weather Effects on Operations
+
+| Weather | Visibility | Movement | Tactical Implication |
+|---------|-----------|----------|---------------------|
+| Clear | ×1.0 | ×1.0 | Normal operations |
+| Rain | ×0.7 | ×0.8 (mud) | Reduces visibility; slower movement but better concealment |
+| Storm | ×0.4 | ×0.6 (heavy mud) | Severely limits operations; favors defense |
+| Fog | ×0.3 | ×0.95 | Excellent concealment for movement; poor for observation |
+| Snow | ×0.6 | ×0.7 | Moderate impact; tracks compromise concealment |
+
+- Exploit bad weather for concealed movement approaches.
+- Avoid major offensive operations in storms — coordination is nearly impossible.
+- Fog is an opportunity for surprise attacks and infiltration.
+
+### C.11 Combat Decision Framework (METT-T)
+
+When making tactical decisions, evaluate:
+
+1. **M**ission: What is the objective? What must be achieved?
+2. **E**nemy: Where is the enemy? What is their strength, disposition, activity?
+3. **T**errain: What terrain advantages can I exploit? What restricts movement?
+4. **T**roops: What is my strength? Ammo? Morale? Available reserves?
+5. **T**ime: How urgent is this? Can I prepare, or must I act immediately?
+
+**Decision priorities (in order):**
+
+| Priority | Condition | Action |
+|----------|-----------|--------|
+| 1 | Unit strength < 15% (broken) | Unit unresponsive — cannot be commanded |
+| 2 | Unit comms offline | Unit continues last task — cannot receive orders |
+| 3 | Unit strength < retreat threshold | Withdraw to rally point / covered position |
+| 4 | Unit ammo < 10% | Cannot attack — defend or withdraw |
+| 5 | Contact close (< 500m) + aggressive doctrine | Engage immediately |
+| 6 | Contact detected + fire support available | Suppress with artillery before assault |
+| 7 | No contacts + objective assigned | Advance toward objective with recon forward |
+| 8 | Outnumbered | Seek terrain advantage, request support, delay |
+| 9 | Idle units | Assign observation, patrolling, or reserve role |
+| 10 | All objectives achieved | Consolidate, dig in, prepare for counterattack |
+
+### C.12 Logistics and Sustainment
+
+- **Ammo**: Units consume ammo each tick in combat (0.01 × fire_rate). At 0 ammo, units cannot fire.
+- **Supply caches**: +0.05 ammo/tick and +0.005 strength/tick to friendly units within ~100m.
+- **Field hospitals**: +0.01 strength/tick for recovery.
+- **Rest**: Units out of combat slowly recover: +0.003 strength/tick (first 5 ticks), +0.008/tick (after 5 rest ticks).
+- **Doctrine**: Position logistics assets in protected rear areas, close enough to support front-line units. Protect them from enemy action — logistics are high-value targets.
+<!-- DOCTRINE:FULL:END -->
+
+---
+
+### C.13 Tactical Doctrine (Brief / Condensed)
+
+> This condensed version is injected into cost-sensitive LLM calls (order parser).
+> Delimited by DOCTRINE:BRIEF markers below.
+
+<!-- DOCTRINE:BRIEF:START -->
+#### Key Tactical Principles
+- **Fire and Maneuver**: One element suppresses while another moves. Never advance without covering fire.
+- **Combined Arms**: Infantry clears complex terrain, armor provides shock in open terrain, artillery suppresses from range, recon finds the enemy.
+- **Concentration of Force**: Attack with local superiority (3:1 minimum). Never spread forces evenly.
+- **Terrain**: Use cover (forest 1.4× protection, urban 1.5×) and concealment (forest 0.4 vis, urban 0.5 vis). Higher ground = advantage.
+- **Security**: Always screen flanks. Recon forward before advancing. Never advance blind.
+
+#### Order Types and Implied Tasks
+- **Move**: Maintain comms, report arrival, expect contact en route.
+- **Attack**: Suppress enemy, establish fire superiority, consolidate after assault.
+- **Defend**: Dig in, improve positions, prepare fire plan, establish OPs.
+- **Observe**: Maintain concealment, report contacts, avoid engagement.
+- **Fire**: Compute fire solution, observe and adjust. Danger close = 50m.
+- **Withdraw**: Maintain contact while disengaging, establish rally point.
+- **Disengage**: Break contact immediately, seek covered position, suppress during withdrawal.
+
+#### Unit Employment
+- Infantry: assault complex terrain, hold ground, patrol.
+- Armor: attack in open terrain, exploit breakthroughs, counterattack.
+- Artillery/mortar: support attacks from range (area fire: 150m blast radius). Max 3 salvos per fire mission.
+- Recon/sniper/OP: find enemy, report. Nearly undetectable when concealed and stationary (300m max detection). Do NOT engage decisively.
+- Engineers: breach obstacles, lay mines, deploy bridges.
+
+#### Decision Priorities
+1. Preserve force (withdraw if strength < 30%).
+2. Cannot attack with no ammo (< 10%).
+3. Broken units (morale < 15%) do not respond.
+4. Use terrain advantage — height, cover, concealment.
+5. Coordinate fires with maneuver.
+<!-- DOCTRINE:BRIEF:END -->
+
+---
+
+## Appendix D: LLM Integration Points
+
+> **FIELD_MANUAL.md is the SINGLE SOURCE OF TRUTH for all tactical doctrine.**
+> `tactical_doctrine.py` reads from this file at startup — it contains no doctrine text of its own.
+
+| LLM Consumer | Doctrine Level | File | Purpose |
+|-------------|---------------|------|---------|
+| **Red AI Commander** | Full (Appendix C.1–C.12) | `backend/prompts/red_commander.py` | Drives tactical decision-making for AI-controlled Red forces. Injected into system prompt with doctrine-specific behavior instructions. |
+| **Order Parser** | Brief (Appendix C.13) | `backend/prompts/order_parser.py` | Helps LLM understand military terminology, order types, and implied tasks when parsing player radio messages. |
+| **Doctrine Profiles** | Posture-specific | `backend/services/red_ai/doctrine.py` | Each doctrine profile (aggressive/balanced/cautious/defensive) includes posture-specific behavior rules referencing field manual principles. |
+| **Intent Interpreter** | Rules-only (no LLM) | `backend/services/intent_interpreter.py` | Deterministic rules encode tactical doctrine (formations, implied tasks, constraints). No LLM call — 100% cost savings. |
+| **Response Generator** | Templates-only | `backend/services/response_generator.py` | Template-based unit radio responses. Uses military radio protocol but no doctrine injection needed. |
+| **Rule-based Red AI Fallback** | Embedded | `backend/services/red_ai/agent.py` | When LLM unavailable, rule-based decision engine applies doctrine heuristics (combined arms, recon employment, artillery support). |
+
+### D.1 Doctrine Flow (Single Source of Truth)
+
+```
+FIELD_MANUAL.md                          ◄── THE SINGLE SOURCE OF TRUTH
+│
+├── Appendix C.1–C.12 (full doctrine)
+│   extracted at startup via markers:
+│   <!-- DOCTRINE:FULL:START/END -->
+│       │
+│       └──▶ tactical_doctrine.py ──▶ TACTICAL_DOCTRINE_FULL
+│               │
+│               ├──▶ Red AI Commander system prompt
+│               │
+│               └──▶ (available for any future LLM consumer)
+│
+├── Appendix C.13 (brief doctrine)
+│   extracted at startup via markers:
+│   <!-- DOCTRINE:BRIEF:START/END -->
+│       │
+│       └──▶ tactical_doctrine.py ──▶ TACTICAL_DOCTRINE_BRIEF
+│               │
+│               └──▶ Order Parser system prompt
+│
+└── Sections 1–32 (game mechanics/rules)
+        │
+        └──▶ Referenced by engine code (deterministic, not LLM)
+
+doctrine.py (posture profiles)
+│
+└──▶ prompt_instruction per posture ──▶ Red AI Commander system prompt
+     (behavioral parameters — HOW aggressive/cautious to apply the doctrine)
+```
+
+### D.2 How to Update Tactical Doctrine
+
+1. **Edit FIELD_MANUAL.md** — Appendix C sections only.
+2. Do NOT edit `tactical_doctrine.py` — it reads from FIELD_MANUAL.md automatically.
+3. Keep content between the DOCTRINE FULL START/END markers (Appendix C.1–C.12).
+4. Keep content between the DOCTRINE BRIEF START/END markers (Appendix C.13).
+5. Restart the backend to pick up changes (doctrine is loaded at import time).
+6. Test with: `python -c "from backend.prompts.tactical_doctrine import get_tactical_doctrine; print(len(get_tactical_doctrine('full')))"`
+
+---
+
+*Last updated: 2026-04-10*
+*Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/prompts/tactical_doctrine.py`*
 

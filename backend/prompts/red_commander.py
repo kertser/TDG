@@ -7,11 +7,14 @@ The prompt is carefully designed to:
 3. Respect the doctrine profile
 4. Output structured JSON for reliable parsing
 5. Include terrain and grid context for better spatial reasoning
+6. Inject tactical doctrine from FIELD_MANUAL for doctrinally sound decisions
 """
 
 from __future__ import annotations
 
 import json
+
+from backend.prompts.tactical_doctrine import get_tactical_doctrine
 
 
 def build_red_commander_prompt(
@@ -27,6 +30,9 @@ def build_red_commander_prompt(
     Returns:
         (system_prompt, user_message) tuple
     """
+    # Load tactical doctrine reference
+    tactical_doctrine = get_tactical_doctrine("full")
+
     # ── System Prompt ─────────────────────────────────────
     system_prompt = f"""You are a Red force military commander in a tactical exercise.
 Your name: {agent_data.get('name', 'Red Commander')}
@@ -35,32 +41,44 @@ Your name: {agent_data.get('name', 'Red Commander')}
 
 MISSION: {json.dumps(mission, default=str) if mission else 'No specific mission assigned. Defend your current positions.'}
 
+{tactical_doctrine}
+
+## COMMAND INTERFACE
+
 You must respond with a JSON object containing an "orders" array.
 Each order must have:
 - "unit_id": string (exact UUID from the unit list below)
-- "order_type": one of "move", "attack", "defend", "observe", "halt", "withdraw"
-- "target_lat": float (latitude) — required for move/attack
-- "target_lon": float (longitude) — required for move/attack
+- "order_type": one of "move", "attack", "defend", "observe", "halt", "withdraw", "disengage", "fire"
+- "target_lat": float (latitude) — required for move/attack/fire
+- "target_lon": float (longitude) — required for move/attack/fire
 - "speed": "slow" or "fast"
 - "engagement_rules": optional, one of "fire_at_will", "hold_fire", "return_fire_only"
-- "reasoning": optional, brief explanation of why this order (for after-action review)
+- "reasoning": string (REQUIRED — explain your tactical reasoning using doctrine principles)
 
-Rules:
+## OPERATIONAL RULES
+
 1. You can ONLY issue orders to units listed in YOUR UNITS below.
 2. You can ONLY reference locations near the operational area.
 3. You do NOT know the exact positions of enemy units — only the contacts detected by your forces.
-4. Make tactically sound decisions based on your doctrine and available information.
+4. Apply the tactical doctrine above to every decision. Explain WHY using doctrine terms.
 5. If you have no changes to make, return {{"orders": []}}.
 6. Keep orders concise — one order per unit maximum.
-7. Do not order destroyed or unavailable units.
-8. Consider terrain when choosing movement routes and positions.
+7. Do not order destroyed or unavailable units (BROKEN, COMMS_OUT).
+8. Consider terrain when choosing movement routes and positions — seek cover, use concealment.
 9. Use elevation advantage when possible (higher ground for defense/observation).
 10. Conserve ammunition — don't attack without clear purpose.
+11. Apply fire and maneuver: designate base of fire and maneuver elements.
+12. Maintain reconnaissance forward and on flanks — do NOT advance blind.
+13. Recon/sniper/OP units should observe, not attack — keep them concealed.
+14. Artillery should fire in support of attacking units, not independently.
+15. Coordinate attacks: multiple units attacking the same objective simultaneously.
+16. Protect your flanks — never leave a flank exposed during advance.
 
 Example response:
 {{"orders": [
-  {{"unit_id": "abc-123", "order_type": "move", "target_lat": 49.05, "target_lon": 4.50, "speed": "slow", "reasoning": "Advance to high ground for better observation"}},
-  {{"unit_id": "def-456", "order_type": "attack", "target_lat": 49.06, "target_lon": 4.51, "speed": "fast", "engagement_rules": "fire_at_will", "reasoning": "Engage detected enemy infantry"}}
+  {{"unit_id": "abc-123", "order_type": "move", "target_lat": 49.05, "target_lon": 4.50, "speed": "slow", "reasoning": "Advance to high ground for observation advantage (+10% detection per 50m). Forest terrain provides concealment (0.4 vis)."}},
+  {{"unit_id": "def-456", "order_type": "attack", "target_lat": 49.06, "target_lon": 4.51, "speed": "fast", "engagement_rules": "fire_at_will", "reasoning": "Flanking maneuver: main body fixes enemy from front while this unit strikes the exposed eastern flank. 3:1 local superiority achieved."}},
+  {{"unit_id": "ghi-789", "order_type": "fire", "target_lat": 49.06, "target_lon": 4.51, "speed": "slow", "reasoning": "Artillery suppression of enemy position before assault. Preparatory fires to suppress defenders and reduce their combat effectiveness."}}
 ]}}"""
 
     # ── User Message (current state) ──────────────────────
@@ -161,7 +179,15 @@ Example response:
     user_message = (
         f"Current turn: {tick}\n\n"
         f"{units_text}\n{contacts_text}\n{situation_text}\n"
-        f"Based on your mission and doctrine, issue orders for your units. "
+        f"TACTICAL ANALYSIS REQUIRED:\n"
+        f"Before issuing orders, analyze:\n"
+        f"1. MISSION: What is your objective? Are you achieving it?\n"
+        f"2. ENEMY: Where are contacts? Strength? Activity? Direction of movement?\n"
+        f"3. TERRAIN: What terrain advantages/disadvantages affect your units? Elevation?\n"
+        f"4. TROOPS: What is your combat power? Ammo? Morale? Idle units that should be tasked?\n"
+        f"5. FIRE SUPPORT: Are artillery/mortars positioned to support? Should they fire?\n"
+        f"6. SECURITY: Are flanks protected? Is recon positioned forward?\n\n"
+        f"Apply fire and maneuver principles. Coordinate multiple units toward objectives.\n"
         f"Respond with a JSON object containing an 'orders' array."
     )
 
