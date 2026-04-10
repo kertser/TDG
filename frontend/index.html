@@ -513,6 +513,19 @@
                     <button id="admin-db-stats" class="admin-btn" title="Show database table row counts">📊 DB Stats</button>
                     <div id="admin-db-info" class="admin-info"></div>
                 </div>
+
+                <div class="admin-section">
+                    <h4>Debug Log</h4>
+                    <div style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
+                        <button id="admin-debug-log-toggle" class="admin-btn" title="Toggle debug logging to file">📝 Debug Log OFF</button>
+                        <button id="admin-debug-log-view" class="admin-btn" title="View debug log contents" style="display:none;">📄 View Log</button>
+                        <button id="admin-debug-log-clear" class="admin-btn admin-btn-danger" title="Clear debug log file" style="display:none;padding:2px 8px;font-size:10px;">🗑 Clear</button>
+                    </div>
+                    <div id="admin-debug-log-status" class="admin-info" style="font-size:10px;"></div>
+                    <div id="admin-debug-log-viewer" style="display:none;margin-top:4px;">
+                        <textarea id="admin-debug-log-contents" readonly style="width:100%;height:200px;background:#0a0a0a;color:#00ff88;font-family:monospace;font-size:10px;border:1px solid #333;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto;"></textarea>
+                    </div>
+                </div>
             </div>
 
             <!-- ═══ USERS SUB-TAB ═══════════════════════════ -->

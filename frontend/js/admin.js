@@ -118,6 +118,10 @@ const KAdmin = (() => {
         _bind('admin-load-dashboard', 'click', _loadUnitDashboard);
         _bind('admin-load-orders', 'click', _loadAllOrders);
         _bind('admin-db-stats', 'click', _loadDbStats);
+        _bind('admin-debug-log-toggle', 'click', _toggleDebugLog);
+        _bind('admin-debug-log-view', 'click', _viewDebugLog);
+        _bind('admin-debug-log-clear', 'click', _clearDebugLog);
+        _checkDebugLogStatus();  // check initial status
 
         // ── Users sub-tab ───────────────────────────
         _bind('admin-load-users', 'click', _loadUsers);
@@ -2460,6 +2464,90 @@ const KAdmin = (() => {
             }
         } catch (err) {
             _showInfo('admin-db-info', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    // ══════════════════════════════════════════════════
+    // ── Debug Log Management ────────────────────────
+    // ══════════════════════════════════════════════════
+
+    let _debugLogEnabled = false;
+
+    async function _checkDebugLogStatus() {
+        try {
+            const resp = await fetch('/api/admin/debug-log/status');
+            if (resp.ok) {
+                const data = await resp.json();
+                _debugLogEnabled = data.enabled;
+                _updateDebugLogUI();
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    function _updateDebugLogUI() {
+        const btn = document.getElementById('admin-debug-log-toggle');
+        const viewBtn = document.getElementById('admin-debug-log-view');
+        const clearBtn = document.getElementById('admin-debug-log-clear');
+        const status = document.getElementById('admin-debug-log-status');
+        if (btn) {
+            btn.textContent = _debugLogEnabled ? '📝 Debug Log ON' : '📝 Debug Log OFF';
+            btn.style.background = _debugLogEnabled ? '#1b5e20' : '';
+            btn.style.color = _debugLogEnabled ? '#a5d6a7' : '';
+        }
+        if (viewBtn) viewBtn.style.display = _debugLogEnabled ? '' : 'none';
+        if (clearBtn) clearBtn.style.display = _debugLogEnabled ? '' : 'none';
+        if (status) status.textContent = _debugLogEnabled ? 'Recording tick data to debug_log.txt' : '';
+    }
+
+    async function _toggleDebugLog() {
+        try {
+            const endpoint = _debugLogEnabled ? '/api/admin/debug-log/disable' : '/api/admin/debug-log/enable';
+            const resp = await fetch(endpoint, { method: 'POST' });
+            if (resp.ok) {
+                const data = await resp.json();
+                _debugLogEnabled = !!data.enabled;
+                _updateDebugLogUI();
+                if (_debugLogEnabled && data.path) {
+                    _showInfo('admin-debug-log-status', `Recording → ${data.path}`);
+                }
+            }
+        } catch (err) {
+            _showInfo('admin-debug-log-status', `✗ ${err.message}`, 'error');
+        }
+    }
+
+    async function _viewDebugLog() {
+        const viewer = document.getElementById('admin-debug-log-viewer');
+        const contents = document.getElementById('admin-debug-log-contents');
+        if (!viewer || !contents) return;
+        // Toggle visibility
+        if (viewer.style.display !== 'none') {
+            viewer.style.display = 'none';
+            return;
+        }
+        try {
+            const resp = await fetch('/api/admin/debug-log/contents?tail=500');
+            if (resp.ok) {
+                const data = await resp.json();
+                contents.value = data.contents || '(empty)';
+                viewer.style.display = 'block';
+                // Auto-scroll to bottom
+                contents.scrollTop = contents.scrollHeight;
+            }
+        } catch (err) {
+            contents.value = `Error: ${err.message}`;
+            viewer.style.display = 'block';
+        }
+    }
+
+    async function _clearDebugLog() {
+        try {
+            await fetch('/api/admin/debug-log/clear', { method: 'POST' });
+            _showInfo('admin-debug-log-status', 'Log cleared');
+            const contents = document.getElementById('admin-debug-log-contents');
+            if (contents) contents.value = '(cleared)';
+        } catch (err) {
+            _showInfo('admin-debug-log-status', `✗ ${err.message}`, 'error');
         }
     }
 

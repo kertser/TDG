@@ -232,6 +232,9 @@ def process_combat(
 
     Returns list of event dicts.
     """
+    from backend.services.debug_logger import dlog, is_debug_logging_enabled
+    _debug = is_debug_logging_enabled()
+
     events = []
     # Track which units are under fire this tick (for suppression recovery)
     under_fire: set[uuid.UUID] = set()
@@ -264,6 +267,9 @@ def process_combat(
         if atk_pos is None:
             continue
 
+        if _debug and task_type == "fire":
+            dlog(f"    [combat] {attacker.name} ({attacker.unit_type}) task=fire target_id={target_id} target_loc={target_location} is_arty={attacker.unit_type in ARTILLERY_TYPES}")
+
         # ── Area fire: indirect fire at a location (no specific target unit) ──
         # Artillery/mortar with "fire" task and target_location but no target_unit_id
         if task_type == "fire" and target_location and not target_id:
@@ -287,6 +293,8 @@ def process_combat(
                 if str(u.id) == str(target_id) and not u.is_destroyed:
                     target = u
                     break
+            if _debug and target is None:
+                dlog(f"    [combat] {attacker.name}: target_unit_id={target_id} NOT FOUND in all_units (destroyed or missing)")
 
         # ── Auto-targeting: find nearest DETECTED enemy in range if no specific target ──
         # Only targets enemies that the attacker's side has contacts for (fog-of-war safe).
@@ -346,6 +354,8 @@ def process_combat(
 
         if dist > weapon_range:
             # Out of range — set target location so movement engine advances unit
+            if _debug:
+                dlog(f"    [combat] {attacker.name}: target {target.name} OUT OF RANGE dist={dist:.0f}m > range={weapon_range}m")
             if not task.get("target_location"):
                 task = dict(task)  # new dict for SQLAlchemy JSONB change detection
                 task["target_location"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
@@ -553,10 +563,15 @@ def _process_area_fire(
 
     Returns list of event dicts.
     """
+    from backend.services.debug_logger import dlog, is_debug_logging_enabled
+    _debug = is_debug_logging_enabled()
+
     events = []
     target_lat = target_location.get("lat")
     target_lon = target_location.get("lon")
     if target_lat is None or target_lon is None:
+        if _debug:
+            dlog(f"    [area_fire] {attacker.name}: NO target lat/lon in target_location={target_location}")
         return events
 
     # Check range
@@ -568,6 +583,8 @@ def _process_area_fire(
 
     if dist_to_target > weapon_range:
         # Out of range — generate event but don't fire
+        if _debug:
+            dlog(f"    [area_fire] {attacker.name}: OUT OF RANGE dist={dist_to_target:.0f}m > range={weapon_range}m")
         events.append({
             "event_type": "fire_out_of_range",
             "actor_unit_id": attacker.id,
@@ -626,6 +643,8 @@ def _process_area_fire(
 
     # Find enemy units within blast radius of the target location
     hit_any = False
+    if _debug:
+        dlog(f"    [area_fire] {attacker.name}: FIRING at ({target_lat:.4f},{target_lon:.4f}) dist={dist_to_target:.0f}m FE={fire_effectiveness:.1f} ammo={ammo:.2f}")
     for target in all_units:
         if target.is_destroyed:
             continue

@@ -151,7 +151,13 @@ def process_detection(
     If los_service is provided, uses LOS checks to verify that terrain
     doesn't block the line of sight between observer and target.
     """
+    from backend.services.debug_logger import dlog, is_debug_logging_enabled
+    _debug = is_debug_logging_enabled()
+
     new_contacts = []
+
+    if _debug:
+        dlog(f"    [detection] blue_units={len(blue_units)} red_units={len(red_units)} weather_vis={weather_visibility_mod:.2f} night={night_mod:.2f}")
 
     # Run both directions
     for observers, targets, obs_side in [
@@ -322,6 +328,10 @@ def process_detection(
                         "source": "recon" if is_recon else "visual",
                     })
 
+    if _debug and new_contacts:
+        dlog(f"    [detection] Total new_contacts: {len(new_contacts)}")
+        for nc in new_contacts[:5]:
+            dlog(f"      contact: {nc['observing_side']} observer={nc['observing_unit_id']} → target_type={nc.get('estimated_type')}")
     return new_contacts
 
 

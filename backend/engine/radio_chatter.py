@@ -587,7 +587,7 @@ def generate_contact_radio_messages(
     reported_units = set()
 
     for evt in tick_events:
-        if evt.get("event_type") != "contact_new":
+        if evt.get("event_type") not in ("contact_new", "contact_refreshed"):
             continue
 
         payload = evt.get("payload", {})

@@ -18,6 +18,8 @@ AGENTS.MD Section 8.1 tick sequence:
 
 from __future__ import annotations
 
+import logging
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -61,6 +63,8 @@ from backend.engine.events import create_event
 from backend.engine.engineering import process_engineering
 from backend.engine.structures import process_structures
 from backend.engine.resupply import process_resupply
+
+logger = logging.getLogger(__name__)
 
 
 async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
@@ -160,25 +164,45 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     game_time = session.current_time or datetime.now(timezone.utc)
 
     all_events: list[dict] = []
+    _tick_start = time.monotonic()
+
+    # ── Initialize debug logger (writes to file if enabled) ──
+    from backend.services.debug_logger import dlog, is_debug_logging_enabled
+    _debug = is_debug_logging_enabled()
+    if _debug:
+        dlog(f"═══ TICK {tick} START ═══ session={session_id}")
 
     # ── 0.5. Run Red AI agents (if applicable) ────────────────
     from backend.services.red_ai.runner import run_red_agents
+    _t0 = time.monotonic()
     try:
         red_events = await run_red_agents(session_id, tick, db)
         all_events.extend(red_events)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("Red AI runner failed: %s", e)
+        logger.warning("Red AI runner failed: %s", e)
+    _t_red_ai = time.monotonic() - _t0
+    if _t_red_ai > 0.5:
+        logger.warning("TICK %d: Red AI took %.1fs", tick, _t_red_ai)
+    if _debug:
+        dlog(f"  [0.5] Red AI: {_t_red_ai:.2f}s, events={len(red_events) if 'red_events' in dir() else '?'}")
 
     # ── 1. Process pending orders → assign tasks ─────────────────
+    _t0 = time.monotonic()
     order_events = await _process_orders(session_id, tick, db)
     all_events.extend(order_events)
+    _t_orders = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [1] Process orders: {_t_orders:.2f}s, events={len(order_events)}")
 
     # ── Load all units for this session ──────────────────────────
+    _t0 = time.monotonic()
     result = await db.execute(
         select(Unit).where(Unit.session_id == session_id)
     )
     all_units = list(result.scalars().all())
+    _t_load = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [load] Units loaded: {len(all_units)} in {_t_load:.2f}s")
 
     blue_units = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
@@ -320,8 +344,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     combined_visibility_mod = weather_mod * night_mod
 
     # ── 2. Execute movement (with obstacle effects) ──────────
+    _t0 = time.monotonic()
     movement_events = process_movement(all_units, tick_duration, terrain, map_objects_list, weather_movement_mod=weather_movement_mod)
     all_events.extend(movement_events)
+    _t_move = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [2] Movement: {_t_move:.2f}s, events={len(movement_events)}")
 
     # ── 2a. Mark completed orders from movement arrivals ──────
     await _complete_orders_from_events(session_id, movement_events, db)
@@ -343,16 +371,24 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     blue_units = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
 
+    _t0 = time.monotonic()
     new_contacts_data = process_detection(
         blue_units, red_units, tick, terrain, combined_visibility_mod,
         los_service=los_service,
         map_objects=map_objects_list,
         night_mod=night_mod,
     )
+    _t_detect = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [3] Detection: {_t_detect:.2f}s, new_contacts={len(new_contacts_data)}")
 
     # Upsert contacts
+    _t0 = time.monotonic()
     contact_events = await _upsert_contacts(session_id, tick, game_time, new_contacts_data, db)
     all_events.extend(contact_events)
+    _t_upsert = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [3b] Upsert contacts: {_t_upsert:.2f}s, events={len(contact_events)}")
 
     # ── 3b. Map object discovery (LOS-based) ──────────────────
     discovery_events = _process_object_discovery(
@@ -446,9 +482,13 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     all_events.extend(arty_events)
 
     # ── 5. Execute combat ────────────────────────────────────────
+    _t0 = time.monotonic()
     combat_events, under_fire = process_combat(all_units, terrain, map_objects_list,
                                                 contacts=existing_contacts)
     all_events.extend(combat_events)
+    _t_combat = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [5] Combat: {_t_combat:.2f}s, events={len(combat_events)}, under_fire={len(under_fire)}")
 
     # ── 5a. Mark completed orders from combat (fire salvos expended) ──
     await _complete_orders_from_events(session_id, combat_events, db)
@@ -512,6 +552,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         db.add(event_row)
 
     # ── 10b. Generate reports (SPOTREPs, SHELREPs, CASREPs, SITREPs, INTSUMs) ──
+    _t0 = time.monotonic()
     from backend.services.report_generator import generate_tick_reports
 
     # Determine language from scenario environment
@@ -575,11 +616,15 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         })
 
     # ── 10c. Generate radio chatter (idle requests + peer support) ──
+    _t_reports = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [10b] Reports: {_t_reports:.2f}s, count={len(tick_reports)}")
     from backend.engine.radio_chatter import (
         generate_idle_radio_messages,
         generate_peer_support_requests,
         generate_casualty_radio_messages,
         generate_contact_radio_messages,
+        generate_combat_coordination_messages,
     )
     from backend.models.chat_message import ChatMessage
 
@@ -599,8 +644,19 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         all_units, all_events, tick,
         grid_service=grid_service, language=_lang,
     )
+    combat_coord_msgs = generate_combat_coordination_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang,
+    )
 
-    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs
+    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs
+    if _debug:
+        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)}")
+        # Log contact events for debugging detection→radio pipeline
+        contact_new_evts = [e for e in all_events if e.get("event_type") in ("contact_new", "contact_refreshed")]
+        dlog(f"  [10c] Contact events in all_events: {len(contact_new_evts)}")
+        for ce in contact_new_evts[:5]:
+            dlog(f"         contact_evt: type={ce.get('event_type')} actor={ce.get('actor_unit_id')} payload_obs={ce.get('payload',{}).get('observing_unit_id')}")
     radio_broadcast = []
     for msg in radio_messages:
         # Ensure sender_name has the 📻 prefix for unit responses
@@ -657,6 +713,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         victory_blue_cond = scenario.objectives.get("victory_blue")
         victory_red_cond = scenario.objectives.get("victory_red")
         if victory_blue_cond or victory_red_cond:
+            _t0_vc = time.monotonic()
             victory_result = await _evaluate_victory_conditions(
                 session=session,
                 scenario=scenario,
@@ -668,6 +725,11 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 victory_blue_cond=victory_blue_cond,
                 victory_red_cond=victory_red_cond,
             )
+            _t_vc = time.monotonic() - _t0_vc
+            if _t_vc > 0.5:
+                logger.warning("TICK %d: Victory eval took %.1fs", session.tick, _t_vc)
+            if _debug:
+                dlog(f"  [11c] Victory eval: {_t_vc:.2f}s, result={'winner=' + str(victory_result.get('winner')) if victory_result else 'none'}")
             if victory_result and victory_result.get("winner"):
                 if not game_finished:
                     session.status = SessionStatus.finished
@@ -683,6 +745,14 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 })
 
     await db.flush()
+
+    _tick_total = time.monotonic() - _tick_start
+    if _tick_total > 2.0:
+        logger.warning("TICK %d total: %.1fs (slow!)", session.tick, _tick_total)
+    else:
+        logger.info("TICK %d total: %.1fs", session.tick, _tick_total)
+    if _debug:
+        dlog(f"═══ TICK {session.tick - 1} END ═══ total={_tick_total:.2f}s events={len(all_events)} radio={len(radio_messages)} reports={len(tick_reports)}")
 
     return {
         "tick": session.tick,
@@ -965,31 +1035,37 @@ async def _upsert_contacts(
 ) -> list[dict]:
     """
     Create or update contacts from detection results.
+    Batch-loads existing contacts once for efficiency.
     """
     events = []
+    if not new_contacts_data:
+        return events
+
+    # Batch-load ALL existing contacts for this session once (not per-detection)
+    result = await db.execute(
+        select(Contact).where(Contact.session_id == session_id)
+    )
+    all_existing = list(result.scalars().all())
+
+    # Index by (observing_side, target_unit_id) for O(1) lookup
+    existing_by_target: dict[tuple[str, str], Contact] = {}
+    for contact in all_existing:
+        obs_side = contact.observing_side.value if hasattr(contact.observing_side, 'value') else str(contact.observing_side)
+        if contact.target_unit_id:
+            key = (obs_side, str(contact.target_unit_id))
+            existing_by_target[key] = contact
 
     for cd in new_contacts_data:
-        # Check if contact for this specific target already exists
         target_uid = cd.get("target_unit_id")
-        result = await db.execute(
-            select(Contact).where(
-                Contact.session_id == session_id,
-                Contact.observing_side == cd["observing_side"],
-            )
-        )
-        existing = result.scalars().all()
+        obs_side = cd["observing_side"]
 
-        # Find existing contact for the SAME target unit
+        # Fast lookup for existing contact matching this target
         updated = False
-        for contact in existing:
-            # Match by target_unit_id for precise contact tracking
-            # (Previously matched only by source, causing different targets
-            # to incorrectly merge into one contact)
-            contact_target = None
-            if hasattr(contact, 'target_unit_id'):
-                contact_target = contact.target_unit_id
-            if target_uid and contact_target and str(contact_target) == str(target_uid):
-                # Update existing contact for this target
+        if target_uid:
+            key = (obs_side, str(target_uid))
+            contact = existing_by_target.get(key)
+            if contact:
+                was_stale = contact.is_stale
                 contact.location_estimate = from_shape(
                     Point(cd["lon"], cd["lat"]), srid=4326
                 )
@@ -1001,7 +1077,20 @@ async def _upsert_contacts(
                 contact.is_stale = False
                 contact.source = cd.get("source", "visual")
                 updated = True
-                break
+                if was_stale:
+                    events.append({
+                        "event_type": "contact_refreshed",
+                        "actor_unit_id": cd.get("observing_unit_id"),
+                        "text_summary": f"Contact re-acquired: {cd.get('estimated_type', 'unknown')}",
+                        "payload": {
+                            "observing_side": cd["observing_side"],
+                            "observing_unit_id": str(cd["observing_unit_id"]) if cd.get("observing_unit_id") else None,
+                            "estimated_type": cd.get("estimated_type"),
+                            "lat": cd["lat"],
+                            "lon": cd["lon"],
+                            "confidence": cd["confidence"],
+                        },
+                    })
 
         if not updated:
             # Create new contact
@@ -1022,6 +1111,10 @@ async def _upsert_contacts(
                 source=cd.get("source", "visual"),
             )
             db.add(contact)
+
+            # Add to index for deduplication within this batch
+            if target_uid:
+                existing_by_target[(obs_side, str(target_uid))] = contact
 
             events.append({
                 "event_type": "contact_new",
@@ -1250,8 +1343,8 @@ async def _evaluate_victory_conditions(
     import logging
     logger = logging.getLogger(__name__)
 
-    # Only evaluate every 5 ticks to save costs (and always on turn limit)
-    if tick % 5 != 0 and tick > 5:
+    # Only evaluate every 5 ticks, starting after tick 10 (let game develop first)
+    if tick < 10 or tick % 5 != 0:
         return None
 
     # Build game state summary for the AI referee

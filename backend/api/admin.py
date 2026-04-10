@@ -1573,3 +1573,48 @@ async def admin_save_session_to_scenario(session_id: uuid.UUID, db: DB, user: Cu
         "message": f"Scenario '{scenario.title}' updated with {len(blue_units)} blue + {len(red_units)} red units from current session.",
     }
 
+
+# ══════════════════════════════════════════════════════
+# ── Debug Logging ────────────────────────────────────
+# ══════════════════════════════════════════════════════
+
+@router.post("/debug-log/enable")
+async def enable_debug_log():
+    """Enable debug logging to file. Returns file path."""
+    from backend.services.debug_logger import enable_debug_logging
+    path = enable_debug_logging()
+    return {"enabled": True, "path": path}
+
+
+@router.post("/debug-log/disable")
+async def disable_debug_log():
+    """Disable debug logging."""
+    from backend.services.debug_logger import disable_debug_logging
+    disable_debug_logging()
+    return {"enabled": False}
+
+
+@router.get("/debug-log/status")
+async def debug_log_status():
+    """Get debug logging status."""
+    from backend.services.debug_logger import is_debug_logging_enabled, _log_file_path
+    return {
+        "enabled": is_debug_logging_enabled(),
+        "path": str(_log_file_path),
+    }
+
+
+@router.get("/debug-log/contents")
+async def get_debug_log(tail: int = 300):
+    """Get the last N lines of the debug log file."""
+    from backend.services.debug_logger import get_log_contents
+    return {"contents": get_log_contents(tail_lines=tail)}
+
+
+@router.post("/debug-log/clear")
+async def clear_debug_log():
+    """Clear the debug log file."""
+    from backend.services.debug_logger import clear_log
+    clear_log()
+    return {"cleared": True}
+

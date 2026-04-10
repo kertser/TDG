@@ -289,6 +289,8 @@ async def get_my_role(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
 @router.post("/{session_id}/start")
 async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
+    import time as _time
+    _t0 = _time.monotonic()
     result = await db.execute(
         select(Session).options(selectinload(Session.scenario)).where(Session.id == session_id)
     )
@@ -313,12 +315,19 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
     # Initialize units and grid from scenario (idempotent)
     from backend.services.session_service import initialize_session_from_scenario
+    _t_init = _time.monotonic()
     await initialize_session_from_scenario(session, session.scenario, db)
+    _t_init_done = _time.monotonic() - _t_init
 
     session.status = SessionStatus.running
     if session.current_time is None:
         session.current_time = _get_scenario_start_time(session.scenario) or datetime.now(timezone.utc)
     await db.flush()
+
+    import logging
+    _logger = logging.getLogger(__name__)
+    _logger.info("Session start took %.2fs (init=%.2fs, total=%.2fs)",
+                 _time.monotonic() - _t0, _t_init_done, _time.monotonic() - _t0)
     ct = session.current_time
     ct_iso = ct.isoformat() if ct else None
     if ct_iso and not ct_iso.endswith('Z') and '+' not in ct_iso:
@@ -371,13 +380,21 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
     # Commit tick changes BEFORE broadcasting / returning response.
     # This ensures subsequent queries (e.g. pending-orders-count) see
     # the updated order statuses immediately.
+    import time as _time
+    _t_bc_start = _time.monotonic()
     await db.commit()
+
+    from backend.services.debug_logger import dlog, is_debug_logging_enabled
+    _debug = is_debug_logging_enabled()
+    if _debug:
+        dlog(f"  [post-tick] DB commit: {_time.monotonic() - _t_bc_start:.2f}s")
 
     # Broadcast state update via WebSocket
     from backend.services.ws_manager import ws_manager
     from backend.services.visibility_service import get_visible_units, get_visible_contacts
 
     # Get visible state for each side and broadcast
+    _t0_vis = _time.monotonic()
     for side in ("blue", "red"):
         try:
             units = await get_visible_units(session_id, side, db)
@@ -399,6 +416,8 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
             pass  # Don't fail tick on broadcast error
 
     # Broadcast newly discovered map objects to the relevant side
+    if _debug:
+        dlog(f"  [post-tick] Visibility broadcast: {_time.monotonic() - _t0_vis:.2f}s")
     # Check events table for object_discovered events from this tick
     from backend.models.event import Event
     from backend.models.map_object import MapObject
@@ -502,6 +521,10 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
     # Broadcast radio chatter messages generated during tick
     radio_messages = result.get("radio_messages", [])
     game_time_str = result.get("game_time")
+    if _debug and radio_messages:
+        dlog(f"  [post-tick] Broadcasting {len(radio_messages)} radio messages")
+        for msg in radio_messages[:5]:
+            dlog(f"    radio: side={msg.get('side')} type={msg.get('response_type')} sender={msg.get('sender_name','?')[:30]}")
     for msg in radio_messages:
         msg_side = msg.get("side", "blue")
         msg["game_time"] = game_time_str
@@ -523,6 +546,9 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
     # Strip internal data before returning
     result.pop("_raw_events", None)
+
+    if _debug:
+        dlog(f"  [post-tick] Total broadcast: {_time.monotonic() - _t_bc_start:.2f}s")
 
     return result
 
