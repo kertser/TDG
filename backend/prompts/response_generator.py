@@ -14,15 +14,15 @@ import random
 
 TEMPLATES_RU = {
     "ack": [
-        "Здесь {unit}. Так точно, принял. Выполняю. {status_text}",
+        "Здесь {unit}. Так точно, принял. {status_text}",
         "Здесь {unit}, приём. Понял, выполняю. {status_text}",
-        "{unit}, приказ принят. Начинаю выполнение. {status_text}",
+        "{unit}, приказ принят. {status_text}",
         "Здесь {unit}. Вас понял, приступаю. {status_text}",
     ],
     "wilco": [
-        "Здесь {unit}. Так точно, выдвигаемся. {status_text}",
+        "Здесь {unit}. Так точно, выполняем. {status_text}",
         "{unit} принял. Начали движение. {status_text}",
-        "Здесь {unit}, выполняем. {status_text}",
+        "Здесь {unit}. Приказ принят, выдвигаемся. {status_text}",
     ],
     "wilco_fire": [
         "Здесь {unit}. Принял, готовлю огонь. {status_text}",
@@ -81,9 +81,9 @@ TEMPLATES_EN = {
         "This is {unit}. Copy that, commencing. {status_text}",
     ],
     "wilco": [
-        "This is {unit}. Roger, moving out. {status_text}",
+        "This is {unit}. Roger, wilco. {status_text}",
         "{unit}, copy. Beginning movement. {status_text}",
-        "This is {unit}. Wilco, executing now. {status_text}",
+        "This is {unit}. Order received, executing now. {status_text}",
     ],
     "wilco_fire": [
         "This is {unit}. Roger, preparing to fire. {status_text}",

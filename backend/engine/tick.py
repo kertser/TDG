@@ -28,6 +28,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.session import Session, SessionStatus
 from backend.models.scenario import Scenario
+
+
+def _iso_utc(dt: datetime | None) -> str | None:
+    """Return ISO string with Z suffix for naive datetimes (assumed UTC)."""
+    if dt is None:
+        return None
+    s = dt.isoformat()
+    if not s.endswith('Z') and '+' not in s:
+        s += 'Z'
+    return s
 from backend.models.unit import Unit
 from backend.models.order import Order, OrderStatus
 from backend.models.contact import Contact
@@ -430,7 +440,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     all_events.extend(arty_events)
 
     # ── 5. Execute combat ────────────────────────────────────────
-    combat_events, under_fire = process_combat(all_units, terrain, map_objects_list)
+    combat_events, under_fire = process_combat(all_units, terrain, map_objects_list,
+                                                contacts=existing_contacts)
     all_events.extend(combat_events)
 
     # ── 5a. Mark completed orders from combat (fire salvos expended) ──
@@ -601,7 +612,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
             "side": msg["side"],
             "text": msg["text"],
             "recipient": "all",
-            "game_time": game_time.isoformat() if game_time else None,
+            "game_time": _iso_utc(game_time),
             "is_unit_response": msg.get("is_unit_response", True),
             "response_type": msg.get("response_type", ""),
         })
@@ -665,7 +676,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     return {
         "tick": session.tick,
-        "game_time": session.current_time.isoformat() if session.current_time else None,
+        "game_time": _iso_utc(session.current_time),
         "events_count": len(all_events),
         "units_alive": sum(1 for u in all_units if not u.is_destroyed),
         "radio_messages": radio_broadcast,

@@ -232,9 +232,23 @@ const KMap = (() => {
     function setGameTime(tick, gameTimeISO) {
         _currentTick = tick;
         if (gameTimeISO) {
-            _currentGameTime = new Date(gameTimeISO);
+            // Ensure timezone — treat naive datetimes as UTC
+            let iso = String(gameTimeISO);
+            if (!iso.endsWith('Z') && !iso.includes('+') && !/\d{2}:\d{2}$/.test(iso.slice(-6))) {
+                iso += 'Z';
+            }
+            _currentGameTime = new Date(iso);
         }
         _updateClockDisplay();
+    }
+
+    /** Parse game time as UTC and return {date, h, m, s} without timezone conversion. */
+    function _parseGameTimeUTC(dt) {
+        const h = String(dt.getUTCHours()).padStart(2, '0');
+        const m = String(dt.getUTCMinutes()).padStart(2, '0');
+        const s = String(dt.getUTCSeconds()).padStart(2, '0');
+        const dateStr = dt.toISOString().split('T')[0];
+        return { dateStr, h, m, s };
     }
 
     function _updateClockDisplay() {
@@ -244,11 +258,9 @@ const KMap = (() => {
         }
         if (_clockEl.time) {
             if (_currentGameTime) {
-                const h = String(_currentGameTime.getUTCHours()).padStart(2, '0');
-                const m = String(_currentGameTime.getUTCMinutes()).padStart(2, '0');
-                const dateStr = _currentGameTime.toISOString().split('T')[0];
+                const { dateStr, h, m } = _parseGameTimeUTC(_currentGameTime);
                 _clockEl.time.textContent = `${dateStr} ${h}:${m}`;
-                // Store ISO string for other modules to access
+                // Store ISO string (always UTC) for other modules to access
                 _clockEl.time.dataset.isoTime = _currentGameTime.toISOString();
             } else {
                 _clockEl.time.textContent = '--:--';

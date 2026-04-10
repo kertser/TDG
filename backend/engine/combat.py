@@ -221,15 +221,28 @@ def process_combat(
     all_units: list,
     terrain: TerrainService,
     map_objects: list | None = None,
+    contacts: list | None = None,
 ) -> tuple[list[dict], set[uuid.UUID]]:
     """
     Resolve combat for all units with attack/engage tasks.
+
+    Args:
+        contacts: List of Contact ORM objects. Used to restrict auto-targeting
+                  to only enemies that have been detected (fog-of-war compliant).
 
     Returns list of event dicts.
     """
     events = []
     # Track which units are under fire this tick (for suppression recovery)
     under_fire: set[uuid.UUID] = set()
+
+    # Build set of detected enemy unit IDs per side (for FOW-safe auto-targeting)
+    _detected_by_side: dict[str, set[str]] = {"blue": set(), "red": set()}
+    if contacts:
+        for c in contacts:
+            if c.target_unit_id and not c.is_stale:
+                obs_side = c.observing_side.value if hasattr(c.observing_side, 'value') else str(c.observing_side)
+                _detected_by_side.setdefault(obs_side, set()).add(str(c.target_unit_id))
 
     for attacker in all_units:
         if attacker.is_destroyed:
@@ -275,9 +288,11 @@ def process_combat(
                     target = u
                     break
 
-        # ── Auto-targeting: find nearest enemy in range if no specific target ──
+        # ── Auto-targeting: find nearest DETECTED enemy in range if no specific target ──
+        # Only targets enemies that the attacker's side has contacts for (fog-of-war safe).
         if target is None:
             attacker_side = attacker.side.value if hasattr(attacker.side, 'value') else str(attacker.side)
+            detected_enemies = _detected_by_side.get(attacker_side, set())
             best_dist = float('inf')
             best_target = None
             weapon_range_search = WEAPON_RANGE.get(attacker.unit_type, 800)
@@ -293,6 +308,9 @@ def process_combat(
                 u_side = u.side.value if hasattr(u.side, 'value') else str(u.side)
                 if u_side == attacker_side:
                     continue  # same side
+                # FOW CHECK: only auto-target enemies that have been detected
+                if str(u.id) not in detected_enemies:
+                    continue
                 u_pos = _get_position(u)
                 if u_pos is None:
                     continue

@@ -298,10 +298,14 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
     # Already running — return current state (idempotent)
     if session.status == SessionStatus.running:
+        ct = session.current_time
+        ct_iso = ct.isoformat() if ct else None
+        if ct_iso and not ct_iso.endswith('Z') and '+' not in ct_iso:
+            ct_iso += 'Z'
         return {
             "status": session.status.value,
             "tick": session.tick,
-            "current_time": session.current_time.isoformat() if session.current_time else None,
+            "current_time": ct_iso,
         }
 
     if session.status == SessionStatus.finished:
@@ -315,10 +319,14 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     if session.current_time is None:
         session.current_time = _get_scenario_start_time(session.scenario) or datetime.now(timezone.utc)
     await db.flush()
+    ct = session.current_time
+    ct_iso = ct.isoformat() if ct else None
+    if ct_iso and not ct_iso.endswith('Z') and '+' not in ct_iso:
+        ct_iso += 'Z'
     return {
         "status": session.status.value,
         "tick": session.tick,
-        "current_time": session.current_time.isoformat() if session.current_time else None,
+        "current_time": ct_iso,
     }
 
 

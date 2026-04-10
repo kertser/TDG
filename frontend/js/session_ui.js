@@ -98,6 +98,8 @@ const KSessionUI = (() => {
                     }
                     const data = await resp.json();
                     KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
+                    // Update game clock from start response
+                    KMap.setGameTime(data.tick || 0, data.current_time || null);
                     startBtn.style.display = 'none';
                     if (turnBtn && _canAdvanceTurn) turnBtn.style.display = 'inline-block';
 
@@ -132,6 +134,9 @@ const KSessionUI = (() => {
                         try { await KAdmin.refreshMapUnits(); } catch(e) {}
                     }
                     await KContacts.load(currentSessionId, currentToken);
+
+                    // Ensure WebSocket is connected (reconnect if needed)
+                    try { KWebSocket.connect(currentSessionId, currentToken); } catch(e) {}
 
                     // Refresh chain of command tree after start
                     try { KAdmin.loadPublicCoC(); } catch(e) {}

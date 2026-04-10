@@ -2196,6 +2196,24 @@ const KUnits = (() => {
                 ).join(' ');
             }
         }
+
+        // When units are selected, open the command panel to the Orders tab
+        if (ids.length > 0) {
+            try {
+                const panel = document.getElementById('command-panel');
+                if (panel) {
+                    // Switch to Orders tab
+                    document.querySelectorAll('.cmd-tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.cmd-tab-panel').forEach(p => p.classList.remove('active'));
+                    const ordersTabBtn = document.querySelector('.cmd-tab-btn[data-cmd-tab="cmd-orders"]');
+                    const ordersTabPanel = document.getElementById('cmd-orders');
+                    if (ordersTabBtn) ordersTabBtn.classList.add('active');
+                    if (ordersTabPanel) ordersTabPanel.classList.add('active');
+                    // Expand the panel
+                    panel.classList.add('hovered');
+                }
+            } catch(e) { /* ignore */ }
+        }
     }
 
     /** Select all units the current user can command (same side, not observer). */

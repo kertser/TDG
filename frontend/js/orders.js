@@ -815,8 +815,20 @@ const KOrders = (() => {
             const isOrder = msg.is_order || false;
             const cls = isOrder ? 'msg-order' : isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
             // Prefer game_time (scenario time) over wall-clock timestamp
+            // Always display in UTC 24h format to match the game clock (bottom-right overlay)
             const timeSource = msg.game_time || msg.timestamp;
-            const time = timeSource ? new Date(timeSource).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+            let time = '';
+            if (timeSource) {
+                let iso = String(timeSource);
+                if (!iso.endsWith('Z') && !iso.includes('+') && !/\d{2}:\d{2}$/.test(iso.slice(-6))) {
+                    iso += 'Z';
+                }
+                const d = new Date(iso);
+                const hh = String(d.getUTCHours()).padStart(2, '0');
+                const mm = String(d.getUTCMinutes()).padStart(2, '0');
+                const ss = String(d.getUTCSeconds()).padStart(2, '0');
+                time = `${hh}:${mm}:${ss}`;
+            }
             const recipientTag = msg.recipient !== 'all' && !msg.own ? ' (DM)' : '';
             return `<div class="radio-msg ${cls}">
                 <div class="radio-msg-sender">${_escHtml(msg.sender_name)}${recipientTag}</div>
@@ -878,14 +890,18 @@ const KOrders = (() => {
             });
             const targetStr = unitNames.length > 0 ? unitNames.join(', ') : 'All units';
 
-            // Format game time or wall-clock time
+            // Format game time or wall-clock time (always UTC 24h)
             let timeStr = '';
-            if (order.game_timestamp) {
-                const d = new Date(order.game_timestamp);
-                timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            } else if (order.issued_at) {
-                const d = new Date(order.issued_at);
-                timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const rawTime = order.game_timestamp || order.issued_at;
+            if (rawTime) {
+                let iso = String(rawTime);
+                if (!iso.endsWith('Z') && !iso.includes('+') && !/\d{2}:\d{2}$/.test(iso.slice(-6))) {
+                    iso += 'Z';
+                }
+                const d = new Date(iso);
+                const hh = String(d.getUTCHours()).padStart(2, '0');
+                const mm = String(d.getUTCMinutes()).padStart(2, '0');
+                timeStr = `${hh}:${mm}`;
             }
 
             const status = order.status || 'pending';

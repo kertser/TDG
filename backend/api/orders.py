@@ -132,7 +132,10 @@ async def _run_order_pipeline(
                     _game_t = _sess_r.scalar_one_or_none()
                     if _game_t:
                         _game_time_dt = _game_t
+                        # Ensure UTC timezone suffix for consistent frontend parsing
                         _game_time_str = _game_t.isoformat()
+                        if not _game_time_str.endswith('Z') and '+' not in _game_time_str:
+                            _game_time_str += 'Z'
                 except Exception:
                     pass
 
@@ -541,6 +544,12 @@ async def cancel_unit_orders(
         )
         db.add(chat)
 
+        _cancel_gt_str = None
+        if _cancel_game_time_dt:
+            _cancel_gt_str = _cancel_game_time_dt.isoformat()
+            if not _cancel_gt_str.endswith('Z') and '+' not in _cancel_gt_str:
+                _cancel_gt_str += 'Z'
+
         radio_broadcast.append({
             "sender_id": "",
             "sender_name": f"📻 {unit.name}",
@@ -548,7 +557,7 @@ async def cancel_unit_orders(
             "recipient": "all",
             "side": side_val,
             "timestamp": now.isoformat(),
-            "game_time": _cancel_game_time_dt.isoformat() if _cancel_game_time_dt else None,
+            "game_time": _cancel_gt_str,
             "is_unit_response": True,
             "response_type": "sitrep",
         })

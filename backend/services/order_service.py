@@ -478,6 +478,25 @@ class OrderService:
                     target_snail = (task or {}).get("target_snail", "")
                     target_loc = (task or {}).get("target_location") or {}
                     salvos = (task or {}).get("salvos_remaining", 3)
+
+                    # Resolve own_grid from unit position if missing
+                    if not own_grid and unit_dict.get("lat") and unit_dict.get("lon") and grid_service:
+                        try:
+                            own_grid = grid_service.point_to_snail(
+                                unit_dict["lat"], unit_dict["lon"], depth=2
+                            ) or ""
+                        except Exception:
+                            pass
+
+                    # Resolve target_snail from target_location if missing
+                    if not target_snail and target_loc.get("lat") is not None and grid_service:
+                        try:
+                            target_snail = grid_service.point_to_snail(
+                                target_loc["lat"], target_loc["lon"], depth=2
+                            ) or ""
+                        except Exception:
+                            pass
+
                     pos_ru = f"нахожусь квадрат {own_grid}. " if own_grid else ""
                     pos_en = f"at grid {own_grid}. " if own_grid else ""
                     if target_snail:
@@ -502,12 +521,69 @@ class OrderService:
                     # Brief situation for acknowledgments (position + key info)
                     order_type_val = parsed.order_type.value if parsed.order_type else ""
                     task_target_snail = (task or {}).get("target_snail", "")
-                    if order_type_val in ("move", "advance") and task_target_snail and own_grid:
-                        # Move order: show current position + destination grid
+                    task_target_loc = (task or {}).get("target_location")
+
+                    # Resolve target_snail from target_location if missing
+                    if not task_target_snail and task_target_loc and grid_service:
+                        try:
+                            t_lat = task_target_loc.get("lat")
+                            t_lon = task_target_loc.get("lon")
+                            if t_lat is not None and t_lon is not None:
+                                task_target_snail = grid_service.point_to_snail(t_lat, t_lon, depth=2) or ""
+                        except Exception:
+                            pass
+
+                    # Resolve own_grid from unit position if missing
+                    if not own_grid and unit_dict.get("lat") and unit_dict.get("lon") and grid_service:
+                        try:
+                            own_grid = grid_service.point_to_snail(
+                                unit_dict["lat"], unit_dict["lon"], depth=2
+                            ) or ""
+                        except Exception:
+                            pass
+
+                    # Include both current position AND destination for movement-related orders
+                    _movement_types = ("move", "advance", "attack", "engage", "support",
+                                       "flank", "assault", "withdraw", "retreat", "regroup")
+                    # Defense/observe/halt orders — report position only
+                    _static_types = ("defend", "observe", "halt", "regroup")
+
+                    if order_type_val in _movement_types and task_target_snail and own_grid:
                         if lang == "ru":
-                            status_text = f"нахожусь квадрат {own_grid}. Выдвигаемся в квадрат {task_target_snail}"
+                            status_text = f"нахожусь в квадрате {own_grid}. Выдвигаемся в квадрат {task_target_snail}"
                         else:
                             status_text = f"at grid {own_grid}. Moving to grid {task_target_snail}"
+                    elif order_type_val in _movement_types and task_target_snail:
+                        # Have destination but no own grid
+                        if lang == "ru":
+                            status_text = f"выдвигаемся в квадрат {task_target_snail}"
+                        else:
+                            status_text = f"moving to grid {task_target_snail}"
+                    elif order_type_val == "defend" and own_grid:
+                        if lang == "ru":
+                            status_text = f"нахожусь в квадрате {own_grid}. Занимаю оборону"
+                        else:
+                            status_text = f"at grid {own_grid}. Holding position"
+                    elif order_type_val == "observe" and own_grid:
+                        if lang == "ru":
+                            status_text = f"нахожусь в квадрате {own_grid}. Веду наблюдение"
+                        else:
+                            status_text = f"at grid {own_grid}. Observing"
+                    elif order_type_val == "halt" and own_grid:
+                        if lang == "ru":
+                            status_text = f"нахожусь в квадрате {own_grid}. Стоим"
+                        else:
+                            status_text = f"at grid {own_grid}. Holding"
+                    elif order_type_val == "disengage" and own_grid:
+                        if lang == "ru":
+                            status_text = f"нахожусь в квадрате {own_grid}. Разрываем контакт"
+                        else:
+                            status_text = f"at grid {own_grid}. Breaking contact"
+                    elif own_grid:
+                        if lang == "ru":
+                            status_text = f"нахожусь в квадрате {own_grid}"
+                        else:
+                            status_text = f"at grid {own_grid}"
                     else:
                         status_text = response_generator.generate_brief_sitrep(
                             unit_dict, lang, situation=situation,
