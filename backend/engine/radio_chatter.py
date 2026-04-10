@@ -1,9 +1,15 @@
 """
 Radio chatter engine — generates automatic unit radio messages.
 
-Two features:
+Features:
 1. Idle units request orders when their task completes
 2. Units under pressure request support from CoC peers (siblings)
+3. Post-combat casualty reports
+4. Contact detection reports
+5. Combat role coordination (suppress/flank/assault)
+6. Ceasefire coordination
+7. Artillery fire request/response exchanges
+8. Coordinated attack planning between infantry units
 """
 
 from __future__ import annotations
@@ -658,6 +664,301 @@ def generate_contact_radio_messages(
             "response_type": "contact_report",
         })
         reported_units.add(observer_id_str)
+
+    return messages
+
+
+# ── Templates for artillery fire request/response ──
+
+FIRE_REQUEST_RU = [
+    "Здесь {unit}! Обнаружен противник, район {contact_grid}. Прошу огневую поддержку! Координаты цели: {contact_grid}.",
+    "{unit}, приём! Наблюдаю противника, квадрат {contact_grid}, дистанция ~{dist}м. Запрашиваю огонь по цели!",
+    "Здесь {unit}. Контакт с противником в районе {contact_grid}. Передаю координаты для артиллерии. Прошу подавить!",
+]
+
+FIRE_REQUEST_EN = [
+    "This is {unit}! Enemy contact, grid {contact_grid}. Requesting fire support! Target coordinates: {contact_grid}.",
+    "{unit}, over! Observing enemy at grid {contact_grid}, ~{dist}m. Request fire mission on target!",
+    "This is {unit}. Contact at grid {contact_grid}. Passing coordinates for artillery. Request suppression!",
+]
+
+FIRE_RESPONSE_RU = [
+    "Здесь {arty}. Принял координаты {contact_grid}. Готовлю огонь, {salvos} залпов. Ожидайте.",
+    "{arty}, принял. Цель в квадрате {contact_grid}. Открываю огонь по готовности.",
+    "Здесь {arty}. Координаты приняты. Район {contact_grid}. Огонь!",
+]
+
+FIRE_RESPONSE_EN = [
+    "This is {arty}. Copy coordinates {contact_grid}. Preparing fire, {salvos} rounds. Stand by.",
+    "{arty}, roger. Target at grid {contact_grid}. Firing when ready.",
+    "This is {arty}. Coordinates received. Grid {contact_grid}. Shot, over!",
+]
+
+
+def generate_artillery_fire_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+) -> list[dict]:
+    """
+    Generate radio exchanges when artillery is auto-assigned to support a unit.
+
+    Triggered by 'artillery_support' events. The supported unit calls for fire,
+    and the artillery unit responds with an acknowledgment.
+
+    Returns list of chat message dicts.
+    """
+    messages = []
+
+    req_templates = FIRE_REQUEST_RU if language == "ru" else FIRE_REQUEST_EN
+    resp_templates = FIRE_RESPONSE_RU if language == "ru" else FIRE_RESPONSE_EN
+
+    units_by_id = {str(u.id): u for u in all_units}
+
+    for evt in tick_events:
+        if evt.get("event_type") != "artillery_support":
+            continue
+
+        payload = evt.get("payload", {})
+        arty_id = payload.get("artillery_id")
+        supported_id = payload.get("supported_unit_id")
+        target_lat = payload.get("target_lat")
+        target_lon = payload.get("target_lon")
+
+        arty_unit = units_by_id.get(arty_id) if arty_id else None
+        supported_unit = units_by_id.get(supported_id) if supported_id else None
+
+        if not arty_unit or not supported_unit:
+            continue
+        if arty_unit.is_destroyed or supported_unit.is_destroyed:
+            continue
+
+        # Check comms — skip if either unit is offline
+        skip = False
+        for u in (supported_unit, arty_unit):
+            comms = u.comms_status
+            if hasattr(comms, 'value'):
+                comms = comms.value
+            if comms == "offline":
+                skip = True
+                break
+        if skip:
+            continue
+
+        # Resolve target grid
+        contact_grid = "неизвестном районе" if language == "ru" else "unknown area"
+        if grid_service and target_lat is not None and target_lon is not None:
+            try:
+                snail = grid_service.point_to_snail(target_lat, target_lon, depth=2)
+                if snail:
+                    contact_grid = snail
+            except Exception:
+                pass
+
+        # Distance from supported unit to target
+        dist = "?"
+        if target_lat is not None and target_lon is not None and supported_unit.position is not None:
+            try:
+                from geoalchemy2.shape import to_shape
+                import math
+                pt = to_shape(supported_unit.position)
+                dlat = (target_lat - pt.y) * 111320
+                dlon = (target_lon - pt.x) * 74000
+                dist = str(round(math.sqrt(dlat**2 + dlon**2)))
+            except Exception:
+                pass
+
+        side = supported_unit.side.value if hasattr(supported_unit.side, 'value') else str(supported_unit.side)
+
+        # 1. Supported unit requests fire
+        req_text = random.choice(req_templates).format(
+            unit=supported_unit.name, contact_grid=contact_grid, dist=dist,
+        )
+        messages.append({
+            "sender_name": supported_unit.name,
+            "side": side,
+            "text": req_text,
+            "is_unit_response": True,
+            "response_type": "fire_request",
+        })
+
+        # 2. Artillery responds
+        salvos = 3
+        arty_task = arty_unit.current_task
+        if arty_task:
+            salvos = arty_task.get("salvos_remaining", 3)
+
+        resp_text = random.choice(resp_templates).format(
+            arty=arty_unit.name, contact_grid=contact_grid, salvos=salvos,
+        )
+        messages.append({
+            "sender_name": arty_unit.name,
+            "side": side,
+            "text": resp_text,
+            "is_unit_response": True,
+            "response_type": "fire_response",
+        })
+
+    return messages
+
+
+# ── Templates for coordinated attack radio ──
+
+ATTACK_COORD_RU = [
+    "Здесь {unit}. Наблюдаю тот же противник, район {grid}. Координируем действия. {role_msg}",
+    "{unit}, приём. Противник обнаружен, квадрат {grid}. Предлагаю совместную атаку. {role_msg}",
+]
+
+ATTACK_COORD_EN = [
+    "This is {unit}. Same enemy contact, grid {grid}. Coordinating. {role_msg}",
+    "{unit}, over. Enemy confirmed at grid {grid}. Proposing combined assault. {role_msg}",
+]
+
+ATTACK_COORD_ROLE_RU = {
+    "suppress": "Обеспечиваю огневое прикрытие.",
+    "flank": "Выхожу во фланг.",
+    "assault": "Иду на сближение.",
+    "default": "Вступаю в бой.",
+}
+
+ATTACK_COORD_ROLE_EN = {
+    "suppress": "Providing covering fire.",
+    "flank": "Moving to flank.",
+    "assault": "Closing in.",
+    "default": "Engaging.",
+}
+
+ATTACK_ACK_RU = [
+    "Здесь {ally}. Понял, координируем. {role_msg} Удачи!",
+    "{ally}, принял. {role_msg} Работаем.",
+]
+
+ATTACK_ACK_EN = [
+    "This is {ally}. Copy, coordinating. {role_msg} Good luck!",
+    "{ally}, roger. {role_msg} Let's go.",
+]
+
+
+def generate_coordinated_attack_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+) -> list[dict]:
+    """
+    Generate radio messages when multiple units from the same side engage the same target.
+
+    Detects when 2+ units newly start engaging the same enemy (same tick),
+    and generates coordination messages between them.
+
+    Returns list of chat message dicts.
+    """
+    messages = []
+
+    coord_templates = ATTACK_COORD_RU if language == "ru" else ATTACK_COORD_EN
+    ack_templates = ATTACK_ACK_RU if language == "ru" else ATTACK_ACK_EN
+    role_msgs = ATTACK_COORD_ROLE_RU if language == "ru" else ATTACK_COORD_ROLE_EN
+
+    # Group active engagements by target_unit_id
+    target_to_attackers: dict[str, list] = {}
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        task = u.current_task
+        if not task:
+            continue
+        task_type = task.get("type", "")
+        if task_type not in ("attack", "engage", "fire"):
+            continue
+        target_uid = task.get("target_unit_id")
+        if not target_uid:
+            continue
+        target_to_attackers.setdefault(str(target_uid), []).append(u)
+
+    # Only generate for groups of 2+ and only on the tick roles were assigned
+    announced_pairs = set()
+    for target_id, attackers in target_to_attackers.items():
+        if len(attackers) < 2:
+            continue
+
+        # Check if any of these units got their combat role THIS tick
+        newly_assigned = [
+            u for u in attackers
+            if u.current_task
+            and u.current_task.get("combat_role_assigned_tick") == tick
+        ]
+        if not newly_assigned:
+            continue
+
+        # Find units with different roles for the coordination exchange
+        by_role: dict[str, list] = {}
+        for u in attackers:
+            role = (u.current_task or {}).get("combat_role", "default")
+            by_role.setdefault(role, []).append(u)
+
+        # Pick one initiator (prefer newly assigned) and one responder
+        initiator = newly_assigned[0]
+        responder = None
+        for u in attackers:
+            if u.id != initiator.id and not u.is_destroyed:
+                comms = u.comms_status
+                if hasattr(comms, 'value'):
+                    comms = comms.value
+                if comms != "offline":
+                    responder = u
+                    break
+
+        if not responder:
+            continue
+
+        pair_key = tuple(sorted([str(initiator.id), str(responder.id)]))
+        if pair_key in announced_pairs:
+            continue
+        announced_pairs.add(pair_key)
+
+        # Check initiator comms
+        init_comms = initiator.comms_status
+        if hasattr(init_comms, 'value'):
+            init_comms = init_comms.value
+        if init_comms == "offline":
+            continue
+
+        # Resolve grid
+        grid = _resolve_grid(initiator, grid_service, language)
+        side = initiator.side.value if hasattr(initiator.side, 'value') else str(initiator.side)
+
+        init_role = (initiator.current_task or {}).get("combat_role", "default")
+        resp_role = (responder.current_task or {}).get("combat_role", "default")
+
+        init_role_msg = role_msgs.get(init_role, role_msgs["default"])
+        resp_role_msg = role_msgs.get(resp_role, role_msgs["default"])
+
+        # 1. Initiator announces coordination
+        coord_text = random.choice(coord_templates).format(
+            unit=initiator.name, grid=grid, role_msg=init_role_msg,
+        )
+        messages.append({
+            "sender_name": initiator.name,
+            "side": side,
+            "text": coord_text,
+            "is_unit_response": True,
+            "response_type": "attack_coordination",
+        })
+
+        # 2. Responder acknowledges
+        ack_text = random.choice(ack_templates).format(
+            ally=responder.name, role_msg=resp_role_msg,
+        )
+        messages.append({
+            "sender_name": responder.name,
+            "side": side,
+            "text": ack_text,
+            "is_unit_response": True,
+            "response_type": "attack_coordination_ack",
+        })
 
     return messages
 

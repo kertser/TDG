@@ -603,7 +603,20 @@ const KUnits = (() => {
                     const lastIdx = _lastStackCycleIdx[posKey] || 0;
                     const nextIdx = (lastIdx + 1) % stack.length;
                     _lastStackCycleIdx[posKey] = nextIdx;
-                    _selectUnit(stack[nextIdx].id, false);
+                    const nextUnit = stack[nextIdx];
+                    _selectUnit(nextUnit.id, false);
+                    // Bring the selected unit's marker on top of the stack
+                    const selMarker = unitMarkers[nextUnit.id];
+                    if (selMarker) {
+                        selMarker.setZIndexOffset(2000);
+                        // Reset other stacked units to normal z-index
+                        stack.forEach(su => {
+                            if (su.id !== nextUnit.id && unitMarkers[su.id]) {
+                                const mySide = KSessionUI.getSide();
+                                unitMarkers[su.id].setZIndexOffset(su.side === mySide ? 1000 : 0);
+                            }
+                        });
+                    }
                 } else {
                     _selectUnit(u.id, shiftKey);
                 }
@@ -2211,6 +2224,16 @@ const KUnits = (() => {
                     if (ordersTabPanel) ordersTabPanel.classList.add('active');
                     // Expand the panel
                     panel.classList.add('hovered');
+                }
+            } catch(e) { /* ignore */ }
+        } else {
+            // All units deselected — collapse the panel if not pinned
+            try {
+                const panel = document.getElementById('command-panel');
+                if (panel && !panel.classList.contains('expanded')) {
+                    panel.classList.remove('hovered');
+                    const focused = panel.querySelector(':focus');
+                    if (focused) focused.blur();
                 }
             } catch(e) { /* ignore */ }
         }

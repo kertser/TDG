@@ -625,6 +625,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         generate_casualty_radio_messages,
         generate_contact_radio_messages,
         generate_combat_coordination_messages,
+        generate_artillery_fire_messages,
+        generate_coordinated_attack_messages,
     )
     from backend.models.chat_message import ChatMessage
 
@@ -648,10 +650,18 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         all_units, all_events, tick,
         grid_service=grid_service, language=_lang,
     )
+    arty_fire_msgs = generate_artillery_fire_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang,
+    )
+    coord_attack_msgs = generate_coordinated_attack_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang,
+    )
 
-    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs
+    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs + arty_fire_msgs + coord_attack_msgs
     if _debug:
-        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)}")
+        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)} arty_fire={len(arty_fire_msgs)} coord_attack={len(coord_attack_msgs)}")
         # Log contact events for debugging detection→radio pipeline
         contact_new_evts = [e for e in all_events if e.get("event_type") in ("contact_new", "contact_refreshed")]
         dlog(f"  [10c] Contact events in all_events: {len(contact_new_evts)}")
