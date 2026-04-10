@@ -16,6 +16,18 @@ from __future__ import annotations
 
 import random
 
+
+def _get_unit_lang(unit, language: str = "ru", side_languages: dict | None = None) -> str:
+    """Get the language for a unit based on its side.
+
+    Uses side_languages dict if provided (e.g. {"blue": "en", "red": "ru"}).
+    Falls back to the global language parameter.
+    """
+    if side_languages:
+        side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+        return side_languages.get(side, language)
+    return language
+
 # ── Templates for idle radio messages ──
 
 IDLE_TEMPLATES_RU = [
@@ -63,6 +75,7 @@ def generate_idle_radio_messages(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio messages for units that just completed their task.
@@ -83,8 +96,6 @@ def generate_idle_radio_messages(
     if not completed_unit_ids:
         return messages
 
-    templates = IDLE_TEMPLATES_RU if language == "ru" else IDLE_TEMPLATES_EN
-
     for unit in all_units:
         if unit.is_destroyed:
             continue
@@ -103,8 +114,12 @@ def generate_idle_radio_messages(
         if comms == "offline":
             continue
 
+        # Per-side language
+        lang = _get_unit_lang(unit, language, side_languages)
+        templates = IDLE_TEMPLATES_RU if lang == "ru" else IDLE_TEMPLATES_EN
+
         # Resolve grid reference
-        grid = "текущем районе" if language == "ru" else "current position"
+        grid = "текущем районе" if lang == "ru" else "current position"
         if grid_service:
             try:
                 from geoalchemy2.shape import to_shape
@@ -135,6 +150,7 @@ def generate_peer_support_requests(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio messages for units requesting support from CoC peers.
@@ -157,8 +173,6 @@ def generate_peer_support_requests(
         pid = str(u.parent_unit_id) if u.parent_unit_id else None
         parent_map.setdefault(pid, []).append(u)
 
-    req_templates = SUPPORT_REQUEST_RU if language == "ru" else SUPPORT_REQUEST_EN
-    ack_templates = SUPPORT_ACK_RU if language == "ru" else SUPPORT_ACK_EN
 
     for unit in all_units:
         if unit.is_destroyed:
@@ -206,7 +220,8 @@ def generate_peer_support_requests(
         unit.capabilities = new_caps
 
         # Resolve grid
-        grid = "текущем районе" if language == "ru" else "current area"
+        lang = _get_unit_lang(unit, language, side_languages)
+        grid = "текущем районе" if lang == "ru" else "current area"
         if grid_service:
             try:
                 from geoalchemy2.shape import to_shape
@@ -218,6 +233,7 @@ def generate_peer_support_requests(
                 pass
 
         # Generate request message
+        req_templates = SUPPORT_REQUEST_RU if lang == "ru" else SUPPORT_REQUEST_EN
         text = random.choice(req_templates).format(unit=unit.name, grid=grid)
         messages.append({
             "sender_name": unit.name,
@@ -229,6 +245,7 @@ def generate_peer_support_requests(
 
         # Pick one sibling to acknowledge
         sibling = eligible_siblings[0]  # Closest or first available
+        ack_templates = SUPPORT_ACK_RU if lang == "ru" else SUPPORT_ACK_EN
         ack_text = random.choice(ack_templates).format(unit=sibling.name)
         messages.append({
             "sender_name": sibling.name,
@@ -262,13 +279,13 @@ def generate_casualty_radio_messages(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio messages from units involved in destroying an enemy.
     Each involved unit reports their status and casualties.
     """
     messages = []
-    templates = CASUALTY_REPORT_RU if language == "ru" else CASUALTY_REPORT_EN
 
     units_by_id = {str(u.id): u for u in all_units}
 
@@ -281,6 +298,23 @@ def generate_casualty_radio_messages(
             if actor:
                 involved_ids = [str(actor)]
 
+        # Get the destroyed enemy's position from event payload for accurate reporting
+        target_grid_cache = {}  # cache per event
+        target_lat = evt.get("payload", {}).get("target_lat")
+        target_lon = evt.get("payload", {}).get("target_lon")
+        # Also try to get target unit position directly
+        target_uid = evt.get("target_unit_id")
+        if target_uid and str(target_uid) in units_by_id:
+            target_unit = units_by_id[str(target_uid)]
+            if target_unit.position is not None:
+                try:
+                    from geoalchemy2.shape import to_shape
+                    pt = to_shape(target_unit.position)
+                    target_lat = pt.y
+                    target_lon = pt.x
+                except Exception:
+                    pass
+
         for uid_str in involved_ids:
             unit = units_by_id.get(uid_str)
             if not unit or unit.is_destroyed:
@@ -292,8 +326,21 @@ def generate_casualty_radio_messages(
             if comms == "offline":
                 continue
 
-            grid = "текущем районе" if language == "ru" else "current area"
-            if grid_service:
+            # Per-side language
+            lang = _get_unit_lang(unit, language, side_languages)
+            templates = CASUALTY_REPORT_RU if lang == "ru" else CASUALTY_REPORT_EN
+
+            # Use the TARGET's grid (where the enemy was destroyed), not the unit's own grid
+            grid = "текущем районе" if lang == "ru" else "current area"
+            if grid_service and target_lat is not None and target_lon is not None:
+                try:
+                    snail = grid_service.point_to_snail(target_lat, target_lon, depth=2)
+                    if snail:
+                        grid = snail
+                except Exception:
+                    pass
+            elif grid_service:
+                # Fallback to unit's own position if target position unknown
                 try:
                     from geoalchemy2.shape import to_shape
                     pt = to_shape(unit.position)
@@ -391,6 +438,7 @@ def generate_combat_coordination_messages(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio messages for combat coordination events:
@@ -404,11 +452,6 @@ def generate_combat_coordination_messages(
 
     units_by_id = {str(u.id): u for u in all_units}
 
-    # ── Cease-fire requests ──
-    ceasefire_templates = CEASEFIRE_REQUEST_RU if language == "ru" else CEASEFIRE_REQUEST_EN
-    ceasefire_ack_templates = CEASEFIRE_ACK_RU if language == "ru" else CEASEFIRE_ACK_EN
-    ceasefire_clear_templates = CEASEFIRE_CLEAR_RU if language == "ru" else CEASEFIRE_CLEAR_EN
-
     for evt in tick_events:
         etype = evt.get("event_type", "")
         payload = evt.get("payload", {})
@@ -420,7 +463,9 @@ def generate_combat_coordination_messages(
             arty_unit = units_by_id.get(arty_id) if arty_id else None
 
             if unit and not unit.is_destroyed:
-                grid = _resolve_grid(unit, grid_service, language)
+                lang = _get_unit_lang(unit, language, side_languages)
+                ceasefire_templates = CEASEFIRE_REQUEST_RU if lang == "ru" else CEASEFIRE_REQUEST_EN
+                grid = _resolve_grid(unit, grid_service, lang)
                 side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
                 ally = arty_unit.name if arty_unit else "artillery"
                 text = random.choice(ceasefire_templates).format(
@@ -436,6 +481,7 @@ def generate_combat_coordination_messages(
 
                 # Artillery acknowledges
                 if arty_unit and not arty_unit.is_destroyed:
+                    ceasefire_ack_templates = CEASEFIRE_ACK_RU if lang == "ru" else CEASEFIRE_ACK_EN
                     ack_text = random.choice(ceasefire_ack_templates).format(unit=arty_unit.name)
                     messages.append({
                         "sender_name": arty_unit.name,
@@ -448,6 +494,8 @@ def generate_combat_coordination_messages(
         elif etype == "ceasefire_cleared":
             unit = units_by_id.get(str(actor_id)) if actor_id else None
             if unit and not unit.is_destroyed:
+                lang = _get_unit_lang(unit, language, side_languages)
+                ceasefire_clear_templates = CEASEFIRE_CLEAR_RU if lang == "ru" else CEASEFIRE_CLEAR_EN
                 side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
                 text = random.choice(ceasefire_clear_templates).format(unit=unit.name)
                 messages.append({
@@ -459,11 +507,6 @@ def generate_combat_coordination_messages(
                 })
 
     # ── Combat role assignment announcements ──
-    # Only announce when roles are newly assigned this tick
-    suppress_templates = ROLE_SUPPRESS_RU if language == "ru" else ROLE_SUPPRESS_EN
-    flank_templates = ROLE_FLANK_RU if language == "ru" else ROLE_FLANK_EN
-    assault_templates = ROLE_ASSAULT_RU if language == "ru" else ROLE_ASSAULT_EN
-
     announced_units = set()
     for u in all_units:
         if u.is_destroyed:
@@ -474,7 +517,7 @@ def generate_combat_coordination_messages(
         role = task.get("combat_role")
         assign_tick = task.get("combat_role_assigned_tick", 0)
         if not role or assign_tick != tick:
-            continue  # Only announce on the tick roles are assigned
+            continue
 
         uid_str = str(u.id)
         if uid_str in announced_units:
@@ -487,7 +530,12 @@ def generate_combat_coordination_messages(
         if comms == "offline":
             continue
 
-        grid = _resolve_grid(u, grid_service, language)
+        lang = _get_unit_lang(u, language, side_languages)
+        suppress_templates = ROLE_SUPPRESS_RU if lang == "ru" else ROLE_SUPPRESS_EN
+        flank_templates = ROLE_FLANK_RU if lang == "ru" else ROLE_FLANK_EN
+        assault_templates = ROLE_ASSAULT_RU if lang == "ru" else ROLE_ASSAULT_EN
+
+        grid = _resolve_grid(u, grid_service, lang)
         side = u.side.value if hasattr(u.side, 'value') else str(u.side)
 
         # Find an ally name for context
@@ -573,6 +621,7 @@ def generate_contact_radio_messages(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio messages when units detect new enemy contacts.
@@ -583,9 +632,6 @@ def generate_contact_radio_messages(
     Returns list of chat message dicts.
     """
     messages = []
-
-    templates = CONTACT_REPORT_RU if language == "ru" else CONTACT_REPORT_EN
-    type_names = UNIT_TYPE_NAMES_RU if language == "ru" else {}
 
     units_by_id = {str(u.id): u for u in all_units}
 
@@ -617,13 +663,18 @@ def generate_contact_radio_messages(
         if comms == "offline":
             continue
 
+        # Per-side language
+        lang = _get_unit_lang(unit, language, side_languages)
+        templates = CONTACT_REPORT_RU if lang == "ru" else CONTACT_REPORT_EN
+        type_names = UNIT_TYPE_NAMES_RU if lang == "ru" else {}
+
         # Get contact info
         contact_type = payload.get("estimated_type", "")
         contact_lat = payload.get("lat")
         contact_lon = payload.get("lon")
 
         # Resolve grid reference for the contact position
-        contact_grid = "неизвестном районе" if language == "ru" else "unknown area"
+        contact_grid = "неизвестном районе" if lang == "ru" else "unknown area"
         if grid_service and contact_lat is not None and contact_lon is not None:
             try:
                 snail = grid_service.point_to_snail(contact_lat, contact_lon, depth=2)
@@ -633,7 +684,7 @@ def generate_contact_radio_messages(
                 pass
 
         # Type description
-        if language == "ru":
+        if lang == "ru":
             type_desc = type_names.get(contact_type, contact_type.replace("_", " ") if contact_type else "противник")
         else:
             type_desc = contact_type.replace("_", " ") if contact_type else "enemy unit"
@@ -701,19 +752,12 @@ def generate_artillery_fire_messages(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio exchanges when artillery is auto-assigned to support a unit.
-
-    Triggered by 'artillery_support' events. The supported unit calls for fire,
-    and the artillery unit responds with an acknowledgment.
-
-    Returns list of chat message dicts.
     """
     messages = []
-
-    req_templates = FIRE_REQUEST_RU if language == "ru" else FIRE_REQUEST_EN
-    resp_templates = FIRE_RESPONSE_RU if language == "ru" else FIRE_RESPONSE_EN
 
     units_by_id = {str(u.id): u for u in all_units}
 
@@ -747,8 +791,13 @@ def generate_artillery_fire_messages(
         if skip:
             continue
 
+        # Per-side language
+        lang = _get_unit_lang(supported_unit, language, side_languages)
+        req_templates = FIRE_REQUEST_RU if lang == "ru" else FIRE_REQUEST_EN
+        resp_templates = FIRE_RESPONSE_RU if lang == "ru" else FIRE_RESPONSE_EN
+
         # Resolve target grid
-        contact_grid = "неизвестном районе" if language == "ru" else "unknown area"
+        contact_grid = "неизвестном районе" if lang == "ru" else "unknown area"
         if grid_service and target_lat is not None and target_lon is not None:
             try:
                 snail = grid_service.point_to_snail(target_lat, target_lon, depth=2)
@@ -847,20 +896,19 @@ def generate_coordinated_attack_messages(
     tick: int,
     grid_service=None,
     language: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate radio messages when multiple units from the same side engage the same target.
-
-    Detects when 2+ units newly start engaging the same enemy (same tick),
-    and generates coordination messages between them.
-
-    Returns list of chat message dicts.
     """
     messages = []
 
-    coord_templates = ATTACK_COORD_RU if language == "ru" else ATTACK_COORD_EN
-    ack_templates = ATTACK_ACK_RU if language == "ru" else ATTACK_ACK_EN
-    role_msgs = ATTACK_COORD_ROLE_RU if language == "ru" else ATTACK_COORD_ROLE_EN
+    coord_templates_ru = ATTACK_COORD_RU
+    coord_templates_en = ATTACK_COORD_EN
+    ack_templates_ru = ATTACK_ACK_RU
+    ack_templates_en = ATTACK_ACK_EN
+    role_msgs_ru = ATTACK_COORD_ROLE_RU
+    role_msgs_en = ATTACK_COORD_ROLE_EN
 
     # Group active engagements by target_unit_id
     target_to_attackers: dict[str, list] = {}
@@ -927,16 +975,19 @@ def generate_coordinated_attack_messages(
             continue
 
         # Resolve grid
-        grid = _resolve_grid(initiator, grid_service, language)
+        lang = _get_unit_lang(initiator, language, side_languages)
+        grid = _resolve_grid(initiator, grid_service, lang)
         side = initiator.side.value if hasattr(initiator.side, 'value') else str(initiator.side)
 
         init_role = (initiator.current_task or {}).get("combat_role", "default")
         resp_role = (responder.current_task or {}).get("combat_role", "default")
 
+        role_msgs = role_msgs_ru if lang == "ru" else role_msgs_en
         init_role_msg = role_msgs.get(init_role, role_msgs["default"])
         resp_role_msg = role_msgs.get(resp_role, role_msgs["default"])
 
         # 1. Initiator announces coordination
+        coord_templates = coord_templates_ru if lang == "ru" else coord_templates_en
         coord_text = random.choice(coord_templates).format(
             unit=initiator.name, grid=grid, role_msg=init_role_msg,
         )
@@ -949,6 +1000,7 @@ def generate_coordinated_attack_messages(
         })
 
         # 2. Responder acknowledges
+        ack_templates = ack_templates_ru if lang == "ru" else ack_templates_en
         ack_text = random.choice(ack_templates).format(
             ally=responder.name, role_msg=resp_role_msg,
         )

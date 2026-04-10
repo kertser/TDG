@@ -673,6 +673,7 @@ def generate_tick_reports(
     under_fire: set,
     grid_service=None,
     lang: str = "ru",
+    side_languages: dict | None = None,
 ) -> list[dict]:
     """
     Generate all applicable reports for the current tick.

@@ -1,6 +1,7 @@
 /**
  * contacts.js – Render detected enemy contacts on the map.
  * Shows contacts as uncertainty circles with estimated type info.
+ * Skips rendering for contacts that overlap with visible enemy unit markers.
  */
 const KContacts = (() => {
     let contactsLayer = null;
@@ -29,8 +30,17 @@ const KContacts = (() => {
         if (!contactsLayer) return;
         contactsLayer.clearLayers();
 
+        // Get currently visible enemy unit positions to avoid double-rendering
+        const visibleEnemyPositions = _getVisibleEnemyPositions();
+
         contacts.forEach(c => {
             if (c.lat == null || c.lon == null) return;
+
+            // Skip contact if there's already a visible enemy unit marker nearby
+            // (within 100m) — the unit marker already shows the enemy
+            if (_hasNearbyVisibleEnemy(c.lat, c.lon, visibleEnemyPositions)) {
+                return;
+            }
 
             // Uncertainty circle
             const accuracy = c.location_accuracy_m || 500;
@@ -86,6 +96,34 @@ const KContacts = (() => {
         if (!_visible && _map && _map.hasLayer(contactsLayer)) {
             _map.removeLayer(contactsLayer);
         }
+    }
+
+    /** Get positions of visible enemy units from KUnits data. */
+    function _getVisibleEnemyPositions() {
+        const positions = [];
+        if (typeof KUnits !== 'undefined' && KUnits.getAllUnits) {
+            const allUnits = KUnits.getAllUnits();
+            const mySide = (typeof KSessionUI !== 'undefined' && KSessionUI.getSide) ? KSessionUI.getSide() : null;
+            for (const u of allUnits) {
+                if (u.is_destroyed || u.lat == null || u.lon == null) continue;
+                // Consider enemy if marked as enemy or different side
+                if (u.is_enemy || (mySide && mySide !== 'admin' && mySide !== 'observer' && u.side !== mySide)) {
+                    positions.push({ lat: u.lat, lon: u.lon });
+                }
+            }
+        }
+        return positions;
+    }
+
+    /** Check if a contact position is near a visible enemy unit marker. */
+    function _hasNearbyVisibleEnemy(lat, lon, enemyPositions) {
+        const THRESHOLD_DEG = 0.001; // ~110m — close enough to be the same target
+        for (const pos of enemyPositions) {
+            if (Math.abs(pos.lat - lat) < THRESHOLD_DEG && Math.abs(pos.lon - lon) < THRESHOLD_DEG) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Toggle contacts layer visibility. Returns new state. */

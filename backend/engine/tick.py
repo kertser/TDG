@@ -620,6 +620,14 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     if scenario and scenario.environment:
         _lang = scenario.environment.get("language", "ru")
 
+    # Per-side language: use the last language each side's commander used
+    # (tracked by order_service). Falls back to scenario language.
+    from backend.services.order_service import get_session_language
+    _side_languages = {
+        "blue": get_session_language(session_id, "blue") or _lang,
+        "red": get_session_language(session_id, "red") or _lang,
+    }
+
     # Reload contacts for report generation
     _contacts_result = await db.execute(
         select(Contact).where(Contact.session_id == session_id)
@@ -635,6 +643,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         under_fire=under_fire,
         grid_service=grid_service,
         lang=_lang,
+        side_languages=_side_languages,
     )
 
     report_broadcast = []
@@ -692,31 +701,31 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     idle_msgs = generate_idle_radio_messages(
         all_units, all_events, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
     peer_msgs = generate_peer_support_requests(
         all_units, under_fire, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
     casualty_msgs = generate_casualty_radio_messages(
         all_units, all_events, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
     contact_msgs = generate_contact_radio_messages(
         all_units, all_events, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
     combat_coord_msgs = generate_combat_coordination_messages(
         all_units, all_events, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
     arty_fire_msgs = generate_artillery_fire_messages(
         all_units, all_events, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
     coord_attack_msgs = generate_coordinated_attack_messages(
         all_units, all_events, tick,
-        grid_service=grid_service, language=_lang,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
 
     radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs + arty_fire_msgs + coord_attack_msgs
@@ -1048,9 +1057,11 @@ def _order_to_task(order: Order) -> dict | None:
                                       "артподдержк", "огневая поддержк"]):
             from backend.engine.combat import DEFAULT_FIRE_SALVOS
             return {"type": "fire", "order_id": str(order.id), "salvos_remaining": DEFAULT_FIRE_SALVOS}
+        # Check attack BEFORE move: "Move to X. Eliminate enemy" should be attack, not move
+        if any(kw in text for kw in ["attack", "engage", "eliminate", "destroy", "neutralize",
+                                      "атаку", "уничтож", "ликвидир", "поразить"]):
+            return {"type": "attack", "order_id": str(order.id)}
         if "move" in text or "advance" in text:
-            return {"type": "move", "order_id": str(order.id)}
-        if "attack" in text or "engage" in text:
             return {"type": "attack", "order_id": str(order.id)}
         if "defend" in text or "hold" in text:
             return {"type": "defend", "order_id": str(order.id)}

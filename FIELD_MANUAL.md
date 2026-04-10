@@ -1018,15 +1018,30 @@ Always **fully visible** with all stats (strength, ammo, morale, suppression, co
 ### 18.2 Enemy Units
 
 Only visible if within detection range of at least one friendly unit AND LOS is clear. Visible enemy units show:
-- Position, type, SIDC
+- Position (with uncertainty based on detection accuracy)
+- **Generalized type** (broad category only: "infantry", "armor", "artillery", "recon", "engineer", "support", "command" — exact echelon hidden)
+- **Masked SIDC** (echelon indicator set to "unspecified" — no squad/platoon/company bar visible)
 - **Approximate strength** (quantized to 25% buckets: full/reduced/weakened/critical)
-- No ammo, morale, suppression, comms, or task details
+- **No** exact personnel count, ammo, morale, suppression, comms, task details, or formation
 
-### 18.3 Admin/Observer
+### 18.3 Information Denied to Opposing Side
+
+| Data Field | Own Units | Detected Enemy | Rationale |
+|---|---|---|---|
+| Name | Real name | Generic label (e.g. "Infantry team") | Prevents identification of specific callsigns |
+| Unit type | Exact (e.g. `infantry_squad`) | Broad category (e.g. `infantry`) | Prevents exact personnel/capability deduction |
+| SIDC | Full 20-char | Echelon masked to "00" (unspecified) | Prevents size deduction from military symbol |
+| Strength | Exact 0.0–1.0 | Quantized to 25% buckets | Approximate visual estimate only |
+| Personnel | Calculated from type × strength | Not available | Cannot count individuals at distance |
+| Ammo/Morale/Suppression | Exact values | Hidden (null) | Internal state not observable |
+| Task/Formation | Exact details | Hidden (null) | Cannot know enemy intentions |
+| Detection/Fire range | From unit type config | Hidden (null) | Capability intelligence denied |
+
+### 18.4 Admin/Observer
 
 See **all** units from both sides with full details.
 
-### 18.4 Strength Approximation
+### 18.5 Strength Approximation
 
 Enemy unit strength is quantized:
 
@@ -1036,6 +1051,16 @@ Enemy unit strength is quantized:
 | 0.50 – 0.75 | "reduced" (0.75) |
 | 0.25 – 0.50 | "weakened" (0.50) |
 | ≤ 0.25 | "critical" (0.25) |
+
+### 18.6 Contact Circles vs Unit Markers
+
+When an enemy unit is detected, two visual elements may appear:
+- **Unit marker** (NATO symbol via milsymbol.js) — shown when the unit is within fog-of-war detection range
+- **Contact circle** (red uncertainty circle from detection system) — represents the contact record
+
+To avoid confusion, **contact circles are not rendered when the enemy unit marker is already visible** (within ~110m proximity). Contact circles only appear for:
+- Stale contacts (enemy moved away but last known position recorded)
+- Contacts without a currently visible corresponding unit
 
 ---
 
@@ -1052,7 +1077,7 @@ pending → validated → executing → completed | failed | cancelled
 Orders are parsed into unit tasks using priority:
 1. **Parsed intent** (`parsed_intent.action` + `parsed_intent.destination`)
 2. **Parsed order** (`parsed_order.order_type` + `parsed_order.target_location`)
-3. **Keyword fallback** from `original_text` (halt, stop, move, advance, attack, engage, defend, hold, observe, recon)
+3. **Keyword fallback** from `original_text` (halt, stop, move, advance, attack, engage, eliminate, destroy, neutralize, defend, hold, observe, recon, fire at, fire on, disengage, resupply)
 
 ### 19.3 Order Precedence
 
@@ -1070,14 +1095,23 @@ When a move-type order is processed, the speed label (`slow`/`fast`) is looked u
 
 ## 20. Radio Chatter & Reports
 
-### 20.1 Idle Radio Messages
+### 20.1 Language Consistency
+
+Radio chatter and unit responses follow the **last language used by the commander** for each side:
+- If the Blue commander's last order was in English, all Blue unit radio messages use English templates
+- If the Red commander's last order was in Russian, all Red unit radio messages use Russian templates
+- Each side tracks language independently (Blue can be EN while Red is RU)
+- Falls back to scenario `environment.language` setting if no orders have been issued yet
+- Language is tracked per `(session_id, side)` and persists across ticks
+
+### 20.2 Idle Radio Messages
 
 When a unit completes its task and becomes idle:
 - Broadcasts a radio message: "Objective complete, holding at [grid]. Awaiting orders."
 - Only if comms are not `offline`
-- Bilingual RU/EN templates
+- Language matches the side's last-used language
 
-### 20.2 Peer Support Requests
+### 20.3 Peer Support Requests
 
 When a unit is under fire AND (strength < 0.5 OR suppression > 0.5):
 1. Broadcasts support request to CoC siblings (same parent)
@@ -1085,7 +1119,14 @@ When a unit is under fire AND (strength < 0.5 OR suppression > 0.5):
 3. **Cooldown**: 5 ticks between requests per unit
 4. Only if comms are not `offline`
 
-### 20.3 Auto-Generated Reports
+### 20.4 Casualty Reports
+
+When a unit is involved in destroying an enemy:
+- Reports the **target's grid position** (where the enemy was destroyed), not the reporting unit's own position
+- Includes own strength and ammo status
+- For artillery/mortar units, this correctly shows the bombardment zone, not the firing position
+
+### 20.5 Auto-Generated Reports
 
 | Report Type | Trigger | Content |
 |------------|---------|---------|

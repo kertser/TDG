@@ -292,7 +292,8 @@ class OrderParser:
                          "retreat", "support", "halt", "stop", "flank", "engage", "fire at",
                          "fire on", "fire mission", "shoot", "disengage", "break contact",
                          "hit any", "hit enemy", "engage any", "open fire", "suppress",
-                         "capture", "seize", "take", "occupy"]
+                         "capture", "seize", "take", "occupy",
+                         "eliminate", "destroy", "neutralize"]
         command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
@@ -351,13 +352,16 @@ class OrderParser:
                 # "Hit any enemy target in your sight" → engage (fire at targets of opportunity)
                 order_type = "attack"
                 engagement_rules = "fire_at_will"
+            # Check attack/eliminate BEFORE move: "Move to X. Eliminate enemy" should be attack
+            elif any(kw in text_lower for kw in ["attack", "engage", "eliminate", "destroy", "neutralize",
+                                                    "атак",
+                                                    "capture", "seize", "take", "occupy",
+                                                    "уничтож", "ликвидир", "поразить", "поразите",
+                                                    "захвати", "захват", "овладе", "занять", "займ"]):
+                order_type = "attack"
             elif any(kw in text_lower for kw in ["move", "advance", "form ", "выдвигай", "двигай",
                                                      "движен", "марш", "обход", "перестрои", "построение"]):
                 order_type = "move"
-            elif any(kw in text_lower for kw in ["attack", "engage", "атак",
-                                                    "capture", "seize", "take", "occupy",
-                                                    "захвати", "захват", "овладе", "занять", "займ"]):
-                order_type = "attack"
             elif any(kw in text_lower for kw in ["defend", "hold", "оборон", "удержи"]):
                 order_type = "defend"
             elif any(kw in text_lower for kw in ["observe", "наблюда"]):

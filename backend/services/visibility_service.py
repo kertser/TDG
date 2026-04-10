@@ -109,7 +109,9 @@ def _compute_unit_status(unit: Unit) -> str:
     task = unit.current_task
     if task:
         task_type = task.get("type", "")
-        if task_type in ("attack", "engage"):
+        if task_type in ("attack", "engage", "fire"):
+            return "engaging"
+        if task.get("auto_return_fire"):
             return "engaging"
         if task_type in ("move", "advance"):
             return "moving"
@@ -162,6 +164,44 @@ def _make_enemy_label(unit_type: str) -> str:
         size = " team"
 
     return category + size
+
+
+def _generalize_unit_type(unit_type: str) -> str:
+    """Generalize unit_type to a broad category for fog-of-war.
+    
+    Prevents exact personnel lookup — e.g., 'infantry_squad' → 'infantry',
+    'tank_company' → 'armor', 'mortar_section' → 'artillery'.
+    """
+    t = (unit_type or "").lower()
+    if "infantry" in t or "mech" in t:
+        return "infantry"
+    elif "tank" in t:
+        return "armor"
+    elif "artillery" in t or "mortar" in t:
+        return "artillery"
+    elif "recon" in t or "sniper" in t or "observation" in t:
+        return "recon"
+    elif "engineer" in t or "mine" in t or "breacher" in t or "avlb" in t:
+        return "engineer"
+    elif "logistics" in t:
+        return "support"
+    elif "command" in t or "headquarters" in t:
+        return "command"
+    return "unknown"
+
+
+def _mask_sidc_echelon(sidc: str) -> str:
+    """Mask the echelon field (positions 9-10, 0-indexed) in a MIL-STD-2525D SIDC.
+    
+    Sets echelon to '00' (unspecified) so the military symbol doesn't reveal
+    exact unit size (team/squad/section/platoon/company/battalion).
+    Also masks HQ indicator (position 8) to prevent deduction.
+    """
+    if not sidc or len(sidc) < 20:
+        return sidc or ""
+    # Positions are 1-based in the spec; 0-based in string indexing:
+    # pos 8 (idx 7) = HQ/TF/FD, pos 9-10 (idx 8-9) = Echelon
+    return sidc[:7] + "0" + "00" + sidc[10:]
 
 
 def _serialize_contact(contact: Contact) -> dict:
@@ -310,6 +350,12 @@ async def get_visible_units(
         # Hide real unit name — replace with generic type estimate
         serialized["real_name"] = serialized["name"]  # kept for admin
         serialized["name"] = _make_enemy_label(u.unit_type)
+        # Generalize unit_type to broad category (prevent exact personnel lookup)
+        serialized["real_unit_type"] = serialized["unit_type"]  # kept for admin
+        serialized["unit_type"] = _generalize_unit_type(u.unit_type)
+        # Mask SIDC echelon (positions 9-10) to prevent size deduction from symbol
+        serialized["real_sidc"] = serialized["sidc"]  # kept for admin
+        serialized["sidc"] = _mask_sidc_echelon(u.sidc)
         # Quantize strength to 25% buckets (approximate observation)
         raw_strength = serialized.get("strength") or 1.0
         if raw_strength > 0.75:

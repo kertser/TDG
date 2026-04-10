@@ -2844,6 +2844,8 @@ const KAdmin = (() => {
 
     /** Cached participants for the current session (for CoC user picker). */
     let _cachedParticipants = [];
+    /** Preserve the last selected user in bulk assign dropdown across re-renders. */
+    let _lastBulkUserId = '';
 
     async function _loadParticipantsForCoC(sessionId) {
         const token = _getToken();
@@ -3164,6 +3166,33 @@ const KAdmin = (() => {
                     opt.textContent = `${sideIcon} ${p.display_name} (${p.role})`;
                     bulkUserSel.appendChild(opt);
                 });
+                // Restore last selected user
+                if (_lastBulkUserId) {
+                    bulkUserSel.value = _lastBulkUserId;
+                }
+                // Track selection changes
+                bulkUserSel.addEventListener('change', () => {
+                    _lastBulkUserId = bulkUserSel.value;
+                });
+            } else if (bulkUserSel && _cachedParticipants.length === 0) {
+                // Participants not loaded yet — try loading them now
+                const sid = _getAdminSessionId() || _getUserSessionId();
+                if (sid) {
+                    _loadParticipantsForAdminCoC(sid).then(() => {
+                        if (_cachedParticipants.length > 0) {
+                            bulkUserSel.innerHTML = '<option value="">— Select user —</option>';
+                            _cachedParticipants.filter(p => p.side !== 'observer' && p.role !== 'observer').forEach(p => {
+                                const opt = document.createElement('option');
+                                opt.value = p.user_id;
+                                const sideIcon = p.side === 'blue' ? '🔵' : p.side === 'red' ? '🔴' : '⚪';
+                                opt.textContent = `${sideIcon} ${p.display_name} (${p.role})`;
+                                bulkUserSel.appendChild(opt);
+                            });
+                            if (_lastBulkUserId) bulkUserSel.value = _lastBulkUserId;
+                            bulkUserSel.addEventListener('change', () => { _lastBulkUserId = bulkUserSel.value; });
+                        }
+                    });
+                }
             }
 
             // Select-all checkbox
