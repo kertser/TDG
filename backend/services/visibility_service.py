@@ -449,9 +449,6 @@ async def _filter_by_los(
 
         has_any_los = False
         for obs_lon, obs_lat, det_range, eye_h in own_positions:
-            # Apply terrain visibility factor to detection range
-            # (matches the tick engine's process_detection formula)
-            terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
 
             if enemy_concealed:
                 # Concealed units: max 300m range, further reduced by terrain at
@@ -459,7 +456,11 @@ async def _filter_by_los(
                 target_terrain_vis = terrain.visibility_factor(e_lon, e_lat)
                 effective_range = 300.0 * target_terrain_vis  # forest=120m, open=300m
             else:
-                effective_range = det_range * terrain_vis
+                # Use base detection range WITHOUT terrain visibility reduction.
+                # Terrain visibility affects detection PROBABILITY in the tick engine,
+                # not the visibility range. This keeps fog-of-war range consistent
+                # with the detection engine's range check.
+                effective_range = det_range
 
                 # Apply height advantage bonus to effective range
                 height_bonus = terrain.detection_height_bonus(

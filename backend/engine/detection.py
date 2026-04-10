@@ -175,7 +175,7 @@ def process_detection(
                 continue
 
             base_range = observer.detection_range_m or 1500.0
-            terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
+            observer_terrain_vis = terrain.visibility_factor(obs_lon, obs_lat)
 
             # Observer capabilities (used for NVG and recon checks)
             capabilities = observer.capabilities or {}
@@ -193,7 +193,11 @@ def process_detection(
                 else:
                     obs_night_mod = night_mod
 
-            effective_range = base_range * terrain_vis * weather_visibility_mod * obs_night_mod
+            # Detection RANGE: base × weather × night (NOT terrain — terrain affects probability)
+            # This keeps range consistent with the fog-of-war visibility service which uses
+            # base_range directly. Terrain visibility affects detection PROBABILITY instead,
+            # making it harder to spot enemies in dense terrain without artificially reducing range.
+            effective_range = base_range * weather_visibility_mod * obs_night_mod
 
             # Observer eye height depends on unit type (OP = 8m, tanks = 3m, infantry = 2m)
             observer_eye_h = UNIT_EYE_HEIGHTS.get(observer.unit_type, DEFAULT_EYE_HEIGHT)
@@ -280,17 +284,27 @@ def process_detection(
 
                 dist = _distance_m(obs_lat, obs_lon, tgt_lat, tgt_lon)
                 if dist > pair_effective_range:
+                    if _debug:
+                        dlog(f"      [det-skip] {obs_side} {observer.name}→{target.name}: dist={dist:.0f}m > range={pair_effective_range:.0f}m (base={base_range:.0f} h_bonus={pair_height_bonus:.2f})")
                     continue
 
                 # LOS check: verify terrain doesn't block line of sight
                 if los_service is not None:
                     if not los_service.has_los(obs_lon, obs_lat, tgt_lon, tgt_lat,
                                                eye_height=observer_eye_h):
+                        if _debug:
+                            dlog(f"      [det-skip] {obs_side} {observer.name}→{target.name}: LOS blocked (dist={dist:.0f}m)")
                         continue  # LOS blocked by terrain
 
                 # Detection probability
                 posture_mod = _posture_modifier(target.current_task)
                 distance_factor = max(0.0, 1.0 - dist / pair_effective_range)
+
+                # Observer terrain visibility: observer in dense terrain (forest, urban)
+                # has reduced detection probability (harder to scan surroundings).
+                # This was previously applied to range; now applied to probability
+                # to keep range consistent with the fog-of-war visibility service.
+                observer_terrain_prob = 0.5 + 0.5 * observer_terrain_vis
 
                 # Target terrain concealment: targets in obscuring terrain
                 # (forest, urban, scrub) are harder to detect even if LOS exists.
@@ -305,10 +319,13 @@ def process_detection(
                 if _is_in_smoke(obs_lat, obs_lon, map_objects):
                     smoke_mod *= 0.15
 
-                prob = base_prob * distance_factor * posture_mod * recon_bonus * target_concealment * smoke_mod
+                prob = base_prob * distance_factor * posture_mod * recon_bonus * observer_terrain_prob * target_concealment * smoke_mod
                 prob = min(prob, 0.95)  # cap at 95%
 
                 roll = _deterministic_roll(tick, observer.id, target.id)
+
+                if _debug:
+                    dlog(f"      [det-check] {obs_side} {observer.name}→{target.name}: dist={dist:.0f}m range={pair_effective_range:.0f}m prob={prob:.3f} roll={roll:.3f} {'HIT' if roll < prob else 'MISS'}")
 
                 if roll < prob:
                     # Detection successful!

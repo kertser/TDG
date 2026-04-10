@@ -1068,7 +1068,9 @@ const KUnits = (() => {
     function _showUnitContextMenu(u, e) {
         _menuOpenTime = Date.now();
         const canSel = _canSelect(u);
-        const isAdmin = typeof KAdmin !== 'undefined' && KAdmin.isUnlocked();
+        // Use isWindowOpen() — not isUnlocked() — because isUnlocked() stays true
+        // for the entire session even after closing the admin panel.
+        const isAdmin = typeof KAdmin !== 'undefined' && KAdmin.isWindowOpen && KAdmin.isWindowOpen();
 
         // Detect enemy unit — block context menu entirely for non-admins
         const _mySideCtx = KSessionUI.getSide ? KSessionUI.getSide() : null;
