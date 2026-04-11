@@ -23,6 +23,9 @@ const KUI = (() => {
                 if (btn.dataset.tab === 'coc-tab') {
                     try { KAdmin.loadPublicCoC(); } catch(e) {}
                 }
+
+                // Reports unread badge: clear when tab is opened, re-arm when switching away
+                try { KReports.setTabActive(btn.dataset.tab === 'reports-tab'); } catch(e) {}
             });
         });
 

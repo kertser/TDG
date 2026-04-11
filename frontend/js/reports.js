@@ -8,6 +8,8 @@ const KReports = (() => {
     let filterChannel = null;
     let _sessionId = null;
     let _token = null;
+    let _unreadCount = 0;
+    let _isTabActive = false;
 
     const CHANNEL_ICONS = {
         spotrep:  '👁️',
@@ -42,6 +44,11 @@ const KReports = (() => {
     async function load(sessionId, token) {
         _sessionId = sessionId;
         _token = token;
+        // Detect if Reports tab is currently active
+        const tabBtn = document.querySelector('.tab-btn[data-tab="reports-tab"]');
+        _isTabActive = tabBtn ? tabBtn.classList.contains('active') : false;
+        _unreadCount = 0;
+        _updateBadge();
         try {
             const resp = await fetch(`/api/sessions/${sessionId}/reports`, {
                 headers: { 'Authorization': `Bearer ${token}` },
@@ -54,6 +61,31 @@ const KReports = (() => {
         }
     }
 
+    function setTabActive(active) {
+        _isTabActive = active;
+        if (active) {
+            _unreadCount = 0;
+            _updateBadge();
+        }
+    }
+
+    function _updateBadge() {
+        const tabBtn = document.querySelector('.tab-btn[data-tab="reports-tab"]');
+        if (!tabBtn) return;
+        let badge = tabBtn.querySelector('.reports-badge');
+        if (_unreadCount > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'reports-badge';
+                tabBtn.appendChild(badge);
+            }
+            badge.textContent = _unreadCount > 99 ? '99+' : String(_unreadCount);
+            badge.style.display = '';
+        } else {
+            if (badge) badge.style.display = 'none';
+        }
+    }
+
     function addReport(report) {
         allReports.unshift(report);
         if (allReports.length > 500) allReports.pop();
@@ -61,6 +93,11 @@ const KReports = (() => {
             _prependReportDom(report);
         }
         _renderFilterBar();
+        // Track unread when Reports tab is not visible
+        if (!_isTabActive) {
+            _unreadCount++;
+            _updateBadge();
+        }
     }
 
     function render() {
@@ -244,5 +281,5 @@ const KReports = (() => {
     document.addEventListener('DOMContentLoaded', _bindExport);
     setTimeout(_bindExport, 0);
 
-    return { load, addReport, render, setFilter, exportReports };
+    return { load, addReport, render, setFilter, exportReports, setTabActive };
 })();

@@ -43,6 +43,7 @@ class OrderType(str, enum.Enum):
     halt = "halt"
     regroup = "regroup"
     resupply = "resupply"
+    request_fire = "request_fire"
     report_status = "report_status"
 
 
@@ -53,8 +54,11 @@ class SpeedMode(str, enum.Enum):
 
 class ResponseType(str, enum.Enum):
     ack = "ack"                       # acknowledgment
-    wilco = "wilco"                   # will comply
+    wilco = "wilco"                   # will comply (movement)
     wilco_fire = "wilco_fire"         # will comply — fire mission (artillery/mortar)
+    wilco_request_fire = "wilco_request_fire"  # will comply — requesting CoC fire support
+    wilco_observe = "wilco_observe"   # will comply — observe/defend/halt (stationary)
+    wilco_standby = "wilco_standby"   # will comply — standby to support another unit
     wilco_disengage = "wilco_disengage"  # will comply — disengage/break contact
     wilco_resupply = "wilco_resupply"    # will comply — resupply mission
     unable = "unable"                 # cannot comply
@@ -121,6 +125,11 @@ class ParsedOrderData(BaseModel):
     purpose: Optional[str] = Field(
         None,
         description="Stated purpose/objective, e.g. 'обнаружение и уничтожение противника'",
+    )
+    support_target_ref: Optional[str] = Field(
+        None,
+        description="Unit name/callsign that this unit should support/relay to, "
+                    "e.g. 'C-squad' in 'be ready to support C-squad's targets'",
     )
 
     # For acknowledgment / status_report messages

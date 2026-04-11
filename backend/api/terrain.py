@@ -159,6 +159,7 @@ async def analyze_terrain(
         from backend.engine.terrain import clear_terrain_cache
         clear_terrain_cache(str(session_id))
         _invalidate_peaks_cache(str(session_id))
+        _path_cache.pop(str(session_id), None)
         await _clear_db_peaks_cache(session_id, db)
         return summary
     except ValueError as e:
@@ -186,6 +187,7 @@ async def analyze_terrain_stream(
 
     # Invalidate peaks cache at analysis start (in-memory + DB)
     _invalidate_peaks_cache(str(session_id))
+    _path_cache.pop(str(session_id), None)
     await _clear_db_peaks_cache(session_id, db)
 
     async def event_generator():
@@ -638,6 +640,7 @@ async def clear_terrain(
     from backend.engine.terrain import clear_terrain_cache
     clear_terrain_cache(str(session_id))
     _invalidate_peaks_cache(str(session_id))
+    _path_cache.pop(str(session_id), None)
     await _clear_db_peaks_cache(session_id, db)
 
     return {"deleted": deleted_count, "kept_manual": keep_manual}
@@ -961,6 +964,35 @@ async def get_elevation_peaks(
 
 # ── Reference data endpoint ──────────────────────────────────
 
+async def get_elevation_peaks_cached(
+    session_id: uuid.UUID,
+    db,
+    min_prominence_m: float = 5.0,
+    min_distance_m: float = 1500.0,
+) -> list[dict]:
+    """
+    Shared helper to get elevation peaks using the 3-tier cache.
+    Called by order_service.py and terrain API endpoint.
+    Returns list of peak dicts (not the full response envelope).
+    """
+    sid = str(session_id)
+
+    # Tier 1: in-memory
+    cached = _get_peaks_cache(sid, min_prominence_m, min_distance_m)
+    if cached is not None:
+        return cached.get("peaks", [])
+
+    # Tier 2: DB-persisted
+    db_cached = await _load_db_peaks_cache(session_id, min_prominence_m, min_distance_m, db)
+    if db_cached is not None:
+        _set_peaks_cache(sid, min_prominence_m, min_distance_m, db_cached)
+        return db_cached.get("peaks", [])
+
+    # Tier 3: no cache → return empty (peaks will be computed on next GET /elevation/peaks)
+    # We don't trigger full computation here to avoid blocking order processing.
+    return []
+
+
 @router.get("/{session_id}/terrain/types")
 async def get_terrain_types(session_id: uuid.UUID):
     """Return terrain type definitions, modifiers, and colors."""
@@ -969,4 +1001,168 @@ async def get_terrain_types(session_id: uuid.UUID):
         "modifiers": TERRAIN_MODIFIERS,
         "colors": TERRAIN_COLORS,
     }
+
+
+# ── Pathfinding endpoint ─────────────────────────────────────
+
+# In-memory path cache: session_id → {(from_snail, to_snail) → {path, ts}}
+_path_cache: dict[str, dict] = {}
+_PATH_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_cached_path(session_id: str, from_snail: str, to_snail: str) -> list | None:
+    """Get a cached path, or None if expired/missing."""
+    entries = _path_cache.get(session_id)
+    if not entries:
+        return None
+    key = (from_snail, to_snail)
+    entry = entries.get(key)
+    if not entry:
+        return None
+    if _time.time() - entry["ts"] > _PATH_CACHE_TTL:
+        entries.pop(key, None)
+        return None
+    return entry["path"]
+
+
+def _set_cached_path(session_id: str, from_snail: str, to_snail: str, path: list):
+    if session_id not in _path_cache:
+        _path_cache[session_id] = {}
+    _path_cache[session_id][(from_snail, to_snail)] = {"path": path, "ts": _time.time()}
+
+
+@router.get("/{session_id}/pathfind")
+async def find_path(
+    session_id: uuid.UUID,
+    db: DB,
+    current_user: CurrentUser,
+    from_lat: float = Query(..., description="Start latitude"),
+    from_lon: float = Query(..., description="Start longitude"),
+    to_lat: float = Query(..., description="End latitude"),
+    to_lon: float = Query(..., description="End longitude"),
+):
+    """
+    Find optimal movement path between two points using A* search.
+
+    Returns a list of (lat, lon) waypoints that avoids water, minefields,
+    and prefers roads/open terrain over forest/marsh/mountain.
+
+    Falls back to empty path (straight line) if no terrain data or path not found.
+    """
+    sid = str(session_id)
+
+    # Load grid definition
+    result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    grid_def = result.scalar_one_or_none()
+    if grid_def is None:
+        return {"path": [], "cost": 0, "cells": 0}
+
+    grid_service = GridService(grid_def)
+
+    # Snap to snail paths for cache key
+    from_snail = grid_service.point_to_snail(from_lat, from_lon, depth=1) or ""
+    to_snail = grid_service.point_to_snail(to_lat, to_lon, depth=1) or ""
+
+    # Check path cache
+    if from_snail and to_snail:
+        cached_path = _get_cached_path(sid, from_snail, to_snail)
+        if cached_path is not None:
+            return {"path": cached_path, "cost": 0, "cells": len(cached_path), "cached": True}
+
+    # Load terrain data (use session cache if available)
+    from backend.engine.terrain import get_cached_terrain_data, set_cached_terrain_data
+    cached = get_cached_terrain_data(sid)
+
+    if cached:
+        terrain_cells = cached.get("terrain_cells") or {}
+        elevation_cells = cached.get("elevation_cells") or {}
+        cell_centroids = cached.get("cell_centroids") or {}
+    else:
+        # Load from DB
+        result_tc = await db.execute(
+            select(TerrainCell).where(TerrainCell.session_id == session_id)
+        )
+        cells = result_tc.scalars().all()
+        if not cells:
+            return {"path": [], "cost": 0, "cells": 0}
+
+        terrain_cells = {c.snail_path: c.terrain_type for c in cells}
+        cell_centroids = {c.snail_path: (c.centroid_lat, c.centroid_lon) for c in cells}
+        elev_result = await db.execute(
+            select(ElevationCell).where(ElevationCell.session_id == session_id)
+        )
+        elev_cells = elev_result.scalars().all()
+        elevation_cells = {
+            c.snail_path: {"elevation_m": c.elevation_m, "slope_deg": c.slope_deg, "aspect_deg": c.aspect_deg}
+            for c in elev_cells
+        }
+        set_cached_terrain_data(sid, terrain_cells, elevation_cells)
+        # Also cache centroids (extend the terrain cache entry)
+        _cache_entry = get_cached_terrain_data(sid)
+        if _cache_entry is not None:
+            _cache_entry["cell_centroids"] = cell_centroids
+
+    if not terrain_cells:
+        return {"path": [], "cost": 0, "cells": 0}
+
+    # Build centroids from grid if not available in cache
+    if not cell_centroids:
+        for path in terrain_cells:
+            try:
+                center = grid_service.snail_to_center(path)
+                if center:
+                    cell_centroids[path] = (center.y, center.x)
+            except Exception:
+                pass
+
+    if not cell_centroids:
+        return {"path": [], "cost": 0, "cells": 0}
+
+    # Get user's side for minefield discovery filtering
+    from backend.models.session import SessionParticipant
+    part_result = await db.execute(
+        select(SessionParticipant).where(
+            SessionParticipant.session_id == session_id,
+            SessionParticipant.user_id == current_user.id,
+        )
+    )
+    participant = part_result.scalar_one_or_none()
+    side = participant.side if participant else "blue"
+
+    # Load active map objects (for obstacle avoidance)
+    from backend.models.map_object import MapObject
+    obj_result = await db.execute(
+        select(MapObject).where(
+            MapObject.session_id == session_id,
+            MapObject.is_active == True,  # noqa: E712
+        )
+    )
+    map_objects = obj_result.scalars().all()
+
+    # Build pathfinder and find path
+    from backend.services.pathfinding_service import PathfindingService
+    pathfinder = PathfindingService(
+        terrain_cells=terrain_cells,
+        elevation_cells=elevation_cells,
+        cell_centroids=cell_centroids,
+        grid_service=grid_service,
+        map_objects=map_objects if map_objects else None,
+        side=side,
+    )
+
+    path = pathfinder.find_path(from_lat, from_lon, to_lat, to_lon)
+    if path is None:
+        return {"path": [], "cost": 0, "cells": 0}
+
+    # Convert to [[lat, lon], ...] for JSON
+    path_list = [[round(lat, 7), round(lon, 7)] for lat, lon in path]
+
+    # Cache result
+    if from_snail and to_snail:
+        _set_cached_path(sid, from_snail, to_snail, path_list)
+
+    return {"path": path_list, "cost": 0, "cells": len(path_list)}
+
 

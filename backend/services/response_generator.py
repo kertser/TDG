@@ -33,6 +33,7 @@ class ResponseGenerator:
         response_type: ResponseType,
         reason_key: str | None = None,
         status_text: str = "",
+        support_target: str = "",
     ) -> UnitRadioResponse | None:
         """
         Generate a template-based radio response from a unit.
@@ -43,6 +44,7 @@ class ResponseGenerator:
             response_type: Type of response to generate.
             reason_key: Key for inability reason (destroyed, morale_broken, no_ammo, etc.).
             status_text: Status text to include in status responses.
+            support_target: Name of the unit to support (for standby orders).
 
         Returns:
             UnitRadioResponse or None (for no_response).
@@ -50,12 +52,17 @@ class ResponseGenerator:
         language = parsed.language.value
         unit_name = unit.get("name", "Unknown Unit")
 
+        # Resolve support_target from parsed data if not provided
+        if not support_target and response_type == ResponseType.wilco_standby:
+            support_target = getattr(parsed, "support_target_ref", "") or ""
+
         text = get_template_response(
             unit_name=unit_name,
             response_type=response_type.value,
             language=language,
             reason_key=reason_key,
             status_text=status_text,
+            support_target=support_target,
         )
 
         if text is None:
@@ -138,6 +145,15 @@ class ResponseGenerator:
             # Resupply order → use resupply-specific response
             if order_type == "resupply":
                 return ResponseType.wilco_resupply, None
+            # Observe/standby order for artillery with support_target → standby response
+            if order_type == "observe" and is_fire_unit:
+                support_target = getattr(parsed, "support_target_ref", None)
+                if support_target:
+                    return ResponseType.wilco_standby, None
+                return ResponseType.wilco_observe, None
+            # Static orders (defend, observe, halt) → stationary response (no "moving out")
+            if order_type in ("defend", "observe", "halt"):
+                return ResponseType.wilco_observe, None
             return ResponseType.wilco, None
 
         return ResponseType.ack, None

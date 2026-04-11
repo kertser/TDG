@@ -42,6 +42,18 @@ TEMPLATES_RU = {
         "Здесь {unit}. Принял. Выходим на пополнение боеприпасов. {status_text}",
         "{unit} принял. Начинаем пополнение запасов. {status_text}",
     ],
+    "wilco_observe": [
+        "Здесь {unit}. Принял, занимаю позицию. {status_text}",
+        "{unit}, приём. Так точно, веду наблюдение. {status_text}",
+        "Здесь {unit}. Принял. На позиции. {status_text}",
+        "{unit} принял. Занимаем оборону. {status_text}",
+    ],
+    "wilco_standby": [
+        "Здесь {unit}. Принял, в готовности. {status_text}",
+        "{unit}, приём. Так точно, на связи с {support_target}. В готовности поддержать по команде. {status_text}",
+        "Здесь {unit}. Принял. Жду целеуказания от {support_target}. {status_text}",
+        "{unit} принял. В готовности поддержать {support_target}. Жду команды. {status_text}",
+    ],
     "unable": [
         "Здесь {unit}. Не могу выполнить! {reason}",
         "{unit}, приём. Выполнение невозможно. {reason}",
@@ -109,6 +121,18 @@ TEMPLATES_EN = {
         "This is {unit}. Wilco, proceeding to resupply. {status_text}",
         "{unit}, moving to logistics point for ammunition resupply. {status_text}",
     ],
+    "wilco_observe": [
+        "This is {unit}. Roger, taking position. {status_text}",
+        "{unit}, copy. In position, observing. {status_text}",
+        "This is {unit}. Roger, holding position. {status_text}",
+        "{unit}, in position. Standing by. {status_text}",
+    ],
+    "wilco_standby": [
+        "This is {unit}. Roger, standing by. {status_text}",
+        "{unit}, copy. Linked with {support_target}. Standing by to support on call. {status_text}",
+        "This is {unit}. Roger, awaiting target designation from {support_target}. {status_text}",
+        "{unit}, standing by to support {support_target}. Awaiting fire command. {status_text}",
+    ],
     "unable": [
         "This is {unit}. Unable to comply! {reason}",
         "{unit} here. Cannot execute. {reason}",
@@ -170,6 +194,7 @@ def get_template_response(
     language: str = "en",
     reason_key: str | None = None,
     status_text: str = "",
+    support_target: str = "",
 ) -> str | None:
     """
     Pick a random template response.
@@ -192,6 +217,17 @@ def get_template_response(
     if not pool:
         return None
 
+    # For standby templates, prefer templates with {support_target} if we have one
+    if response_type == "wilco_standby" and support_target:
+        with_target = [t for t in pool if "{support_target}" in t]
+        if with_target:
+            pool = with_target
+    elif response_type == "wilco_standby" and not support_target:
+        # No support target → use templates without {support_target}
+        without_target = [t for t in pool if "{support_target}" not in t]
+        if without_target:
+            pool = without_target
+
     template = random.choice(pool)
 
     # Fill in placeholders
@@ -202,6 +238,7 @@ def get_template_response(
         unit=unit_name,
         reason=reason,
         status_text=status_text,
+        support_target=support_target or "",
     ).strip()
 
 

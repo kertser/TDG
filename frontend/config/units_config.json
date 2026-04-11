@@ -100,6 +100,13 @@
         "fallback_dash": "6,4"
     },
 
+    "selection_trajectory": {
+        "dash_array": "10, 8",
+        "weight": 1.8,
+        "opacity": 0.5,
+        "endpoint_radius": 5
+    },
+
     "size_suffixes": [
         "_battalion", "_company", "_battery", "_platoon",
         "_section", "_squad", "_team", "_post", "_unit"

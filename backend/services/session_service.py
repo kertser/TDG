@@ -72,6 +72,11 @@ async def initialize_session_from_scenario(
     )
     if existing_grid.scalar_one_or_none() is None and scenario.grid_settings:
         gs = scenario.grid_settings
+        # Pre-populate settings_json with peaks cache from scenario if available
+        settings_json = None
+        if scenario.terrain_meta and scenario.terrain_meta.get("peaks_cache"):
+            settings_json = {"peaks_cache": scenario.terrain_meta["peaks_cache"]}
+
         grid_def = GridDefinition(
             session_id=session.id,
             origin=from_shape(
@@ -83,6 +88,7 @@ async def initialize_session_from_scenario(
             columns=gs.get("columns", 8),
             rows=gs.get("rows", 8),
             labeling_scheme=gs.get("labeling_scheme", "alphanumeric"),
+            settings_json=settings_json,
         )
         db.add(grid_def)
 

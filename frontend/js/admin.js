@@ -2874,6 +2874,13 @@ const KAdmin = (() => {
 
             if (resp.ok) {
                 units = await resp.json();
+                // Public CoC should only show own-side units (unless admin panel is open)
+                if (!_adminUnlocked) {
+                    const mySide = typeof KSessionUI !== 'undefined' && KSessionUI.getSide ? KSessionUI.getSide() : 'blue';
+                    if (mySide && mySide !== 'admin' && mySide !== 'observer') {
+                        units = units.filter(u => u.side === mySide);
+                    }
+                }
             } else {
                 // Fallback to admin endpoint if available
                 const adminResp = await fetch(`/api/admin/sessions/${sid}/unit-hierarchy`, {

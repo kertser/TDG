@@ -1501,6 +1501,11 @@ const KUnits = (() => {
                     if (idx >= 0) {
                         Object.assign(allUnitsData[idx], updated);
                     }
+                    // Store pending order so trajectory shows before tick runs
+                    _pendingOrders[unitId] = {
+                        type: 'move',
+                        target_location: { lat: e.latlng.lat, lon: e.latlng.lng },
+                    };
                     render(allUnitsData);
                     const snail = updated.current_task && updated.current_task.target_snail;
                     const coordStr = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
@@ -2138,6 +2143,127 @@ const KUnits = (() => {
             if (!target && u.heading_deg != null && u.heading_deg !== 0) {
                 _drawHeadingIndicator(pos, u.heading_deg, accent);
             }
+
+            // ── Trajectory dashed line for selected moving units ──
+            // Shows terrain-aware path from unit position to destination
+            // Also shows for pending orders (submitted but not yet tick-processed)
+            let trajTarget = target;
+            let trajTaskType = u.current_task && u.current_task.type;
+            if (!trajTarget) {
+                // Check for pending order target
+                const pending = _pendingOrders[uid];
+                if (pending && pending.target_location) {
+                    trajTarget = { lat: pending.target_location.lat, lon: pending.target_location.lon };
+                    trajTaskType = pending.type || 'move';
+                }
+            }
+            if (trajTarget) {
+                const isMoving = trajTaskType && ['move', 'attack', 'advance', 'retreat', 'withdraw', 'disengage', 'resupply'].includes(trajTaskType);
+                const isEngaging = trajTaskType && ['engage', 'fire'].includes(trajTaskType);
+                if (isMoving || isEngaging) {
+                    const to = L.latLng(trajTarget.lat, trajTarget.lon);
+                    const trajCfg = (CFG && CFG.selection_trajectory) || {};
+                    const dashArr = trajCfg.dash_array || '10, 8';
+                    const weight = trajCfg.weight || 1.8;
+                    const opacity = trajCfg.opacity || 0.5;
+                    const endRadius = trajCfg.endpoint_radius || 5;
+                    const lineColor = isEngaging ? '#ff5252' : accent;
+
+                    // Try to get terrain-aware path (async with cache)
+                    const cachedPath = _getCachedPath(uid, pos.lat, pos.lng, trajTarget.lat, trajTarget.lon);
+                    let pathPoints;
+                    if (cachedPath && cachedPath.length >= 2) {
+                        // Use pathfound route: convert [[lat, lon], ...] to L.latLng array
+                        pathPoints = cachedPath.map(p => L.latLng(p[0], p[1]));
+                    } else {
+                        // Straight line fallback (while path is loading or unavailable)
+                        pathPoints = [pos, to];
+                    }
+
+                    // Draw dashed trajectory polyline (curved path or straight)
+                    _selectionLayer.addLayer(L.polyline(
+                        pathPoints, {
+                            color: lineColor,
+                            weight: weight,
+                            opacity: opacity,
+                            dashArray: dashArr,
+                            lineCap: 'round',
+                            interactive: false,
+                        }
+                    ));
+
+                    // Endpoint marker (small circle or crosshair)
+                    if (isEngaging) {
+                        // Crosshair for engage/fire targets
+                        _selectionLayer.addLayer(L.circleMarker(to, {
+                            radius: endRadius,
+                            color: lineColor,
+                            fillColor: 'transparent',
+                            fillOpacity: 0,
+                            weight: 1.5,
+                            opacity: opacity,
+                            interactive: false,
+                        }));
+                    } else {
+                        // Filled circle for movement destinations
+                        _selectionLayer.addLayer(L.circleMarker(to, {
+                            radius: endRadius - 1,
+                            color: lineColor,
+                            fillColor: lineColor,
+                            fillOpacity: 0.25,
+                            weight: 1.5,
+                            opacity: opacity,
+                            interactive: false,
+                        }));
+                    }
+
+                    // Distance label at midpoint of path
+                    // Compute total path distance (sum of segments)
+                    let totalDist = 0;
+                    for (let i = 1; i < pathPoints.length; i++) {
+                        totalDist += _map.distance(pathPoints[i - 1], pathPoints[i]);
+                    }
+                    if (totalDist > 50) {
+                        // Find the point at 50% of total distance along the path
+                        let halfDist = totalDist / 2;
+                        let midPt = pathPoints[Math.floor(pathPoints.length / 2)];
+                        let accum = 0;
+                        for (let i = 1; i < pathPoints.length; i++) {
+                            const segLen = _map.distance(pathPoints[i - 1], pathPoints[i]);
+                            if (accum + segLen >= halfDist) {
+                                const frac = (halfDist - accum) / segLen;
+                                midPt = L.latLng(
+                                    pathPoints[i - 1].lat + (pathPoints[i].lat - pathPoints[i - 1].lat) * frac,
+                                    pathPoints[i - 1].lng + (pathPoints[i].lng - pathPoints[i - 1].lng) * frac
+                                );
+                                break;
+                            }
+                            accum += segLen;
+                        }
+                        const distText = totalDist >= 1000
+                            ? (totalDist / 1000).toFixed(1) + ' km'
+                            : Math.round(totalDist) + ' m';
+                        const distIcon = L.divIcon({
+                            className: 'trajectory-distance-label',
+                            html: `<span style="
+                                font-size: 10px;
+                                color: ${lineColor};
+                                background: rgba(0,0,0,0.6);
+                                padding: 1px 4px;
+                                border-radius: 3px;
+                                white-space: nowrap;
+                                pointer-events: none;
+                            ">${distText}</span>`,
+                            iconSize: [60, 14],
+                            iconAnchor: [30, 7],
+                        });
+                        _selectionLayer.addLayer(L.marker([midPt.lat, midPt.lng], {
+                            icon: distIcon,
+                            interactive: false,
+                        }));
+                    }
+                }
+            }
         });
     }
 
@@ -2158,6 +2284,54 @@ const KUnits = (() => {
             }
         }
         return null;
+    }
+
+    /** Fetch pathfound route for a unit's movement trajectory. */
+    function _fetchPath(unitId, fromLat, fromLon, toLat, toLon) {
+        const key = `${unitId}_${toLat.toFixed(5)}_${toLon.toFixed(5)}`;
+        // Invalidate cache on tick change (re-use viewshed tick tracker)
+        if (_viewshedTick !== _pathCacheTick) {
+            _pathCache = {};
+            _pathPending = {};
+            _pathCacheTick = _viewshedTick;
+        }
+        if (_pathCache[key] !== undefined) return;
+        if (_pathPending[key]) return;
+
+        const sessionId = typeof KSessionUI !== 'undefined' ? KSessionUI.getSessionId() : null;
+        const token = typeof KSessionUI !== 'undefined' ? KSessionUI.getToken() : null;
+        if (!sessionId || !token) return;
+
+        _pathPending[key] = true;
+        const url = `/api/sessions/${sessionId}/pathfind?from_lat=${fromLat}&from_lon=${fromLon}&to_lat=${toLat}&to_lon=${toLon}`;
+        fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+            .then(resp => resp.ok ? resp.json() : null)
+            .then(data => {
+                _pathPending[key] = false;
+                if (data && data.path && data.path.length >= 2) {
+                    _pathCache[key] = data.path;
+                } else {
+                    _pathCache[key] = null;
+                }
+                if (selectedUnitIds.has(unitId)) _drawSelectionOverlays();
+            })
+            .catch(() => {
+                _pathPending[key] = false;
+                _pathCache[key] = null;
+            });
+    }
+
+    /** Get cached path waypoints for a unit, or undefined (triggers async fetch). */
+    function _getCachedPath(unitId, fromLat, fromLon, toLat, toLon) {
+        const key = `${unitId}_${toLat.toFixed(5)}_${toLon.toFixed(5)}`;
+        if (_viewshedTick !== _pathCacheTick) {
+            _pathCache = {};
+            _pathPending = {};
+            _pathCacheTick = _viewshedTick;
+        }
+        if (_pathCache[key] !== undefined) return _pathCache[key];
+        _fetchPath(unitId, fromLat, fromLon, toLat, toLon);
+        return undefined;
     }
 
     function _drawHeadingIndicator(pos, headingDeg, color) {

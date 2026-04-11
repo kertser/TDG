@@ -1562,6 +1562,12 @@ async def admin_save_session_to_scenario(session_id: uuid.UUID, db: DB, user: Cu
         env["start_time"] = session.current_time.isoformat()
         scenario.environment = env
 
+    # Persist elevation peaks cache in scenario terrain_meta for fast loading
+    if grid_def and grid_def.settings_json and grid_def.settings_json.get("peaks_cache"):
+        terrain_meta = dict(scenario.terrain_meta or {})
+        terrain_meta["peaks_cache"] = grid_def.settings_json["peaks_cache"]
+        scenario.terrain_meta = terrain_meta
+
     await db.flush()
 
     return {

@@ -731,6 +731,26 @@ class OrderParser:
             if ref not in target_unit_refs:
                 target_unit_refs.append(ref)
 
+        # Custom callsign patterns: "A-squad", "C-squad", "Alpha", etc.
+        callsign_pat = re.compile(
+            r'\b([A-Za-z]-(?:squad|team|section|platoon|group))\b',
+            re.IGNORECASE,
+        )
+        for m in callsign_pat.finditer(text):
+            ref = m.group().strip()
+            if ref not in target_unit_refs:
+                target_unit_refs.append(ref)
+
+        # Also match standalone known unit names (e.g. "Mortar" alone)
+        standalone_pat = re.compile(
+            r'\b(Mortar|Sniper|Recon|Artillery|HQ|Штаб|Миномёт|Миномет|Разведка|Артиллерия)\b',
+            re.IGNORECASE,
+        )
+        for m in standalone_pat.finditer(text):
+            ref = m.group().strip()
+            if ref not in target_unit_refs:
+                target_unit_refs.append(ref)
+
         # Russian named: "разведгруппа", "миномётная секция"
         ru_named_pat = re.compile(
             r'\b((?:развед\w*|миномёт\w*|минометн\w*|танк\w*|снайпер\w*|сапёрн\w*'
@@ -843,6 +863,49 @@ class OrderParser:
         elif any(kw in text_lower for kw in ["return fire only", "ответный огонь"]):
             engagement_rules = "return_fire_only"
 
+        # ── Support target ref: extract the unit being supported in standby orders ──
+        # e.g. "be ready to support C-squad's targets" → support_target_ref = "C-squad"
+        # e.g. "Будьте готовы поддержать огнём по целям, которые вам передаст C-squad" → "C-squad"
+        support_target_ref = None
+        _is_standby_check = (classification == MessageClassification.command
+                             and order_type == "observe"
+                             and any(kw in text_lower for kw in [
+                                 "get ready", "stand by", "standby", "be ready", "on request",
+                                 "on call", "ready to support", "prepare to support",
+                                 "готовность", "готовьтесь", "будьте готовы", "по запросу",
+                                 "по вызову", "по команде", "в готовности",
+                                 "support", "поддержать", "поддерж", "целям", "передаст",
+                             ]))
+        if _is_standby_check or order_type == "observe":
+            # Look for patterns like "support X", "поддержать X", "targets from X",
+            # "которые вам передаст X", "целям X", "work with X"
+            import re as _re2
+            support_patterns = [
+                # EN: "support [unit]", "support [unit]'s targets"
+                r'support\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon))?)',
+                r"([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon))?)'s\s+(?:targets?|coordinates?|data)",
+                r'targets?\s+from\s+([A-Za-z][\w-]+)',
+                r'work\s+with\s+([A-Za-z][\w-]+)',
+                r'coordinate\s+with\s+([A-Za-z][\w-]+)',
+                # RU: "поддержать X", "целям от X", "передаст X"
+                r'поддержать\s+(?:огнём\s+)?(?:по\s+)?(?:целям[,\s]*)?(?:которые\s+)?(?:вам\s+)?(?:передаст|укажет|назначит)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'поддержать\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'передаст\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'укажет\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'целям\s+(?:от\s+)?([A-Za-zА-Яа-яё][\w-]+)',
+                r'по\s+команде\s+([A-Za-zА-Яа-яё][\w-]+)',
+            ]
+            for pat in support_patterns:
+                m2 = _re2.search(pat, text, _re2.IGNORECASE)
+                if m2:
+                    candidate = m2.group(1).strip().rstrip(".,;!")
+                    # Don't pick up generic words as unit refs
+                    generic = {"огнём", "fire", "support", "targets", "целям", "all", "any",
+                               "the", "вам", "ваши", "your", "his", "their"}
+                    if candidate.lower() not in generic and len(candidate) > 1:
+                        support_target_ref = candidate
+                        break
+
         return ParsedOrderData(
             classification=classification,
             language=lang,
@@ -853,6 +916,7 @@ class OrderParser:
             speed=speed,
             formation=formation,
             engagement_rules=engagement_rules,
+            support_target_ref=support_target_ref,
             confidence=self._compute_keyword_confidence(
                 classification, order_type, location_refs,
                 target_unit_refs, speed, engagement_rules, formation,

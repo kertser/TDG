@@ -50,10 +50,8 @@ logger = logging.getLogger(__name__)
 # responses stay in Russian until the next order arrives in English.
 _session_language: dict[str, str] = {}  # key → "en" or "ru"
 
-# ── Elevation peaks cache per session ──────────────────────
+# ── Elevation peaks: delegates to terrain.py's 3-tier cache ──
 import time as _time
-_peaks_cache: dict[str, tuple[float, list]] = {}  # session_id → (timestamp, peaks)
-_PEAKS_CACHE_TTL = 3600  # 1 hour
 
 
 def _get_session_lang_key(session_id: uuid.UUID, side: str) -> str:
@@ -559,7 +557,9 @@ class OrderService:
                         f"need to advance at least {range_info['deficit_m']}m."
                     )
             elif resp_type in (ResponseType.status, ResponseType.wilco, ResponseType.wilco_fire,
-                               ResponseType.wilco_disengage, ResponseType.wilco_resupply, ResponseType.ack):
+                               ResponseType.wilco_disengage, ResponseType.wilco_resupply,
+                               ResponseType.wilco_observe, ResponseType.wilco_standby,
+                               ResponseType.ack):
                 situation = await self._build_unit_situation(
                     unit_dict, session_id, issuer_side, units_context,
                     db, grid_service,
@@ -694,6 +694,7 @@ class OrderService:
                 response_type=resp_type,
                 reason_key=reason,
                 status_text=status_text,
+                support_target=getattr(parsed, "support_target_ref", "") or "",
             )
             if resp:
                 result.responses.append(resp)
@@ -840,7 +841,14 @@ class OrderService:
         """Process a status request — generate status reports from units."""
         matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
 
-        # If no specific units, report from all own-side units
+        # If no units matched from text, try order.target_unit_ids (from selected units)
+        if not matched and order.target_unit_ids:
+            for uid in order.target_unit_ids:
+                for u in units_context:
+                    if u.get("id") == str(uid):
+                        matched.append(u)
+
+        # Only fall back to all own-side units if BOTH text refs AND target_unit_ids are empty
         if not matched:
             matched = [u for u in units_context
                        if u.get("side") == issuer_side and not u.get("is_destroyed")]
@@ -1130,92 +1138,10 @@ class OrderService:
         session_id: uuid.UUID,
         db: AsyncSession,
     ) -> list[dict]:
-        """Load elevation peaks (local maxima) for height reference resolution."""
-        # Check cache first
-        sid = str(session_id)
-        cached = _peaks_cache.get(sid)
-        if cached:
-            ts, peaks = cached
-            if _time.time() - ts < _PEAKS_CACHE_TTL:
-                return peaks
-
+        """Load elevation peaks using terrain.py's 3-tier cache (memory → DB → compute)."""
         try:
-            from backend.models.elevation_cell import ElevationCell
-
-            result = await db.execute(
-                select(ElevationCell).where(ElevationCell.session_id == session_id)
-            )
-            cells = result.scalars().all()
-            if not cells or len(cells) < 3:
-                return []
-
-            # Build a spatial lookup for neighbor checking
-            cell_list = list(cells)
-            cell_list.sort(key=lambda c: c.snail_path)
-
-            # Estimate cell spacing
-            lats = [c.centroid_lat for c in cell_list]
-            lons = [c.centroid_lon for c in cell_list]
-            if len(set(lats)) < 2:
-                return []
-            sorted_lats = sorted(set(lats))
-            sorted_lons = sorted(set(lons))
-            cell_dlat = (sorted_lats[-1] - sorted_lats[0]) / max(1, len(sorted_lats) - 1) if len(sorted_lats) > 1 else 0.001
-            cell_dlon = (sorted_lons[-1] - sorted_lons[0]) / max(1, len(sorted_lons) - 1) if len(sorted_lons) > 1 else 0.001
-
-            min_lat = min(lats)
-            min_lon = min(lons)
-
-            # Spatial grid index
-            grid_idx: dict[str, list] = {}
-            for c in cell_list:
-                row = round((c.centroid_lat - min_lat) / cell_dlat) if cell_dlat > 0 else 0
-                col = round((c.centroid_lon - min_lon) / cell_dlon) if cell_dlon > 0 else 0
-                key = f"{row},{col}"
-                if key not in grid_idx:
-                    grid_idx[key] = []
-                grid_idx[key].append(c)
-
-            # Find peaks
-            peaks = []
-            min_prominence = 3.0  # meters
-            for cell in cell_list:
-                row = round((cell.centroid_lat - min_lat) / cell_dlat) if cell_dlat > 0 else 0
-                col = round((cell.centroid_lon - min_lon) / cell_dlon) if cell_dlon > 0 else 0
-                neighbors = []
-                for dr in (-1, 0, 1):
-                    for dc in (-1, 0, 1):
-                        if dr == 0 and dc == 0:
-                            continue
-                        key = f"{row + dr},{col + dc}"
-                        if key in grid_idx:
-                            neighbors.extend(grid_idx[key])
-                if not neighbors:
-                    continue
-                max_neighbor = max(n.elevation_m for n in neighbors)
-                if cell.elevation_m > max_neighbor and (cell.elevation_m - max_neighbor) >= min_prominence:
-                    peaks.append({
-                        "snail_path": cell.snail_path,
-                        "lat": cell.centroid_lat,
-                        "lon": cell.centroid_lon,
-                        "elevation_m": round(cell.elevation_m, 1),
-                        "label": f"Height {round(cell.elevation_m)}",
-                        "label_ru": f"Высота {round(cell.elevation_m)}",
-                    })
-
-            # Deduplicate very close peaks
-            peaks.sort(key=lambda p: p["elevation_m"], reverse=True)
-            deduped = []
-            for peak in peaks:
-                too_close = False
-                for existing in deduped:
-                    if abs(peak["lat"] - existing["lat"]) < cell_dlat * 1.5 and abs(peak["lon"] - existing["lon"]) < cell_dlon * 1.5:
-                        too_close = True
-                        break
-                if not too_close:
-                    deduped.append(peak)
-            _peaks_cache[sid] = (_time.time(), deduped)
-            return deduped
+            from backend.api.terrain import get_elevation_peaks_cached
+            return await get_elevation_peaks_cached(session_id, db)
         except Exception as e:
             logger.warning("Failed to load elevation peaks: %s", e)
             return []

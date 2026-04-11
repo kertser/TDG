@@ -1068,3 +1068,145 @@ def generate_coordinated_attack_messages(
 
     return messages
 
+
+# ── Contact During Advance: halt and request orders ────────────
+
+CONTACT_HALT_RU = [
+    "Здесь {unit}! Обнаружен противник в квадрате {contact_grid}, дистанция {dist}м! Прекратили движение, занимаем позицию в {grid}. Запрашиваю разрешение на вступление в бой, приём!",
+    "{unit}, приём! Контакт с противником! {type_desc} в районе {contact_grid}, {dist}м. Остановились в {grid}. Жду указаний — атаковать или обойти? Приём!",
+    "Здесь {unit}. Обнаружен противник ({type_desc}) в квадрате {contact_grid}. Движение остановлено, позиция {grid}. Прошу приказа на дальнейшие действия!",
+]
+
+CONTACT_HALT_EN = [
+    "This is {unit}! Enemy contact at grid {contact_grid}, range {dist}m! Halted, holding position at {grid}. Requesting permission to engage, over!",
+    "{unit}, over! Contact! {type_desc} at {contact_grid}, {dist}m. Halted at {grid}. Awaiting orders — engage or bypass? Over!",
+    "This is {unit}. Enemy detected ({type_desc}) at grid {contact_grid}. Movement halted, position {grid}. Requesting further orders!",
+]
+
+CONTACT_RESUME_RU = [
+    "Здесь {unit}. Команд не поступало, возобновляю движение к цели. Приём.",
+    "{unit}, ответа нет. Продолжаю выполнение задачи, двигаюсь к цели.",
+    "Здесь {unit}. По собственной инициативе продолжаю движение. Приём.",
+]
+
+CONTACT_RESUME_EN = [
+    "This is {unit}. No orders received, resuming advance to objective. Over.",
+    "{unit}, no response. Continuing mission, moving to objective.",
+    "This is {unit}. Resuming movement on own initiative. Over.",
+]
+
+
+def generate_contact_halt_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+    side_languages: dict | None = None,
+) -> list[dict]:
+    """
+    Generate radio messages when units halt due to enemy contact during advance,
+    and when they resume movement after timeout.
+
+    Triggered by 'contact_during_advance' and 'contact_advance_resumed' events.
+    """
+    messages = []
+    units_by_id = {str(u.id): u for u in all_units}
+
+    for evt in tick_events:
+        evt_type = evt.get("event_type")
+
+        if evt_type == "contact_during_advance":
+            actor_id = evt.get("actor_unit_id")
+            if not actor_id:
+                continue
+            unit = units_by_id.get(str(actor_id))
+            if not unit or unit.is_destroyed:
+                continue
+
+            comms = unit.comms_status
+            if hasattr(comms, 'value'):
+                comms = comms.value
+            if comms == "offline":
+                continue
+
+            lang = _get_unit_lang(unit, language, side_languages)
+            templates = CONTACT_HALT_RU if lang == "ru" else CONTACT_HALT_EN
+
+            payload = evt.get("payload", {})
+            grid = payload.get("grid", "?")
+
+            # Find the contact event for this unit to get contact details
+            contact_grid = "?"
+            contact_dist = "?"
+            type_desc = "противник" if lang == "ru" else "enemy"
+            for ce in tick_events:
+                if ce.get("event_type") in ("contact_new",) and str(ce.get("actor_unit_id")) == str(actor_id):
+                    cp = ce.get("payload", {})
+                    c_lat = cp.get("lat")
+                    c_lon = cp.get("lon")
+                    if grid_service and c_lat is not None and c_lon is not None:
+                        try:
+                            snail = grid_service.point_to_snail(c_lat, c_lon, depth=2)
+                            if snail:
+                                contact_grid = snail
+                        except Exception:
+                            pass
+                    c_type = cp.get("estimated_type", "")
+                    if c_type:
+                        type_desc = c_type
+                    if c_lat is not None and c_lon is not None and unit.position:
+                        try:
+                            from geoalchemy2.shape import to_shape
+                            import math
+                            pt = to_shape(unit.position)
+                            dlat = (c_lat - pt.y) * 111320
+                            dlon = (c_lon - pt.x) * 74000
+                            contact_dist = str(round(math.sqrt(dlat ** 2 + dlon ** 2)))
+                        except Exception:
+                            pass
+                    break
+
+            side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+            text = random.choice(templates).format(
+                unit=unit.name, grid=grid,
+                contact_grid=contact_grid, dist=contact_dist,
+                type_desc=type_desc,
+            )
+            messages.append({
+                "sender_name": unit.name,
+                "side": side,
+                "text": text,
+                "is_unit_response": True,
+                "response_type": "contact_halt",
+            })
+
+        elif evt_type == "contact_advance_resumed":
+            actor_id = evt.get("actor_unit_id")
+            if not actor_id:
+                continue
+            unit = units_by_id.get(str(actor_id))
+            if not unit or unit.is_destroyed:
+                continue
+
+            comms = unit.comms_status
+            if hasattr(comms, 'value'):
+                comms = comms.value
+            if comms == "offline":
+                continue
+
+            lang = _get_unit_lang(unit, language, side_languages)
+            templates = CONTACT_RESUME_RU if lang == "ru" else CONTACT_RESUME_EN
+            side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+            text = random.choice(templates).format(unit=unit.name)
+            messages.append({
+                "sender_name": unit.name,
+                "side": side,
+                "text": text,
+                "is_unit_response": True,
+                "response_type": "contact_resume",
+            })
+
+    return messages
+

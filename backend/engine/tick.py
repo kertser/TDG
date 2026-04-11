@@ -401,12 +401,27 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     # ── 3c. Same-tick target resolution from newly detected contacts ──
     # If Blue detects Red THIS tick, Blue attack units should immediately get
     # target info rather than waiting until next tick's step 1b.
+    #
+    # ALSO: Units with 'move' tasks that detect new enemies HALT and report,
+    # waiting for commander orders. Units with 'attack' tasks continue (they expect contact).
+    # After CONTACT_HALT_TICKS ticks without orders, unit resumes movement (initiative).
+    CONTACT_HALT_TICKS = 3  # ticks to wait before resuming on own initiative
+
     if new_contacts_data:
         # Reload contacts from DB (now includes this tick's detections)
         _fresh_contacts_result = await db.execute(
             select(Contact).where(Contact.session_id == session_id, Contact.is_stale == False)
         )
         _fresh_contacts = list(_fresh_contacts_result.scalars().all())
+
+        # Build set of unit_ids that just detected something new this tick
+        # (from contact_new events created by _upsert_contacts above)
+        new_detection_observer_ids = set()
+        for evt in all_events:
+            if evt.get("event_type") == "contact_new":
+                obs_id = evt.get("actor_unit_id")
+                if obs_id:
+                    new_detection_observer_ids.add(str(obs_id))
 
         for unit in all_units:
             if unit.is_destroyed:
@@ -415,6 +430,55 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
             if not task:
                 continue
             task_type = task.get("type", "")
+
+            # ── Contact halt for move-only units ──
+            # Units with 'move' (not attack/engage) tasks that detect new enemies this tick
+            # should halt and report, waiting for commander input.
+            uid_str = str(unit.id)
+            if task_type == "move" and uid_str in new_detection_observer_ids:
+                # Don't re-halt if already halted for contact
+                if not task.get("contact_halt"):
+                    new_task = dict(task)
+                    new_task["contact_halt"] = True
+                    new_task["contact_halt_tick"] = tick
+                    new_task["saved_type"] = "move"  # remember original task
+                    new_task["type"] = "halt"  # temporarily halt
+                    unit.current_task = new_task
+                    # Generate contact halt event
+                    try:
+                        u_pt = to_shape(unit.position)
+                        unit_grid = grid_service.point_to_snail(u_pt.y, u_pt.x, depth=2) if grid_service else ""
+                    except Exception:
+                        unit_grid = ""
+                    u_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+                    all_events.append({
+                        "event_type": "contact_during_advance",
+                        "text_summary": f"{unit.name} halted at {unit_grid} — enemy contact detected. Requesting orders.",
+                        "actor_unit_id": unit.id,
+                        "visibility": u_side,
+                        "payload": {"grid": unit_grid, "unit_name": unit.name},
+                    })
+                    continue  # Don't resolve attack targets for move-halted units
+
+            # ── Resume movement for contact-halted units after timeout ──
+            if task.get("contact_halt") and task_type == "halt":
+                halt_tick = task.get("contact_halt_tick", tick)
+                if tick - halt_tick >= CONTACT_HALT_TICKS:
+                    # Resume original movement on own initiative
+                    new_task = dict(task)
+                    new_task["type"] = new_task.pop("saved_type", "move")
+                    new_task.pop("contact_halt", None)
+                    new_task.pop("contact_halt_tick", None)
+                    unit.current_task = new_task
+                    all_events.append({
+                        "event_type": "contact_advance_resumed",
+                        "text_summary": f"{unit.name} resuming advance on own initiative.",
+                        "actor_unit_id": unit.id,
+                        "visibility": unit.side.value if hasattr(unit.side, 'value') else str(unit.side),
+                    })
+                continue  # Don't override contact-halted unit's task
+
+            # ── Attack/engage/fire target resolution (existing logic) ──
             if task_type not in ("attack", "engage", "fire"):
                 continue
             if task.get("target_location"):
@@ -745,6 +809,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         generate_combat_coordination_messages,
         generate_artillery_fire_messages,
         generate_coordinated_attack_messages,
+        generate_contact_halt_messages,
     )
     from backend.models.chat_message import ChatMessage
 
@@ -776,10 +841,14 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         all_units, all_events, tick,
         grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
+    contact_halt_msgs = generate_contact_halt_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
+    )
 
-    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs + arty_fire_msgs + coord_attack_msgs
+    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs + arty_fire_msgs + coord_attack_msgs + contact_halt_msgs
     if _debug:
-        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)} arty_fire={len(arty_fire_msgs)} coord_attack={len(coord_attack_msgs)}")
+        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)} arty_fire={len(arty_fire_msgs)} coord_attack={len(coord_attack_msgs)} contact_halt={len(contact_halt_msgs)}")
         # Log contact events for debugging detection→radio pipeline
         contact_new_evts = [e for e in all_events if e.get("event_type") in ("contact_new", "contact_refreshed")]
         dlog(f"  [10c] Contact events in all_events: {len(contact_new_evts)}")
