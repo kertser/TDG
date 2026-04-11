@@ -316,6 +316,13 @@ def process_detection(
                         prob *= 0.05
                     prob = min(prob, 0.25)  # cap at 25% — concealed units are HARD to find
 
+                    # Close-range floor for concealed units: even the best camouflage
+                    # fails when someone is standing right next to you.
+                    if dist < 30.0:
+                        prob = max(prob, 0.80)  # nearly on top of them
+                    elif dist < 80.0:
+                        prob = max(prob, 0.50)  # very close
+
                     roll = _deterministic_roll(tick, observer.id, target.id)
                     if roll < prob:
                         accuracy = max(80.0, dist * 0.1 + (1.0 - prob) * 300.0)
@@ -385,6 +392,16 @@ def process_detection(
 
                 prob = base_prob * distance_factor * posture_mod * recon_bonus * target_concealment * smoke_mod
                 prob = min(prob, 0.95)  # cap at 95%
+
+                # Close-range detection floor: at very close range, detection is
+                # nearly guaranteed regardless of posture/terrain.  You can't hide
+                # from someone walking through your position.
+                if dist < 50.0:
+                    prob = max(prob, 0.95)  # point-blank: near-certain
+                elif dist < 150.0:
+                    prob = max(prob, 0.75)  # very close: highly likely
+                elif dist < 300.0:
+                    prob = max(prob, 0.50)  # close: more likely than not
 
                 roll = _deterministic_roll(tick, observer.id, target.id)
 

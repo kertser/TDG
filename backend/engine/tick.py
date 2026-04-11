@@ -372,8 +372,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
 
     _t0 = time.monotonic()
+    # Pass weather_mod (not combined) — detection handles night_mod internally
+    # via per-observer NVG check (obs_night_mod), avoiding double application.
     new_contacts_data = process_detection(
-        blue_units, red_units, tick, terrain, combined_visibility_mod,
+        blue_units, red_units, tick, terrain, weather_mod,
         los_service=los_service,
         map_objects=map_objects_list,
         night_mod=night_mod,
@@ -883,8 +885,9 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     return {
         "tick": session.tick,
         "game_time": _iso_utc(session.current_time),
-        "events_count": len(all_events),
-        "units_alive": sum(1 for u in all_units if not u.is_destroyed),
+        "events_count": sum(1 for e in all_events if e.get("event_type") not in ("red_ai_decision", "red_ai_error")),
+        "units_alive_blue": sum(1 for u in all_units if not u.is_destroyed and u.side == "blue"),
+        "units_alive_red": sum(1 for u in all_units if not u.is_destroyed and u.side == "red"),
         "radio_messages": radio_broadcast,
         "reports": report_broadcast,
         "_raw_events": all_events,  # for combat impact visualization

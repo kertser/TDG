@@ -546,6 +546,25 @@ async def advance_tick(session_id: uuid.UUID, db: DB, user: CurrentUser):
 
     # Strip internal data before returning
     result.pop("_raw_events", None)
+    result.pop("_smoke_updated", None)
+    # Radio messages and reports are delivered per-side via WebSocket, not HTTP.
+    # Remove from HTTP response to prevent fog-of-war leaks (response contains ALL sides).
+    result.pop("radio_messages", None)
+    result.pop("reports", None)
+
+    # Fog-of-war: only expose alive count for the requesting user's side
+    # Admin/observer can see total; regular players only see own side
+    p_side = participant.side.value if hasattr(participant.side, 'value') else str(participant.side)
+    if p_side in ("admin", "observer"):
+        result["units_alive"] = result.get("units_alive_blue", 0) + result.get("units_alive_red", 0)
+    elif p_side == "blue":
+        result["units_alive"] = result.get("units_alive_blue", 0)
+    elif p_side == "red":
+        result["units_alive"] = result.get("units_alive_red", 0)
+    else:
+        result["units_alive"] = result.get("units_alive_blue", 0)
+    result.pop("units_alive_blue", None)
+    result.pop("units_alive_red", None)
 
     if _debug:
         dlog(f"  [post-tick] Total broadcast: {_time.monotonic() - _t_bc_start:.2f}s")

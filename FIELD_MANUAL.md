@@ -1988,6 +1988,83 @@ When making tactical decisions, evaluate:
 - **Field hospitals**: +0.01 strength/tick for recovery.
 - **Rest**: Units out of combat slowly recover: +0.003 strength/tick (first 5 ticks), +0.008/tick (after 5 rest ticks).
 - **Doctrine**: Position logistics assets in protected rear areas, close enough to support front-line units. Protect them from enemy action — logistics are high-value targets.
+
+### C.13 River Crossings & Bridge Operations
+
+- **Water terrain blocks movement**: Units halt at water cells if no bridge is within 60m. Both vehicles and infantry require bridges.
+- **Bridge types**: Map object bridges (`bridge_structure`) and OSM-sourced bridge terrain cells both allow crossing.
+- **AVLB deployment**: Engineer AVLB vehicles can deploy bridges at river crossing points. Move AVLB to the river bank, then assign engineering task.
+- **Tactical procedure**:
+  1. Recon identifies crossing point
+  2. Artillery/mortar suppresses far bank
+  3. AVLB moves to bank and deploys bridge
+  4. Infantry crosses under suppressive fire
+  5. Establish bridgehead on far bank
+  6. Expand bridgehead, bring up follow-on forces
+- **Risk**: Bridges are chokepoints. Avoid concentrating forces at a single crossing. If possible, use multiple crossing points.
+- **Doctrine**: Never attempt a river crossing without suppressing the far bank. The crossing force is extremely vulnerable during transit.
+
+### C.14 Obstacle Breaching
+
+- **Minefield detection**: Units approaching a discovered minefield halt automatically and report "detected minefield ahead, requesting engineers."
+- **Discovery requirement**: Only minefields discovered by the unit's side trigger the halt. Undiscovered minefields damage units that enter.
+- **Engineer breach procedure**:
+  1. Lead element detects minefield → halts
+  2. Engineer/obstacle breacher team moves to minefield
+  3. Engineers breach (engineering task — several ticks depending on obstacle size)
+  4. Lead element resumes advance through cleared lane
+- **Barbed wire**: Slows movement but does not halt. Engineers can breach faster.
+- **Doctrine**: Always have engineers in the lead element's follow-on echelon. Never attempt to push through a minefield without breach assets — casualties will be severe.
+
+### C.15 Urban Operations
+
+- **Terrain modifiers**: Urban terrain provides high protection (×1.5) but severely limits visibility (×0.5) and movement (×0.4).
+- **Pillboxes**: Fixed fortifications providing additional protection bonus to nearby defenders.
+- **Entrenchments**: Linear defensive positions providing dig-in bonus.
+- **Tactical procedure (building clearance)**:
+  1. Isolate the objective (prevent reinforcement/withdrawal)
+  2. Suppress with indirect fire (mortar/artillery preparatory fire)
+  3. Assault with infantry in line formation (slow speed for control)
+  4. Mech/armor provides direct fire support from covered positions
+  5. Clear systematically — do NOT bypass defended buildings
+- **Combined arms**: Infantry leads in urban terrain. Armor supports with direct fire but is vulnerable to AT weapons in close quarters. Engineers breach obstacles and fortifications.
+- **Doctrine**: Urban combat is slow, attritional, and ammunition-intensive. Expect 3:1 casualty ratios favoring the defender. Use overwhelming force and firepower before committing infantry.
+
+### C.16 Defense in Depth
+
+- **Concept**: Multiple defensive lines arranged in depth rather than a single line.
+- **Three-line structure**:
+  - **Forward security (screening)**: Light forces (recon, sections) observe, report, and delay. Disengage on contact with main enemy force.
+  - **Main defense line**: Main body digs in with entrenchments. AT teams, MG positions. Holds the enemy.
+  - **Reserve/counterattack**: Fresh platoon/company held behind main line. Counterattacks to restore forward positions or exploit enemy weakness.
+- **Disengage timing**: Forward security withdraws when:
+  - Enemy strength is clearly superior
+  - Mission is to delay, not hold
+  - Main defense is ready to receive
+- **Doctrine**: Never put all forces on a single line. Depth absorbs the enemy's momentum. The reserve is the commander's most important tool — commit it decisively, not piecemeal.
+
+### C.17 Smoke Employment
+
+- **Purpose**: Smoke screens conceal friendly movement from enemy observation and fire.
+- **Effects**: Smoke reduces detection to ×0.1 within the smoke area. Dissipates after ~3 ticks.
+- **Employment methods**:
+  - Artillery/mortar smoke rounds (`fire-smoke` order)
+  - Area effect placement (admin/scenario)
+- **Tactical procedure (smoke and advance)**:
+  1. Mortar fires smoke between friendly and enemy positions
+  2. Wait 1-2 ticks for smoke to form
+  3. Infantry advances through smoke screen at fast speed
+  4. Close with enemy before smoke dissipates
+- **Limitations**: Smoke blinds both sides. Friendly units in smoke also cannot observe. Wind (not yet modeled) would affect smoke drift.
+- **Doctrine**: Smoke is a force multiplier for the attacker crossing open ground. Place smoke on the enemy position or between forces, never on your own troops. Time the advance carefully — smoke is brief.
+
+### C.18 Elevation & Height Advantage
+
+- **Movement**: Slope penalty: `slope_factor = max(0.2, 1.0 - slope_deg/45)`. Steep slopes (>20°) reclassify terrain to mountain.
+- **Detection**: Higher ground bonus: +10% detection range per 50m height advantage. Observer on high ground sees farther and over obstacles.
+- **Combat**: Height advantage: +15% fire effectiveness when firing downhill. Attackers moving uphill are exposed and slowed.
+- **Key terrain**: Height tops (local elevation maxima) are tactically critical. They provide observation, fields of fire, and defensive advantage. Seize or deny them.
+- **Doctrine**: Always seek the high ground. Defend from heights when possible. If attacking uphill, suppress the defender with overwhelming fire before closing. Use covered approaches (gullies, reverse slopes) to avoid observation from the heights.
 <!-- DOCTRINE:FULL:END -->
 
 ---
@@ -2032,6 +2109,14 @@ When making tactical decisions, evaluate:
 4. Use terrain advantage — height, cover, concealment.
 5. Coordinate fires with maneuver — suppress before assault, cease fire before storming.
 6. Units attacking same target coordinate roles: suppress/flank/assault.
+
+#### Special Operations (Brief)
+- **River crossing**: Units halt at water without bridge. AVLB deploys bridges. Suppress far bank before crossing.
+- **Obstacle breach**: Infantry halts at discovered minefields. Engineers breach. Do not push through without breach assets.
+- **Urban clearing**: Infantry leads, armor supports with direct fire. Suppress before assault. Expect 3:1 casualty ratio favoring defender. Slow and systematic.
+- **Defense in depth**: Forward security → main defense → reserve. Forward disengages on contact, main holds, reserve counterattacks.
+- **Smoke**: Mortar smoke screens conceal advancing infantry (detection ×0.1). Place between forces, not on own troops. Advance through quickly — smoke dissipates in ~3 ticks.
+- **Elevation**: High ground gives +15% fire effectiveness, +10% detection range per 50m height advantage. Defend from heights. If attacking uphill, suppress heavily first.
 <!-- DOCTRINE:BRIEF:END -->
 
 ---
@@ -2094,6 +2179,6 @@ doctrine.py (posture profiles)
 
 ---
 
-*Last updated: 2026-04-10*
+*Last updated: 2026-04-11*
 *Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/prompts/tactical_doctrine.py`, `backend/engine/radio_chatter.py`*
 

@@ -239,6 +239,11 @@ class OrderParser:
                     if "max_tokens" in err_str or "max_completion_tokens" in err_str:
                         create_kwargs.pop("max_completion_tokens", None)
                         response = await client.chat.completions.create(**create_kwargs)
+                    elif "temperature" in err_str:
+                        create_kwargs.pop("temperature", None)
+                        response = await client.chat.completions.create(**create_kwargs)
+                        create_kwargs.pop("max_completion_tokens", None)
+                        response = await client.chat.completions.create(**create_kwargs)
                     else:
                         raise
 

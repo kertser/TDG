@@ -80,7 +80,7 @@ for i in range(10):
     result = r.json()
     events_count = result['events_count']
     marker = '📡' if events_count > 0 else '  '
-    print(f'{marker} Tick {result["tick"]:3d}: {events_count} events, {result["units_alive"]} alive')
+    print(f'{marker} Tick {result["tick"]:3d}: {events_count} events, {result.get("units_alive", "?")} alive (own side)')
 
 # ── Final state ──────────────────────────────────────
 print('\n── Final Unit Positions ──')

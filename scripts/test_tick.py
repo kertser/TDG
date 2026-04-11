@@ -49,7 +49,7 @@ for i in range(5):
         print(f'Tick {i+1} FAILED: {r.status_code} {r.text}')
         break
     result = r.json()
-    print(f'Tick {result["tick"]}: {result["events_count"]} events, {result["units_alive"]} units alive')
+    print(f'Tick {result["tick"]}: {result["events_count"]} events, {result.get("units_alive", "?")} units alive (own side)')
 
 # ── Check events ────────────────────────────────────
 r = httpx.get(f'{base}/api/sessions/{session_id}/events', headers=headers)

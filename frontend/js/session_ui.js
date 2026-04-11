@@ -163,7 +163,7 @@ const KSessionUI = (() => {
                     }
                     const data = await resp.json();
                     KGameLog.addEntry(
-                        `Turn ${data.tick}: ${data.events_count} events, ${data.units_alive} alive`,
+                        `Turn ${data.tick}: ${data.events_count} events`,
                         'info'
                     );
                     // Clear pending orders — they've been executed
