@@ -1131,7 +1131,7 @@ if unit.ammo <= 0:
 
 ## Appendix A: Implementation Status
 
-> Last updated: 2026-04-09
+> Last updated: 2026-04-11
 
 ### Phases Completed / In Progress
 
@@ -1349,6 +1349,7 @@ if unit.ammo <= 0:
 | **Artillery Standby Response Fix** | `response_generator.py` | Fixed mortar responding "ready to engage targets of opportunity" when given a standby order. Root cause: `get_response_type()` returned `wilco_fire` for ALL artillery/mortar units regardless of order type. Fix: now only returns `wilco_fire` when `order_type == "fire"`. For observe/standby orders, artillery uses standard `wilco` response. |
 | **Enemy Personnel Unknown Display** | `units.js` | Fixed enemy units showing exact personnel count ("p20") when it should be unknown due to fog-of-war. For generalized unit types (e.g., "infantry" instead of "infantry_squad"), the `PERSONNEL` lookup returns undefined. Frontend now shows "?p" in tooltip and "? personnel" in info card when personnel count is unknown (enemy units with generalized type). Prevents players from deducing exact enemy strength from personnel display. |
 | **Coordination Order LLM Routing** | `order_parser.py` | Fixed coordination/leadership orders being classified as "fire" orders when they mention "artillery support" or "fire support". Example: "Lead the attack. Coordinate artillery support" was incorrectly classified as `order_type=fire` for infantry unit. Fix: (1) Added coordination keyword detection (`coordinate`, `lead the`, `organize`, `command`), (2) If coordination keywords + attack keywords present → classify as `attack` (not fire), (3) Reduced confidence to 0.50 for any order with coordination keywords to force LLM parsing. Coordination verbs now trigger full LLM model for proper intent resolution. |
+| **Tactical Test Framework** | `scripts/tactical_tests/` | Automated tactical scenario testing framework for validating engine behavior. **Components**: `BaseScenario` ABC (unit/order builders, assertions), `TacticalTestRunner` (session creation, order injection, tick execution), `run_all.py` CLI (runs all scenarios, generates HTML report). **10 scenarios**: basic movement, armored breakthrough, defensive stand, combined arms, recon infiltration, meeting engagement, urban combat, night operations, river crossing, withdraw under pressure. **Assertions**: event_exists, detection_occurs, unit_moved, unit_strength_below/above, order_executed, no_event. **Report**: color-coded HTML with scenario results, per-unit timelines, movement analysis, assertion details. Run with `python -m scripts.tactical_tests.run_all`. |
 
 ### Key Architecture Decisions Made
 
@@ -1528,7 +1529,25 @@ KShU/
     ├── test_simulation.py
     ├── test_tick.py
     ├── test_viewport.py
-    └── verify_system.py
+    ├── verify_system.py
+    └── tactical_tests/            ← Automated tactical scenario testing framework
+        ├── __init__.py
+        ├── base.py                ← BaseScenario ABC, helper functions (grid_center, offset_position, etc.)
+        ├── runner.py              ← TacticalTestRunner: creates sessions, injects orders, runs ticks, evaluates assertions
+        ├── run_all.py             ← CLI entry point: runs all scenarios, generates HTML report
+        ├── analysis.py            ← Deep analysis functions (per-unit timelines, movement tracking, detection events)
+        └── scenarios/             ← Individual tactical scenario files
+            ├── __init__.py
+            ├── s01_basic_movement.py
+            ├── s02_armored_breakthrough.py
+            ├── s03_defensive_stand.py
+            ├── s04_combined_arms.py
+            ├── s05_recon_infiltration.py
+            ├── s06_meeting_engagement.py
+            ├── s07_urban_combat.py
+            ├── s08_night_operations.py
+            ├── s09_river_crossing.py
+            └── s10_withdraw_under_pressure.py
 ```
 
 ### SIDC Code Reference (MIL-STD-2525D 20-character format)

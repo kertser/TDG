@@ -159,6 +159,36 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 | `backend/config.py` | Server configuration: DB URL, Redis, API keys |
 | `.env` | Environment variables (secrets, overrides) |
 
+## Testing
+
+### Tactical Scenario Tests
+Automated tactical scenario tests validate engine behavior (movement, detection, combat, coordination):
+
+```bash
+# Run all tactical scenarios (requires running backend infrastructure)
+python -m scripts.tactical_tests.run_all
+
+# The test runner will:
+# 1. Create a test session with units and orders
+# 2. Execute the specified number of ticks
+# 3. Evaluate assertions (events, detections, unit state)
+# 4. Generate an HTML report: tactical_test_report.html
+```
+
+**10 test scenarios** covering:
+- Basic movement (unit-type-specific speeds)
+- Armored breakthrough (combined arms)
+- Defensive stand (dig-in, return fire)
+- Combined arms coordination
+- Recon infiltration (concealment)
+- Meeting engagement (mutual detection)
+- Urban combat (terrain effects)
+- Night operations (visibility modifiers)
+- River crossing (bridge requirements)
+- Withdraw under pressure (morale, disengage)
+
+See `scripts/tactical_tests/` for scenario definitions and the test framework.
+
 ## API Documentation
 FastAPI auto-generates interactive docs:
 - Swagger UI: `http://localhost:8000/docs`
