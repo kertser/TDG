@@ -105,6 +105,18 @@ class LocationResolver:
         normalized = ref.normalized.strip()
         ref_type = ref.ref_type
 
+        # 0. Contact-target reference — "на цель" / "at the target"
+        # This is resolved later from known enemy contacts; we pass it through as-is.
+        if ref_type == "contact_target":
+            return ResolvedLocation(
+                source_text=ref.source_text,
+                ref_type="contact_target",
+                normalized_ref="nearest_enemy_contact",
+                lat=None,
+                lon=None,
+                confidence=0.5,
+            )
+
         # 1. Try snail path (e.g. "B8-2-4")
         if ref_type == "snail" or self._looks_like_snail(normalized):
             return self._resolve_snail(ref, normalized)

@@ -298,7 +298,9 @@ class OrderParser:
                          "fire on", "fire mission", "shoot", "disengage", "break contact",
                          "hit any", "hit enemy", "engage any", "open fire", "suppress",
                          "capture", "seize", "take", "occupy",
-                         "eliminate", "destroy", "neutralize"]
+                         "eliminate", "destroy", "neutralize",
+                         "call for fire", "request fire", "direct artillery", "call artillery",
+                         "request artillery"]
         command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
@@ -306,7 +308,10 @@ class OrderParser:
                          "поразить", "бей по", "удар по", "подавить", "подавляющ",
                          "захвати", "захват", "овладе", "занять", "займ",
                          "продолжай", "будьте готовы", "координируй", "организуй",
-                         "откройте огонь", "открывай", "выдвину", "приказываю"]
+                         "откройте огонь", "открывай", "выдвину", "приказываю",
+                         "наведите", "наведи", "наводите", "наводи",
+                         "вызовите огонь", "вызови огонь", "запросите огонь", "запроси огонь",
+                         "артиллерию на", "миномёт на", "минометн на"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -315,6 +320,20 @@ class OrderParser:
         classification = MessageClassification.unclear
         order_type = None
 
+        # ── Question detection ──────────────────────────────
+        # Questions like "Почему не наводите?" / "Why aren't you..." are NOT commands.
+        # They're either status requests or unclear messages that need LLM escalation.
+        _question_words_ru = ["почему", "зачем", "отчего", "разве", "неужели",
+                              "как так", "как же", "что за", "с какой стати"]
+        _question_words_en = ["why", "how come", "what the", "why aren't", "why isn't",
+                              "why don't", "why not"]
+        _is_question = (
+            any(text_lower.startswith(q) or f" {q} " in text_lower or f" {q}?" in text_lower
+                for q in _question_words_ru + _question_words_en)
+            or (text.strip().endswith("?") and any(
+                q in text_lower for q in _question_words_ru + _question_words_en))
+        )
+
         # Strong sender-identification signals → status report or ack
         is_self_report = any(kw in text_lower for kw in ["здесь ", "this is "])
 
@@ -322,9 +341,17 @@ class OrderParser:
         has_command_kw = any(kw in text_lower for kw in command_kw_en + command_kw_ru)
         has_ack_kw = any(kw in text_lower for kw in ack_kw)
 
+        # Questions override command detection — classify as status_request or unclear
+        if _is_question:
+            if any(kw in text_lower for kw in status_req_kw):
+                classification = MessageClassification.status_request
+                order_type = "report_status"
+            else:
+                # "Почему не стреляете?" → unclear, low confidence → LLM escalation
+                classification = MessageClassification.unclear
         # If message has BOTH ack AND command keywords, it's a command with ack preamble
         # e.g. "Вас понял. Атакуйте." or "Roger. Move to grid B8."
-        if has_ack_kw and has_command_kw:
+        elif has_ack_kw and has_command_kw:
             classification = MessageClassification.command
         elif has_ack_kw:
             classification = MessageClassification.acknowledgment
@@ -373,12 +400,35 @@ class OrderParser:
             _request_fire_kw = [
                 "request fire", "call for fire", "request artillery", "call artillery",
                 "direct artillery", "need fire support", "need artillery",
-                "наведите артиллерию", "наведи артиллерию", "запросите огонь",
-                "запроси огонь", "вызовите огонь", "вызови огонь",
+                "наведите артиллерию", "наведи артиллерию",
+                "наводите артиллерию", "наводи артиллерию",
+                "наведите миномёт", "наведи миномёт",
+                "наводите миномёт", "наводи миномёт",
+                "наведите миномет", "наведи миномет",
+                "наводите миномет", "наводи миномет",
+                "наведите огонь", "наведи огонь",
+                "наводите огонь", "наводи огонь",
+                "запросите огонь", "запроси огонь",
+                "вызовите огонь", "вызови огонь",
                 "свяжитесь с артиллерией", "свяжись с артиллерией",
                 "свяжитесь с миномёт", "свяжись с миномёт",
                 "свяжитесь с mortar", "свяжись с mortar",
+                "артиллерию на цель", "миномёт на цель", "миномет на цель",
+                "артиллерию на противника", "миномёт на противника",
             ]
+            # Also detect "наведите ... на цель" / "наводите ... на цель" patterns
+            # even if "артиллерию/миномёт" is not right after
+            if not _is_request_fire:
+                _navedi_pattern = any(kw in text_lower for kw in [
+                    "наведите", "наведи", "наводите", "наводи",
+                ])
+                _on_target = any(kw in text_lower for kw in [
+                    "на цель", "на противника", "на врага", "на позиции",
+                    "на позицию противника", "at the target", "at target", "on target",
+                    "at the enemy", "at enemy", "on the enemy",
+                ])
+                if _navedi_pattern and _on_target:
+                    _is_request_fire = True
             _is_request_fire = any(kw in text_lower for kw in _request_fire_kw)
 
             # Determine order type — logic order matters!
@@ -405,7 +455,9 @@ class OrderParser:
                 # "Lead the attack", "coordinate the attack" → attack with coordination
                 order_type = "attack"
             elif any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
-                                                 "огонь по", "огонь на", "открыть огонь", "стреляй"]):
+                                                 "огонь по", "огонь на", "открыть огонь", "стреляй",
+                                                 "огонь по цели", "огонь по целям",
+                                                 "огонь на цель", "откройте огонь"]):
                 # Direct fire commands → fire
                 order_type = "fire"
             elif any(kw in text_lower for kw in ["suppress", "подавить", "подавляющ",
@@ -528,6 +580,29 @@ class OrderParser:
                     "source_text": obj_text,
                     "ref_type": "map_object",
                     "normalized": obj_text.lower(),
+                })
+
+        # ── Implicit target from "на цель" / "по цели" / "at the target" ──
+        # When no explicit location is given but text says "at the target" / "на цель",
+        # this means "at the enemy we've been tracking" → resolve from nearest contact.
+        _target_phrases_ru = ["на цель", "по цели", "по целям", "на противника",
+                              "по противнику", "на врага", "по врагу",
+                              "на позицию противника", "по позиции противника"]
+        _target_phrases_en = ["at the target", "at target", "on target", "at the enemy",
+                              "on the enemy", "at enemy position", "on enemy position"]
+        _has_explicit_location = any(lr["ref_type"] in ("snail", "grid", "coordinate", "height")
+                                     for lr in location_refs)
+        if not _has_explicit_location:
+            _target_match = None
+            for phrase in _target_phrases_ru + _target_phrases_en:
+                if phrase in text_lower:
+                    _target_match = phrase
+                    break
+            if _target_match:
+                location_refs.append({
+                    "source_text": _target_match,
+                    "ref_type": "contact_target",
+                    "normalized": "nearest_enemy_contact",
                 })
 
         # Extract target unit references from text

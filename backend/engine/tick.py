@@ -1130,14 +1130,20 @@ def _order_to_task(order: Order) -> dict | None:
             "direct artillery", "need fire support", "need artillery",
             "наведите артиллерию", "наведи артиллерию", "запросите огонь",
             "запроси огонь", "вызовите огонь", "вызови огонь",
+            "наводите артиллерию", "наводи артиллерию",
+            "наведите миномёт", "наведи миномёт", "наведите миномет",
+            "наводите миномёт", "наводи миномёт", "наводите миномет",
+            "наведите огонь", "наведи огонь",
             "свяжитесь с артиллерией", "свяжись с артиллерией",
             "свяжитесь с миномёт", "свяжись с миномёт",
             "свяжитесь с mortar", "свяжись с mortar",
+            "артиллерию на цель", "миномёт на цель", "миномет на цель",
         ]
         if any(kw in text for kw in _request_fire_kw):
             return {"type": "request_fire", "order_id": str(order.id)}
 
         if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй",
+                                      "огонь на цель", "огонь по цели",
                                       "artillery support", "fire support", "support fire",
                                       "артподдержк", "огневая поддержк"]):
             from backend.engine.combat import DEFAULT_FIRE_SALVOS

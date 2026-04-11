@@ -319,6 +319,65 @@ class OrderService:
         )
         result.resolved_locations = resolved
 
+        # ── Resolve "contact_target" refs from known enemy contacts ──
+        # "на цель" / "at the target" → nearest known enemy contact
+        has_contact_target = any(loc.ref_type == "contact_target" for loc in resolved)
+        if has_contact_target and unit_pos:
+            try:
+                from backend.models.contact import Contact
+                from geoalchemy2.shape import to_shape as _to_shape
+                from sqlalchemy import select as _select
+
+                contacts_result = await db.execute(
+                    _select(Contact).where(
+                        Contact.session_id == session_id,
+                        Contact.is_stale == False,
+                        Contact.observing_side == order.issued_by_side,
+                    )
+                )
+                nearby_contacts = list(contacts_result.scalars().all())
+                best_dist = float('inf')
+                best_contact_lat = None
+                best_contact_lon = None
+                best_contact_uid = None
+
+                for c in nearby_contacts:
+                    if c.location_estimate is None:
+                        continue
+                    try:
+                        cpt = _to_shape(c.location_estimate)
+                        c_lat, c_lon = cpt.y, cpt.x
+                    except Exception:
+                        continue
+                    dlat = (c_lat - unit_pos[0]) * 111320.0
+                    dlon = (c_lon - unit_pos[1]) * 74000.0
+                    dist = (dlat**2 + dlon**2) ** 0.5
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_contact_lat = c_lat
+                        best_contact_lon = c_lon
+                        best_contact_uid = str(c.target_unit_id) if c.target_unit_id else None
+
+                if best_contact_lat is not None:
+                    # Update the contact_target resolved location with actual coordinates
+                    for i, loc in enumerate(resolved):
+                        if loc.ref_type == "contact_target":
+                            resolved[i] = ResolvedLocation(
+                                source_text=loc.source_text,
+                                ref_type="contact_target",
+                                normalized_ref=f"contact@{best_contact_lat:.6f},{best_contact_lon:.6f}",
+                                lat=best_contact_lat,
+                                lon=best_contact_lon,
+                                confidence=0.7,
+                            )
+                            break
+                    logger.info(
+                        "Resolved contact_target to (%f, %f) dist=%.0fm",
+                        best_contact_lat, best_contact_lon, best_dist,
+                    )
+            except Exception as e:
+                logger.warning("Failed to resolve contact_target: %s", e)
+
         # Persist LocationReference rows
         for loc in resolved:
             if loc.lat is not None and loc.lon is not None:
@@ -335,6 +394,7 @@ class OrderService:
                 "terrain": ReferenceType.terrain,
                 "height": ReferenceType.terrain,
                 "map_object": ReferenceType.terrain,
+                "contact_target": ReferenceType.mixed,
             }
             ref_type = ref_type_map.get(loc.ref_type, ReferenceType.mixed)
 
@@ -858,7 +918,8 @@ class OrderService:
 
         # For commands that don't need a location (halt, regroup, report_status, disengage, resupply)
         # Resupply target is auto-resolved by the resupply engine to the nearest supply source
-        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "resupply"):
+        # request_fire target is resolved from nearest enemy contact at tick time
+        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "resupply", "request_fire"):
             return task
 
         # Commands that need a location but don't have one — still valid for

@@ -558,12 +558,25 @@ const KUnits = (() => {
             const _effPers = _persKnown ? Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0))) : null;
             let tooltipHtml;
             if (_isEnemyTt && !_isAdminTt) {
-                // Enemy tooltip: show generic type estimate, NOT real unit name
+                // Enemy tooltip: show detail based on identification level
                 const estimateLabel = u.strength_estimate || (u.strength > 0.75 ? 'full' : u.strength > 0.5 ? 'reduced' : u.strength > 0.25 ? 'weakened' : 'critical');
-                const _enemyTypeLabel = _getEnemyTypeLabel(u);
-                tooltipHtml = `<b>${_enemyTypeLabel}</b> <span style="font-size:10px;color:#ef5350;">[ENEMY]</span>`
-                    + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
-                    + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${estimateLabel}</span>`;
+                if (u.identified) {
+                    // Identified enemy (close range or recon): show real name, type, personnel
+                    const _identPersKnown = PERSONNEL.hasOwnProperty(u.unit_type);
+                    const _identPers = _identPersKnown ? Math.max(0, Math.floor(PERSONNEL[u.unit_type] * (u.strength != null ? u.strength : 1.0))) : null;
+                    const _identPersDisplay = _identPers != null ? `${_identPers}p` : '?p';
+                    const _identStrPct = u.strength != null ? `${Math.round(u.strength * 100)}%` : '?';
+                    tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#ef5350;">[IDENTIFIED]</span>`
+                        + ` <span style="font-size:10px;color:#aaa;">(${_identPersDisplay})</span>`
+                        + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
+                        + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${_identStrPct} strength</span>`;
+                } else {
+                    // Unidentified enemy: generic type and approximate strength
+                    const _enemyTypeLabel = _getEnemyTypeLabel(u);
+                    tooltipHtml = `<b>${_enemyTypeLabel}</b> <span style="font-size:10px;color:#ef5350;">[ENEMY]</span>`
+                        + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
+                        + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${estimateLabel}</span>`;
+                }
             } else {
                 const _persDisplay = _effPers != null ? `${_effPers}p` : '?p';
                 tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${_persDisplay})</span>`

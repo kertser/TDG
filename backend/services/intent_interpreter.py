@@ -27,6 +27,7 @@ _IMPLIED_TASKS = {
     "observe": ["maintain concealment", "report all contacts", "avoid engagement"],
     "support": ["coordinate fires with supported element", "maintain ammunition supply"],
     "fire": ["compute fire solution", "observe effects on target", "adjust fire as needed"],
+    "request_fire": ["identify target for artillery", "provide target coordinates", "observe and adjust fire"],
     "withdraw": ["maintain contact until disengaged", "establish rally point", "report clear"],
     "disengage": ["break contact immediately", "seek nearest covered position", "suppress enemy during withdrawal", "report clear"],
     "halt": ["establish local security", "report status"],
@@ -258,6 +259,10 @@ class IntentInterpreter:
         # ── FIRE orders (indirect fire at location) ──
         if order_type == "fire":
             return "support_by_fire"
+
+        # ── REQUEST FIRE orders (infantry requesting CoC artillery support) ──
+        if order_type == "request_fire":
+            return "request_fire_support"
 
         # ── ATTACK orders ──
         if order_type == "attack":

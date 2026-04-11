@@ -348,6 +348,50 @@ async def get_visible_units(
             session_id, side, own_units, enemy_units, db
         )
 
+    # ── Pre-compute observer distances for identification detail level ──
+    # Close-range identification: if a friendly unit is within IDENT_RANGE,
+    # we can identify exact unit type, echelon, and personnel count.
+    # Recon/sniper/OP units can identify from longer range.
+    IDENT_RANGE_DEFAULT_M = 50.0    # any unit can identify at 50m
+    IDENT_RANGE_RECON_M = 500.0     # recon/sniper/OP can identify from 500m
+
+    _RECON_IDENT_TYPES = {
+        "recon_team", "recon_section", "sniper_team",
+        "observation_post", "engineer_recon_team",
+    }
+
+    # Build own-unit position list with unit_type for recon check
+    _own_positions_for_ident: list[tuple[float, float, str]] = []
+    for _ou in own_units:
+        if _ou.is_destroyed or _ou.position is None:
+            continue
+        try:
+            _oup = to_shape(_ou.position)
+            _own_positions_for_ident.append((_oup.y, _oup.x, _ou.unit_type or ""))
+        except Exception:
+            continue
+
+    def _can_identify_enemy(enemy_unit: Unit) -> bool:
+        """Check if any friendly observer is close enough to identify full detail."""
+        if enemy_unit.position is None:
+            return False
+        try:
+            ept = to_shape(enemy_unit.position)
+            e_lat, e_lon = ept.y, ept.x
+        except Exception:
+            return False
+        for o_lat, o_lon, o_type in _own_positions_for_ident:
+            dlat = (e_lat - o_lat) * 111320.0
+            dlon = (e_lon - o_lon) * 74000.0
+            dist = (dlat * dlat + dlon * dlon) ** 0.5
+            # Any unit at very close range can visually identify
+            if dist <= IDENT_RANGE_DEFAULT_M:
+                return True
+            # Recon/sniper/OP units can identify from longer range
+            if o_type in _RECON_IDENT_TYPES and dist <= IDENT_RANGE_RECON_M:
+                return True
+        return False
+
     all_visible = [_serialize_unit(u) for u in own_units]
     for u in enemy_units:
         serialized = _serialize_unit(u)
@@ -362,29 +406,56 @@ async def get_visible_units(
         serialized["assigned_user_ids"] = None
         serialized["capabilities"] = None
         serialized["formation"] = None
-        # Hide real unit name — replace with generic type estimate
-        serialized["real_name"] = serialized["name"]  # kept for admin
-        serialized["name"] = _make_enemy_label(u.unit_type)
-        # Generalize unit_type to broad category (prevent exact personnel lookup)
-        serialized["real_unit_type"] = serialized["unit_type"]  # kept for admin
-        serialized["unit_type"] = _generalize_unit_type(u.unit_type)
-        # Mask SIDC echelon (positions 9-10) to prevent size deduction from symbol
-        serialized["real_sidc"] = serialized["sidc"]  # kept for admin
-        serialized["sidc"] = _mask_sidc_echelon(u.sidc)
-        # Quantize strength to 25% buckets (approximate observation)
-        raw_strength = serialized.get("strength") or 1.0
-        if raw_strength > 0.75:
-            serialized["strength"] = 1.0
-            serialized["strength_estimate"] = "full"
-        elif raw_strength > 0.50:
-            serialized["strength"] = 0.75
-            serialized["strength_estimate"] = "reduced"
-        elif raw_strength > 0.25:
-            serialized["strength"] = 0.50
-            serialized["strength_estimate"] = "weakened"
+
+        # ── Distance-based identification ──
+        # At close range (or recon observation), we can identify exact unit
+        # type, echelon, name, and accurate strength.
+        identified = _can_identify_enemy(u)
+
+        if identified:
+            # Close/recon identification: show real type, SIDC, and name
+            serialized["real_name"] = serialized["name"]
+            serialized["real_unit_type"] = serialized["unit_type"]
+            serialized["real_sidc"] = serialized["sidc"]
+            # Keep real unit_type, sidc, and name — don't generalize
+            # Still quantize strength to 10% buckets (closer = more accurate)
+            raw_strength = serialized.get("strength") or 1.0
+            if raw_strength > 0.90:
+                serialized["strength"] = round(raw_strength, 1)
+                serialized["strength_estimate"] = "full"
+            elif raw_strength > 0.50:
+                serialized["strength"] = round(raw_strength * 10) / 10  # 10% buckets
+                serialized["strength_estimate"] = "reduced"
+            elif raw_strength > 0.25:
+                serialized["strength"] = round(raw_strength * 10) / 10
+                serialized["strength_estimate"] = "weakened"
+            else:
+                serialized["strength"] = round(raw_strength * 10) / 10
+                serialized["strength_estimate"] = "critical"
+            serialized["identified"] = True
         else:
-            serialized["strength"] = 0.25
-            serialized["strength_estimate"] = "critical"
+            # Standard fog-of-war: generalize type, mask SIDC, hide name
+            serialized["real_name"] = serialized["name"]
+            serialized["name"] = _make_enemy_label(u.unit_type)
+            serialized["real_unit_type"] = serialized["unit_type"]
+            serialized["unit_type"] = _generalize_unit_type(u.unit_type)
+            serialized["real_sidc"] = serialized["sidc"]
+            serialized["sidc"] = _mask_sidc_echelon(u.sidc)
+            # Quantize strength to 25% buckets (approximate observation)
+            raw_strength = serialized.get("strength") or 1.0
+            if raw_strength > 0.75:
+                serialized["strength"] = 1.0
+                serialized["strength_estimate"] = "full"
+            elif raw_strength > 0.50:
+                serialized["strength"] = 0.75
+                serialized["strength_estimate"] = "reduced"
+            elif raw_strength > 0.25:
+                serialized["strength"] = 0.50
+                serialized["strength_estimate"] = "weakened"
+            else:
+                serialized["strength"] = 0.25
+                serialized["strength_estimate"] = "critical"
+            serialized["identified"] = False
         serialized["is_enemy"] = True
         all_visible.append(serialized)
 
