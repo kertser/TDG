@@ -229,23 +229,29 @@ class OrderParser:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_completion_tokens=1000,
+                    max_tokens=1000,
                 )
-                try:
-                    response = await client.chat.completions.create(**create_kwargs)
-                except Exception as api_err:
-                    # Some models don't support max_completion_tokens — retry without it
-                    err_str = str(api_err)
-                    if "max_tokens" in err_str or "max_completion_tokens" in err_str:
-                        create_kwargs.pop("max_completion_tokens", None)
+                # Progressively strip unsupported params (some models reject
+                # max_tokens, temperature, or both — e.g. gpt-5-nano).
+                response = None
+                for _param_attempt in range(3):
+                    try:
                         response = await client.chat.completions.create(**create_kwargs)
-                    elif "temperature" in err_str:
-                        create_kwargs.pop("temperature", None)
-                        response = await client.chat.completions.create(**create_kwargs)
-                        create_kwargs.pop("max_completion_tokens", None)
-                        response = await client.chat.completions.create(**create_kwargs)
-                    else:
-                        raise
+                        break
+                    except Exception as api_err:
+                        err_str = str(api_err)
+                        stripped = False
+                        if ("max_tokens" in err_str or "max_completion_tokens" in err_str):
+                            create_kwargs.pop("max_tokens", None)
+                            create_kwargs.pop("max_completion_tokens", None)
+                            stripped = True
+                        if "temperature" in err_str:
+                            create_kwargs.pop("temperature", None)
+                            stripped = True
+                        if not stripped:
+                            raise
+                if response is None:
+                    raise RuntimeError(f"Failed to call {model} after stripping params")
 
                 raw_content = response.choices[0].message.content
                 if not raw_content:
@@ -416,6 +422,7 @@ class OrderParser:
                 "артиллерию на цель", "миномёт на цель", "миномет на цель",
                 "артиллерию на противника", "миномёт на противника",
             ]
+            _is_request_fire = any(kw in text_lower for kw in _request_fire_kw)
             # Also detect "наведите ... на цель" / "наводите ... на цель" patterns
             # even if "артиллерию/миномёт" is not right after
             if not _is_request_fire:
@@ -429,7 +436,6 @@ class OrderParser:
                 ])
                 if _navedi_pattern and _on_target:
                     _is_request_fire = True
-            _is_request_fire = any(kw in text_lower for kw in _request_fire_kw)
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
