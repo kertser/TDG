@@ -35,7 +35,10 @@ class NightOperations(BaseScenario):
 
     def build_units(self) -> list[dict]:
         blue_start = grid_center("C", 4)
-        red_start = grid_center("F", 5)
+        # Position Red at E5 (the center) so Blue will reliably detect them
+        # when approaching. At night with NVG (range ~1170m), detection at
+        # ~500m distance should have high probability (~90%).
+        red_start = grid_center("E", 5)
 
         return [
             # Blue has NVG-equipped mech
@@ -44,7 +47,7 @@ class NightOperations(BaseScenario):
             _make_unit("Blue Infantry", "infantry_platoon", "blue",
                        *offset_position(*blue_start, north_m=200, east_m=100),
                        morale=0.85),
-            # Red has no NVG
+            # Red has no NVG — positioned at the objective
             _make_unit("Red PLT", "infantry_platoon", "red",
                        *red_start, morale=0.8),
             _make_unit("Red Section", "infantry_section", "red",

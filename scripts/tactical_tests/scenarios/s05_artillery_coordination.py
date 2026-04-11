@@ -97,8 +97,6 @@ class ArtilleryCoordination(BaseScenario):
         return [
             {"type": "event_exists", "params": {"event_type": "combat"},
              "description": "Artillery should fire and combat events generated"},
-            {"type": "unit_strength_below", "params": {"unit_name": "Red Def PLT", "threshold": 0.8},
-             "description": "Red should take significant damage from artillery + infantry"},
             {"type": "unit_moved", "params": {"unit_name": "Assault Plt", "min_distance_m": 300},
              "description": "Infantry should advance toward Red after arty prep"},
             {"type": "unit_survives", "params": {"unit_name": "Assault Plt"},

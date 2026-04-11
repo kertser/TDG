@@ -1134,22 +1134,100 @@ Contact decays → stale after 10 ticks → circle turns gray
 pending → validated → executing → completed | failed | cancelled
 ```
 
-### 19.2 Task Assignment from Orders
+### 19.2 LLM-First Parsing Mode
+
+All orders go through the LLM parser first — keyword matching is only used as a pre-filter hint:
+
+```
+Commander text input
+       │
+       ▼
+┌─────────────────────┐
+│  Keyword Pre-Filter  │  Extracts: language, possible order_type, confidence hint
+│  (deterministic)     │  Does NOT skip LLM — provides routing guidance only
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────┐
+│  LLM Parser (GPT model)                     │
+│                                              │
+│  Context injected:                           │
+│  • Unit roster (names, types, positions)     │
+│  • Grid info (columns, rows, snail system)   │
+│  • Terrain features near units               │
+│  • Known enemy contacts                      │
+│  • Scenario objectives/mission               │
+│  • Friendly unit status (strength, tasks)    │
+│  • Height tops / elevation peaks             │
+│  • Tactical doctrine (brief)                 │
+│  • Game time                                 │
+│                                              │
+│  Output: classification, order_type,         │
+│          location_refs, speed, formation,    │
+│          engagement_rules, urgency           │
+└──────────┬──────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Intent Interpreter  │  Deterministic rules: 25+ patterns
+│  (no LLM)           │  Maps order → tactical action + suggested formation
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Location Resolver   │  Deterministic: snail/grid/coordinate/height/relative
+│  (no LLM)           │  Cyrillic→Latin normalization (Д→D, Е→E, etc.)
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│  Response Generator  │  Template-based unit radio response
+│  (no LLM)           │  Bilingual RU/EN, context-aware
+└──────────┬──────────┘
+           │
+           ▼
+  Task assigned to unit → engine executes
+```
+
+### 19.3 Enriched Context for LLM
+
+The parser receives comprehensive situational awareness:
+
+| Context Type | Content | Example |
+|---|---|---|
+| **Terrain** | Terrain types within 2km of each unit | "forest (C4-5), open (D5-9), urban (D5-4)" |
+| **Contacts** | Known enemy positions from contacts table | "Enemy infantry at E5-3 (confidence 0.8, 800m NE)" |
+| **Objectives** | Scenario victory conditions | "Capture and hold grid squares D5-E5" |
+| **Friendly Status** | Unit strength, tasks, positions | "1st Plt: 85% strength, idle at C3, ammo 90%" |
+| **Height Tops** | Elevation peaks on the map | "Height 170 at D5-3 (170m ASL)" |
+| **Doctrine Brief** | Key tactical principles | Combined arms, fire and movement, etc. |
+
+### 19.4 Message Classifications
+
+| Classification | Description | Example |
+|---|---|---|
+| `command` | Actionable military order | "Move to E5", "Attack position D6" |
+| `status_request` | Request for information | "Report your status", "Доложите обстановку" |
+| `status_report` | Unit reporting information | "In position at D4, no contacts" |
+| `acknowledgment` | Confirmation of received order | "Вас понял", "Roger wilco" |
+| `unclear` | Non-military or unintelligible | Random text, off-topic messages |
+
+### 19.5 Task Assignment from Orders
 
 Orders are parsed into unit tasks using priority:
 1. **Parsed intent** (`parsed_intent.action` + `parsed_intent.destination`)
 2. **Parsed order** (`parsed_order.order_type` + `parsed_order.target_location`)
 3. **Keyword fallback** from `original_text` (halt, stop, move, advance, attack, engage, eliminate, destroy, neutralize, defend, hold, observe, recon, fire at, fire on, disengage, resupply)
 
-### 19.3 Order Precedence
+### 19.6 Order Precedence
 
 For the same unit, the **most recent** order overrides older ones.
 
-### 19.4 Speed Application
+### 19.7 Speed Application
 
 When a move-type order is processed, the speed label (`slow`/`fast`) is looked up in `UNIT_TYPE_SPEEDS` and written to `unit.move_speed_mps`.
 
-### 19.5 Halt Orders
+### 19.8 Halt Orders
 
 `halt` orders clear the unit's current task (`unit.current_task = None`).
 
@@ -1166,14 +1244,58 @@ Radio chatter and unit responses follow the **last language used by the commande
 - Falls back to scenario `environment.language` setting if no orders have been issued yet
 - Language is tracked per `(session_id, side)` and persists across ticks
 
-### 20.2 Idle Radio Messages
+### 20.2 Radio Communication Types
+
+| Message Type | Direction | Trigger | Content |
+|---|---|---|---|
+| **Commander Order** | Commander → Unit | Player submits order | Original text with parsed action |
+| **Unit Acknowledgment** | Unit → Commander | After order received | "Принял", "Wilco", task-specific ack |
+| **Status Report** | Unit → Commander | On request or after action | Position, strength, task, contacts |
+| **Fire Support Request** | Unit → Artillery | Under fire or attacking | Target grid, type, urgency |
+| **Fire Support Ack** | Artillery → Unit | After fire request | Salvo count, ready time |
+| **Support Request** | Unit → Peers | Under heavy fire | Request help from CoC siblings |
+| **Support Ack** | Peer → Unit | After support request | "Moving to assist" |
+| **Casualty Report** | Unit → Commander | Enemy destroyed | Target position, own status |
+| **Idle Report** | Unit → Commander | Task completed | Position, awaiting orders |
+| **Contact Report** | Unit → Commander | New detection | Enemy type, grid, bearing |
+| **Coordination** | Unit → Unit | Combat role assignment | Role announcement (suppress/flank/assault) |
+| **Cease-fire Request** | Infantry → Artillery | Friendly near bombardment | "Cease fire!" |
+| **Cease-fire Ack** | Artillery → Infantry | After cease-fire req | "Ceasing fire" |
+
+### 20.3 Unit Response Protocol
+
+When a unit receives a command, the Response Generator produces a context-aware reply:
+
+```
+Response structure:
+1. Call sign acknowledgment ("Здесь [Unit Name]" / "This is [Unit Name]")
+2. Order acknowledgment type:
+   - wilco: standard confirmation
+   - wilco_fire: artillery fire confirmation
+   - wilco_disengage: retreat confirmation
+   - wilco_resupply: supply run confirmation
+   - unable_range: out of range notification
+   - unable_area: target outside operations area
+   - ack: simple acknowledgment
+3. Tactical assessment (terrain, threats, situation-dependent)
+4. Brief sitrep (position + grid ref + combat status)
+```
+
+Tactical assessments are generated based on:
+- **Terrain type** at unit's position (open = exposed, forest = good cover, urban = close combat)
+- **Elevation** relative to targets (high ground advantage)
+- **Enemy proximity** (contacts within detection range)
+- **Unit strength** (recommendations for reinforcement if below 50%)
+- **Task type** (attack in open = recommend formation change)
+
+### 20.4 Idle Radio Messages
 
 When a unit completes its task and becomes idle:
 - Broadcasts a radio message: "Objective complete, holding at [grid]. Awaiting orders."
 - Only if comms are not `offline`
 - Language matches the side's last-used language
 
-### 20.3 Peer Support Requests
+### 20.5 Peer Support Requests
 
 When a unit is under fire AND (strength < 0.5 OR suppression > 0.5):
 1. Broadcasts support request to CoC siblings (same parent)
@@ -1181,22 +1303,36 @@ When a unit is under fire AND (strength < 0.5 OR suppression > 0.5):
 3. **Cooldown**: 5 ticks between requests per unit
 4. Only if comms are not `offline`
 
-### 20.4 Casualty Reports
+### 20.6 Casualty Reports
 
 When a unit is involved in destroying an enemy:
 - Reports the **target's grid position** (where the enemy was destroyed), not the reporting unit's own position
 - Includes own strength and ammo status
 - For artillery/mortar units, this correctly shows the bombardment zone, not the firing position
 
-### 20.5 Auto-Generated Reports
+### 20.7 Artillery Fire Exchanges
 
-| Report Type | Trigger | Content |
-|------------|---------|---------|
-| **SPOTREP** | New enemy contact detected | Observer, type, grid ref, confidence |
-| **SHELREP** | Unit under significant fire | Unit name, grid, damage, strength |
-| **CASREP** | Unit destroyed | Destroyed unit details |
-| **SITREP** | Every 5 ticks (periodic) | Unit counts, avg strength/morale, ammo status, contacts |
-| **INTSUM** | Every 10 ticks (periodic) | All known contacts with type, grid, confidence |
+When artillery is auto-assigned to support:
+1. Supported unit calls for fire: "Прошу огонь по [grid], дальность [N]м" / "Request fire at [grid], range [N]m"
+2. Artillery acknowledges: "Принял, [N] залпов" / "Roger, [N] salvos"
+3. If cease-fire needed: Infantry halts, requests cease-fire, artillery acknowledges
+4. After artillery stops: Infantry reports clear and resumes advance
+
+### 20.8 Intelligence Reports (Auto-Generated)
+
+| Report Type | Russian Name | Trigger | Content |
+|---|---|---|---|
+| **SPOTREP** | РАЗВЕДДОНЕСЕНИЕ | New enemy contact | Observer, enemy type, grid ref, bearing, distance, confidence |
+| **SHELREP** | ДОНЕСЕНИЕ ОБ ОБСТРЕЛЕ | Unit under significant fire | Unit name, grid, damage %, strength, ammo warning |
+| **CASREP** | ДОНЕСЕНИЕ О ПОТЕРЯХ | Unit destroyed | Destroyed unit details |
+| **SITREP** | ДОКЛАД ОБ ОБСТАНОВКЕ | Every 5 ticks | Per-unit detail (name, type, grid, strength, task, ammo) |
+| **INTSUM** | РАЗВЕД.СВОДКА | Every 10 ticks | All known contacts with type, grid, confidence |
+
+Reports are:
+- Persisted in the `Report` table
+- Broadcast via WebSocket (filtered by side)
+- Available via `GET /sessions/{id}/reports`
+- Bilingual based on scenario language setting
 
 ---
 
@@ -2065,6 +2201,116 @@ When making tactical decisions, evaluate:
 - **Combat**: Height advantage: +15% fire effectiveness when firing downhill. Attackers moving uphill are exposed and slowed.
 - **Key terrain**: Height tops (local elevation maxima) are tactically critical. They provide observation, fields of fire, and defensive advantage. Seize or deny them.
 - **Doctrine**: Always seek the high ground. Defend from heights when possible. If attacking uphill, suppress the defender with overwhelming fire before closing. Use covered approaches (gullies, reverse slopes) to avoid observation from the heights.
+
+### C.19 Radio Communication Protocols
+
+#### C.19.1 Message Format Standards
+All radio communications follow a structured military format. Identification → Content → Acknowledgment.
+
+- **Call Format**: "[Recipient callsign], this is [Sender callsign]. [Message]. Over."
+- **Acknowledgment**: "Roger" / "Wilco" / "Copy" (EN) or "Принял" / "Так точно" / "Вас понял" (RU)
+- **Negative**: "Negative" / "Unable" (EN) or "Отрицательно" / "Не могу выполнить" (RU)
+- **Repeat**: "Say again" / "Repeat" (EN) or "Повторите" / "Не понял" (RU)
+- **End transmission**: "Over" / "Out" (EN) or "Приём" / "Конец связи" (RU)
+
+#### C.19.2 Report Types and Formats
+
+**SPOTREP (Spot Report / Разведдонесение)** — Immediate report of enemy contact:
+- **SALUTE Format**: Size, Activity, Location (grid ref), Unit type, Time observed, Equipment
+- Example EN: "SPOTREP: Enemy platoon-size element, moving east, grid F5-3, infantry with vehicle support, observed 0830."
+- Example RU: "РАЗВЕДДОНЕСЕНИЕ: Противник до взвода, движение на восток, квадрат F5-3, пехота с бронетехникой, замечен в 08:30."
+
+**SITREP (Situation Report / Доклад об обстановке)** — Periodic status update:
+- Contents: Own position (grid ref), strength/casualties, ammo status, enemy activity summary, current task, request for support if needed.
+- Example: "SITREP: Position B4-7. Strength 85%. Ammo adequate. No enemy contact. Continuing advance to objective."
+
+**SHELREP (Shelling Report / Донесение об обстреле)** — When unit is under fire:
+- Contents: Unit name, position, source direction, intensity, damage assessment.
+- Example: "SHELREP: Taking indirect fire from northwest. Grid D6 area. Light casualties, suppressed."
+
+**CASREP (Casualty Report / Донесение о потерях)** — When unit suffers significant losses:
+- Contents: Unit name, position, nature of loss, strength remaining.
+
+**INTSUM (Intelligence Summary / Разведсводка)** — Periodic intelligence rollup:
+- All known enemy contacts with types, positions, confidence levels, and activity patterns.
+
+#### C.19.3 Commander-to-Unit Communication
+
+**Order Format (5-paragraph order, abbreviated for radio)**:
+1. **Situation**: Brief enemy and friendly picture
+2. **Mission**: Clear task statement
+3. **Execution**: How to accomplish (formation, speed, engagement rules)
+4. **Support**: Available fire support, adjacent unit coordination
+5. **Command**: Acknowledge, report markers
+
+**Abbreviated Radio Order Examples**:
+- EN: "Alpha, move to E5, fast, wedge formation. Hold fire until my command."
+- RU: "Альфа, выдвигайтесь в Е5, быстро, клином. Огня не открывать до моей команды."
+- EN: "Bravo, attack enemy position F5. Coordinate with mortar fire. Line formation."
+- RU: "Браво, атаковать позицию противника Ф5. Координируйте с миномётным огнём. Цепью."
+
+#### C.19.4 Unit-to-Commander Communication
+
+Units respond with:
+1. **Acknowledgment**: Confirm receipt of order
+2. **Situation report**: Current position, terrain, threats nearby
+3. **Execution status**: "Moving out" / "Engaging" / "In position"
+4. **Requests**: Resupply, fire support, reinforcement, clarification
+
+**Unit Response Format**: "[Callsign]. [Ack]. [Brief sitrep]. [Execution]. Over."
+- Example: "Здесь Альфа. Принял. Позиция B4-7, открытая местность. Начинаю выдвижение. Приём."
+- Example: "Alpha copies. Grid B4-7, open terrain, no contacts. Moving out. Over."
+
+#### C.19.5 Fire Support Requests
+
+**Call-for-Fire (CFF)** procedure:
+1. **Observer to Fire Direction Center**: "[FDC callsign], this is [Observer]. Fire mission. Over."
+2. **Target location**: Grid reference or coordinates
+3. **Target description**: What the target is
+4. **Method of engagement**: Number of salvos, type of munition, adjust/fire-for-effect
+
+**Examples**:
+- EN: "Mortar Section, fire mission. Grid F5-3. Enemy infantry in the open. Three rounds, fire for effect."
+- RU: "Миномётной секции. Огневая задача. Квадрат Ф5-3. Пехота противника на открытой местности. Три залпа, огонь на поражение."
+- EN: "Request fire support on grid E6. Enemy armor advancing."
+- RU: "Запрашиваю огневую поддержку по квадрату Е6. Бронетехника противника в движении."
+
+**Standby vs Immediate Fire**:
+- "Get ready for fire support on request" → standby (observe), do NOT fire
+- "Fire at grid F5!" → immediate fire mission
+- "Будьте готовы к огневой поддержке по запросу" → standby
+- "Огонь по квадрату Ф5!" → immediate fire
+
+#### C.19.6 Support and Logistics Requests
+
+- **Resupply**: "Requesting resupply. Black on ammo." / "Запрашиваю пополнение. Боеприпасы на нуле."
+- **Medevac**: "Requesting medevac. Multiple casualties." / "Запрашиваю эвакуацию раненых."
+- **Engineer support**: "Need engineers forward. Minefield blocking advance." / "Требуются сапёры. Минное поле блокирует продвижение."
+- **Reinforcement**: "Requesting reinforcement. Under heavy pressure." / "Запрашиваю подкрепление. Под сильным давлением."
+
+### C.20 Intelligence Gathering and Reporting
+
+#### C.20.1 Contact Classification
+- **Confirmed**: Direct visual observation by own unit. High confidence (>0.8).
+- **Probable**: Multiple indirect indicators (movement sounds, tracks, thermal). Medium confidence (0.5-0.8).
+- **Suspected**: Single indicator, uncertain. Low confidence (<0.5).
+
+#### C.20.2 Contact Staleness
+- **Fresh** (0-5 ticks): Enemy was observed recently. Location reliable.
+- **Aging** (5-10 ticks): Enemy may have moved. Location approximate.
+- **Stale** (>10 ticks): Enemy likely moved. Treat as historical data only.
+
+#### C.20.3 Reconnaissance Doctrine
+- Recon units observe and report. They do NOT engage unless cornered.
+- Recon concealment: stationary recon/sniper/OP units are nearly invisible (300m max detection range vs normal 1500m).
+- Moving or firing breaks concealment immediately.
+- Report format: SALUTE — Size, Activity, Location, Unit type, Time, Equipment.
+
+#### C.20.4 Terrain-Aware Intelligence
+- Report terrain type at contact location (forest, urban, open, etc.)
+- Note elevation advantages/disadvantages
+- Identify covered approaches and dead ground
+- Report obstacles discovered (minefields, wire, roadblocks)
 <!-- DOCTRINE:FULL:END -->
 
 ---
@@ -2117,6 +2363,20 @@ When making tactical decisions, evaluate:
 - **Defense in depth**: Forward security → main defense → reserve. Forward disengages on contact, main holds, reserve counterattacks.
 - **Smoke**: Mortar smoke screens conceal advancing infantry (detection ×0.1). Place between forces, not on own troops. Advance through quickly — smoke dissipates in ~3 ticks.
 - **Elevation**: High ground gives +15% fire effectiveness, +10% detection range per 50m height advantage. Defend from heights. If attacking uphill, suppress heavily first.
+
+#### Radio Communication (Brief)
+- **Message format**: Recipient → Sender ID → Content → Over/Приём.
+- **Reports**: SPOTREP (enemy contact: SALUTE), SITREP (periodic status), SHELREP (under fire), CASREP (casualties).
+- **Commander orders**: Task + Location (grid ref) + Speed + Formation + Engagement rules.
+- **Unit responses**: Ack + Position + Terrain + Contacts + Execution status.
+- **Fire support request**: "Fire mission" / "Огневая задача" + Grid + Target + Salvos. "Get ready" / "Будьте готовы" = standby, NOT fire.
+- **Support requests**: "Requesting resupply" / "Запрашиваю пополнение", "Need engineers" / "Требуются сапёры".
+
+#### Intelligence (Brief)
+- **Contact confidence**: Confirmed (visual, >0.8), Probable (indirect, 0.5-0.8), Suspected (<0.5).
+- **Staleness**: Fresh (0-5 ticks), Aging (5-10), Stale (>10, likely moved).
+- **Recon**: Observe, do NOT engage. Stationary recon = nearly invisible. Moving breaks concealment.
+- **Reporting**: Include terrain type, elevation, covered approaches, obstacles at contact location.
 <!-- DOCTRINE:BRIEF:END -->
 
 ---
@@ -2128,14 +2388,43 @@ When making tactical decisions, evaluate:
 
 | LLM Consumer | Doctrine Level | File | Purpose |
 |-------------|---------------|------|---------|
+| **Order Parser** | Full context + Brief doctrine | `backend/services/order_parser.py` | LLM-first parsing of all player messages. Receives enriched context (terrain, contacts, objectives, friendly status, doctrine brief). Keyword hint provides routing guidance only — never skips LLM. |
 | **Red AI Commander** | Full (Appendix C.1–C.12) | `backend/prompts/red_commander.py` | Drives tactical decision-making for AI-controlled Red forces. Injected into system prompt with doctrine-specific behavior instructions. |
-| **Order Parser** | Brief (Appendix C.13) | `backend/prompts/order_parser.py` | Helps LLM understand military terminology, order types, and implied tasks when parsing player radio messages. |
 | **Doctrine Profiles** | Posture-specific | `backend/services/red_ai/doctrine.py` | Each doctrine profile (aggressive/balanced/cautious/defensive) includes posture-specific behavior rules referencing field manual principles. |
 | **Intent Interpreter** | Rules-only (no LLM) | `backend/services/intent_interpreter.py` | Deterministic rules encode tactical doctrine (formations, implied tasks, constraints). No LLM call — 100% cost savings. |
 | **Response Generator** | Templates-only | `backend/services/response_generator.py` | Template-based unit radio responses. Uses military radio protocol but no doctrine injection needed. |
 | **Rule-based Red AI Fallback** | Embedded | `backend/services/red_ai/agent.py` | When LLM unavailable, rule-based decision engine applies doctrine heuristics (combined arms, recon employment, artillery support). |
 
-### D.1 Doctrine Flow (Single Source of Truth)
+### D.1 LLM Parsing Modes
+
+| Mode | Behavior | Config |
+|------|----------|--------|
+| **llm_first** (default) | Keyword pre-filter provides confidence hint → LLM always called. Low confidence → full model, higher → nano model. | `LLM_PARSING_MODE=llm_first` |
+| **keyword_first** (legacy) | High keyword confidence (≥0.80) skips LLM entirely. Medium confidence uses nano model. Low uses full model. | `LLM_PARSING_MODE=keyword_first` |
+
+### D.2 Enriched Context Pipeline
+
+The Order Parser builds comprehensive context for each LLM call:
+
+```
+Session DB ──┬── Terrain Cells ──► Nearby terrain features (2km radius)
+             ├── Contacts ──────► Known enemy positions & types
+             ├── Scenario ──────► Objectives, mission description
+             ├── Units ─────────► Friendly unit positions, status, tasks
+             ├── Elevation ─────► Height tops, peaks nearby
+             └── Grid ──────────► Grid column/row labels, snail system
+                    │
+                    ▼
+              System Prompt
+                    │
+                    ▼
+             LLM API Call (GPT)
+                    │
+                    ▼
+              Parsed Order JSON
+```
+
+### D.3 Doctrine Flow (Single Source of Truth)
 
 ```
 FIELD_MANUAL.md                          ◄── THE SINGLE SOURCE OF TRUTH
@@ -2168,7 +2457,7 @@ doctrine.py (posture profiles)
      (behavioral parameters — HOW aggressive/cautious to apply the doctrine)
 ```
 
-### D.2 How to Update Tactical Doctrine
+### D.4 How to Update Tactical Doctrine
 
 1. **Edit FIELD_MANUAL.md** — Appendix C sections only.
 2. Do NOT edit `tactical_doctrine.py` — it reads from FIELD_MANUAL.md automatically.

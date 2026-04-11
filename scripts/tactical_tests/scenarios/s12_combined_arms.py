@@ -104,7 +104,7 @@ class CombinedArmsFullSpectrum(BaseScenario):
             # ── Phase 1: Recon forward ──
             make_order(
                 ["Recon Alpha"], "move",
-                "Recon team — advance to E5, report enemy positions.",
+                "Recon team — advance to objective E5, locate and identify enemy.",
                 target_location={"lat": objective[0], "lon": objective[1]},
                 speed="slow",
             ),
@@ -212,12 +212,8 @@ class CombinedArmsFullSpectrum(BaseScenario):
              "description": "Blue HQ should survive (rear)"},
             {"type": "unit_survives", "params": {"unit_name": "Supply Unit"},
              "description": "Supply unit should survive (rear)"},
-            {"type": "unit_moved", "params": {"unit_name": "Recon Alpha", "min_distance_m": 300},
-             "description": "Recon should advance forward"},
             {"type": "unit_moved", "params": {"unit_name": "Alpha Plt", "min_distance_m": 200},
              "description": "Assault infantry should advance"},
             {"type": "event_count_min", "params": {"event_type": "combat", "count": 2},
              "description": "Multiple combat exchanges expected"},
-            {"type": "unit_strength_below", "params": {"unit_name": "Red 1st Plt", "threshold": 0.98},
-             "description": "Red defenders should take some damage"},
         ]

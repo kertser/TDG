@@ -111,6 +111,12 @@ class OrderService:
                 for p in elevation_peaks[:30]  # Limit to top 30 peaks
             ]
 
+        # ── 1b. Build enriched context for LLM ───────────────────
+        terrain_ctx = await self._build_terrain_context(session_id, db, units_context, issuer_side)
+        contacts_ctx = await self._build_contacts_context(session_id, db, issuer_side)
+        objectives_ctx = await self._build_objectives_context(session_id, db)
+        friendly_ctx = self._build_friendly_status_context(units_context, issuer_side)
+
         # ── 2. Parse via LLM ────────────────────────────────────
         parsed = await order_parser.parse(
             original_text=original_text,
@@ -118,6 +124,10 @@ class OrderService:
             grid_info=grid_info,
             game_time=game_time,
             issuer_side=issuer_side,
+            terrain_context=terrain_ctx,
+            contacts_context=contacts_ctx,
+            objectives_context=objectives_ctx,
+            friendly_status_context=friendly_ctx,
         )
 
         # ── 2b. Language consistency: enforce last-used language ─────
@@ -1994,6 +2004,193 @@ class OrderService:
         ]
         idx = round(bearing / 22.5) % 16
         return directions[idx]
+
+    # ── Enriched Context Builders ─────────────────────────────────
+
+    async def _build_terrain_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        units_context: list[dict],
+        issuer_side: str,
+    ) -> str:
+        """Build terrain description around friendly unit positions."""
+        try:
+            from backend.models.terrain_cell import TerrainCell
+
+            result = await db.execute(
+                select(TerrainCell.snail_path, TerrainCell.terrain_type,
+                       TerrainCell.elevation_m, TerrainCell.centroid_lat,
+                       TerrainCell.centroid_lon)
+                .where(TerrainCell.session_id == session_id)
+                .limit(500)
+            )
+            cells = result.all()
+            if not cells:
+                return "No terrain data available."
+
+            # Summarize terrain types
+            type_counts: dict[str, int] = {}
+            for _, ttype, *_ in cells:
+                type_counts[ttype] = type_counts.get(ttype, 0) + 1
+
+            lines = ["Terrain in operations area:"]
+            for ttype, count in sorted(type_counts.items(), key=lambda x: -x[1]):
+                lines.append(f"  - {ttype}: {count} cells")
+
+            # Find terrain near friendly units (within ~500m)
+            friendly_units = [u for u in units_context
+                              if u.get("side") == issuer_side
+                              and not u.get("is_destroyed")
+                              and u.get("lat")]
+            if friendly_units and cells:
+                lines.append("Terrain near friendly units:")
+                for u in friendly_units[:6]:
+                    u_lat, u_lon = u["lat"], u["lon"]
+                    nearest = None
+                    nearest_dist = float('inf')
+                    for sp, tt, elev, clat, clon in cells:
+                        if clat and clon:
+                            d = ((clat - u_lat) * 111320) ** 2 + ((clon - u_lon) * 74000) ** 2
+                            if d < nearest_dist:
+                                nearest_dist = d
+                                nearest = (sp, tt, elev)
+                    if nearest:
+                        elev_str = f", elev {nearest[2]:.0f}m" if nearest[2] else ""
+                        lines.append(f"  - {u['name']}: {nearest[1]} ({nearest[0]}{elev_str})")
+
+            return "\n".join(lines)
+        except Exception:
+            return "No terrain data available."
+
+    async def _build_contacts_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+    ) -> str:
+        """Build known enemy contacts description for LLM context."""
+        try:
+            from backend.models.contact import Contact
+
+            result = await db.execute(
+                select(Contact).where(
+                    Contact.session_id == session_id,
+                    Contact.observing_side == issuer_side,
+                    Contact.is_stale == False,
+                ).limit(20)
+            )
+            contacts = result.scalars().all()
+            if not contacts:
+                return "No known enemy contacts."
+
+            lines = [f"Known enemy contacts ({len(contacts)} active):"]
+            for c in contacts:
+                c_lat, c_lon = None, None
+                if c.location_estimate:
+                    try:
+                        pt = to_shape(c.location_estimate)
+                        c_lat, c_lon = pt.y, pt.x
+                    except Exception:
+                        pass
+                pos_str = f" at ({c_lat:.4f}, {c_lon:.4f})" if c_lat else ""
+                conf_str = f"conf={c.confidence:.0%}" if c.confidence else ""
+                etype = c.estimated_type or "unknown"
+                esize = c.estimated_size or ""
+                lines.append(f"  - {etype} {esize}{pos_str} [{conf_str}, {c.source or '?'}]")
+
+            return "\n".join(lines)
+        except Exception:
+            return "No known enemy contacts."
+
+    async def _build_objectives_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> str:
+        """Build mission objectives description for LLM context."""
+        try:
+            from backend.models.session import Session as Sess
+            from backend.models.scenario import Scenario
+
+            sess_result = await db.execute(
+                select(Sess).where(Sess.id == session_id)
+            )
+            session_obj = sess_result.scalar_one_or_none()
+            if not session_obj:
+                return "No objectives defined."
+
+            scen_result = await db.execute(
+                select(Scenario).where(Scenario.id == session_obj.scenario_id)
+            )
+            scenario = scen_result.scalar_one_or_none()
+            if not scenario:
+                return "No objectives defined."
+
+            lines = []
+            if scenario.description:
+                lines.append(f"Mission: {scenario.description[:300]}")
+
+            if scenario.objectives:
+                obj = scenario.objectives
+                if isinstance(obj, dict):
+                    if obj.get("victory_blue"):
+                        lines.append(f"Blue victory: {obj['victory_blue'][:200]}")
+                    if obj.get("victory_red"):
+                        lines.append(f"Red victory: {obj['victory_red'][:200]}")
+                    if obj.get("mission"):
+                        lines.append(f"Objective: {obj['mission'][:200]}")
+
+            if scenario.environment:
+                env = scenario.environment
+                parts = []
+                if env.get("weather"):
+                    parts.append(f"weather={env['weather']}")
+                if env.get("time_of_day"):
+                    parts.append(f"time={env['time_of_day']}")
+                if parts:
+                    lines.append(f"Conditions: {', '.join(parts)}")
+
+            return "\n".join(lines) if lines else "No specific objectives defined."
+        except Exception:
+            return "No objectives defined."
+
+    @staticmethod
+    def _build_friendly_status_context(
+        units_context: list[dict],
+        issuer_side: str,
+    ) -> str:
+        """Build friendly force summary for LLM context."""
+        friendlies = [u for u in units_context
+                      if u.get("side") == issuer_side and not u.get("is_destroyed")]
+        if not friendlies:
+            return "No friendly units."
+
+        # Summary stats
+        total = len(friendlies)
+        avg_strength = sum(u.get("strength", 1.0) for u in friendlies) / total
+        avg_ammo = sum(u.get("ammo", 1.0) for u in friendlies) / total
+        avg_morale = sum(u.get("morale", 1.0) for u in friendlies) / total
+
+        lines = [f"Friendly forces ({total} units): avg strength={avg_strength:.0%}, ammo={avg_ammo:.0%}, morale={avg_morale:.0%}"]
+
+        # Per-unit status (brief)
+        for u in friendlies[:10]:
+            task = u.get("current_task", {})
+            task_str = task.get("type", "idle") if task else "idle"
+            strength = u.get("strength", 1.0)
+            ammo = u.get("ammo", 1.0)
+            status_flags = []
+            if strength < 0.5:
+                status_flags.append("WEAK")
+            if ammo < 0.3:
+                status_flags.append("LOW AMMO")
+            if u.get("suppression", 0) > 0.5:
+                status_flags.append("SUPPRESSED")
+            flag_str = f" [{', '.join(status_flags)}]" if status_flags else ""
+            lines.append(f"  - {u['name']} ({u.get('unit_type', '?')}): {task_str}, str={strength:.0%}{flag_str}")
+
+        return "\n".join(lines)
 
 
 # Singleton

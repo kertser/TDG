@@ -69,7 +69,7 @@ class ArmoredBreakthrough(BaseScenario):
             ),
             make_order(
                 ["Blue Recon"], "move",
-                "Recon team — flank through the forest to the north of E5. Report contacts.",
+                "Recon team — flank north through the forest, reach position north of E5.",
                 target_location={"lat": flank_target[0], "lon": flank_target[1]},
                 speed="slow",
             ),

@@ -139,6 +139,22 @@ Height tops are named terrain features visible on the map.
 
 {game_time}
 
+## Context: Terrain Features Near Units
+
+{terrain_context}
+
+## Context: Known Enemy Contacts
+
+{contacts_context}
+
+## Context: Mission Objectives
+
+{objectives_context}
+
+## Context: Friendly Force Status
+
+{friendly_status_context}
+
 ## Output Format
 
 You MUST respond with a valid JSON object matching this exact schema:
@@ -548,6 +564,166 @@ PARSED:
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []
+}
+
+---
+MESSAGE: "Commander, enemy tank platoon spotted near the forest line at E5-3. Moving northeast. How copy?"
+PARSED:
+{
+  "classification": "status_report",
+  "language": "en",
+  "target_unit_refs": [],
+  "sender_ref": null,
+  "order_type": null,
+  "location_refs": [{"source_text": "E5-3", "ref_type": "snail", "normalized": "E5-3"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": null,
+  "report_text": "SPOTREP: Enemy tank platoon near forest line at E5-3, moving northeast.",
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Командир, наблюдаю противника до взвода в лесополосе, квадрат Е5 улитка 3. Движение на северо-восток."
+PARSED:
+{
+  "classification": "status_report",
+  "language": "ru",
+  "target_unit_refs": [],
+  "sender_ref": null,
+  "order_type": null,
+  "location_refs": [{"source_text": "квадрат Е5 улитка 3", "ref_type": "snail", "normalized": "E5-3"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": null,
+  "report_text": "РАЗВЕДДОНЕСЕНИЕ: Противник до взвода в лесополосе E5-3, движение на северо-восток.",
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "We're low on ammo, requesting resupply at nearest cache."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": [],
+  "sender_ref": null,
+  "order_type": "resupply",
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "resupply ammunition",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["no specific cache location — unit should auto-navigate to nearest supply point"]
+}
+
+---
+MESSAGE: "Артиллерия, огонь по позиции противника в лесу! Квадрат D6 улитка 8. Три залпа!"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Артиллерия"],
+  "sender_ref": null,
+  "order_type": "fire",
+  "location_refs": [{"source_text": "квадрат D6 улитка 8", "ref_type": "snail", "normalized": "D6-8"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "fire on enemy position in forest",
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Запрашиваю огневую поддержку по квадрату E6. Бронетехника противника наступает."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": [],
+  "sender_ref": null,
+  "order_type": "fire",
+  "location_refs": [{"source_text": "квадрату E6", "ref_type": "grid", "normalized": "E6"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "fire support against advancing enemy armor",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["no specific unit targeted — nearest available artillery should respond"]
+}
+
+---
+MESSAGE: "Recon team — flank through the forest to the north of E5. Report contacts."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Recon team"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "to the north of E5", "ref_type": "relative", "normalized": "north of E5"}],
+  "speed": "slow",
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "flanking maneuver with reconnaissance",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["secondary task: report any contacts discovered during movement"]
+}
+
+---
+MESSAGE: "Разведгруппа — обойти противника с востока от B7. При обнаружении доложить."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Разведгруппа"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "с востока от B7", "ref_type": "relative", "normalized": "east of B7"}],
+  "speed": "slow",
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "flanking reconnaissance",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["secondary task: report contacts if discovered"]
+}
+
+---
+MESSAGE: "Scout section, move to position southwest of C6. Observe and report."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Scout section"],
+  "sender_ref": null,
+  "order_type": "move",
+  "location_refs": [{"source_text": "southwest of C6", "ref_type": "relative", "normalized": "southwest of C6"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "observation position",
+  "report_text": null,
+  "confidence": 0.90,
+  "ambiguities": ["secondary task: observe and report from position"]
 }
 
 ---

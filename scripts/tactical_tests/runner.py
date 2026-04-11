@@ -227,11 +227,13 @@ async def main():
     has_openai = _check_openai_key()
     if args.skip_llm:
         scenarios = [s for s in scenarios if s.category != "llm"]
-        logger.info("⏭  Skipping LLM scenarios (--skip-llm)")
+        logger.info("⏭  Skipping pure LLM scenarios (--skip-llm)")
+        logger.info("   Note: engine/tactical/historical scenarios still use LLM for order parsing")
     elif not has_openai:
         llm_count = sum(1 for s in scenarios if s.category == "llm")
         if llm_count > 0:
-            logger.warning("⚠ No OPENAI_API_KEY found. LLM scenarios will be skipped.")
+            logger.warning("⚠ No OPENAI_API_KEY found. Pure LLM scenarios will be skipped.")
+            logger.warning("  Engine/tactical scenarios will use keyword fallback for order parsing.")
             scenarios = [s for s in scenarios if s.category != "llm"]
 
     from scripts.tactical_tests.executor import ScenarioExecutor
@@ -310,10 +312,21 @@ async def main():
                 category=scenario.category,
             )
 
-        # Evaluate assertions (engine + LLM)
+        # Evaluate assertions (engine + LLM for all scenarios)
         assertions = scenario.build_assertions()
         if scenario.category == "llm":
             assertions.extend(scenario.build_llm_assertions())
+        # Auto-add LLM bulk assertions for ALL scenarios with LLM pipeline orders
+        if scenario.use_llm_pipeline or any(
+            o.get("use_llm_pipeline") for o in scenario.build_orders({})
+            if isinstance(o, dict)
+        ):
+            # Validate all orders were parsed by LLM
+            assertions.append({
+                "type": "llm_all_orders_parsed",
+                "params": {},
+                "description": "All orders successfully parsed by LLM pipeline",
+            })
         assertion_results = evaluator.evaluate(result, assertions)
         result.assertions = assertion_results
         result.passed = all(a.passed for a in assertion_results) and not result.errors

@@ -91,23 +91,28 @@ class OrderParser:
         game_time: str = "",
         issuer_side: str | None = None,
         force_full_model: bool = False,
+        # ── Enriched context (optional, injected into LLM prompt) ──
+        terrain_context: str = "",
+        contacts_context: str = "",
+        objectives_context: str = "",
+        friendly_status_context: str = "",
     ) -> ParsedOrderData:
         """
         Parse a radio message into structured data.
 
-        Three-tier routing:
-        1. Run keyword parser first (instant)
-        2. If keyword confidence ≥ 0.8 → return directly (skip LLM, save money)
-        3. If keyword confidence ≥ 0.5 → use cheap nano model (gpt-4o-mini)
-        4. If keyword confidence < 0.5 → use full model (gpt-4.1)
-        5. If no API key → try local model → fall back to keyword result
+        Routing depends on LLM_PARSING_MODE config:
+          "llm_first"     — always call LLM (nano by default); keyword only as fallback
+          "keyword_first"  — legacy 3-tier: keyword→nano→full
+          "keyword_only"   — no LLM calls at all
 
-        If force_full_model=True, skip tiers 1-3 and always use the full model.
+        If force_full_model=True, always use the full model regardless of mode.
         """
-        # ── Step 1: Always run keyword parser first ──
+        # ── Step 1: Always run keyword parser (used as hint or fallback) ──
         keyword_result = self._fallback_parse(original_text)
 
-        # ── Step 2: If forced full model, skip keyword routing ──
+        parsing_mode = settings.LLM_PARSING_MODE
+
+        # ── Step 2: If forced full model, skip all routing ──
         if force_full_model:
             if settings.OPENAI_API_KEY:
                 logger.info("OrderParser: force_full_model — using %s", settings.OPENAI_MODEL)
@@ -116,22 +121,24 @@ class OrderParser:
                     client=self._get_client(),
                     model=settings.OPENAI_MODEL,
                     issuer_side=issuer_side,
+                    terrain_context=terrain_context,
+                    contacts_context=contacts_context,
+                    objectives_context=objectives_context,
+                    friendly_status_context=friendly_status_context,
                 )
                 return result if result else keyword_result
             return keyword_result
 
-        # ── Step 3: High confidence → skip LLM ──
-        if keyword_result.confidence >= CONF_SKIP_LLM:
+        # ── Step 3: keyword_only mode → return keyword result immediately ──
+        if parsing_mode == "keyword_only":
             logger.info(
-                "OrderParser: keyword confidence %.2f ≥ %.2f, skipping LLM. class=%s",
-                keyword_result.confidence, CONF_SKIP_LLM,
-                keyword_result.classification.value,
+                "OrderParser: keyword_only mode. class=%s conf=%.2f",
+                keyword_result.classification.value, keyword_result.confidence,
             )
             return keyword_result
 
-        # ── Step 3: Determine which model to use ──
+        # ── Step 4: No API key → try local model → fall back to keyword ──
         if not settings.OPENAI_API_KEY:
-            # No cloud API → try local model
             local_client = self._get_local_client()
             if local_client:
                 logger.info("OrderParser: no API key, using local model at %s",
@@ -141,11 +148,76 @@ class OrderParser:
                     client=local_client,
                     model=settings.LOCAL_MODEL_NAME,
                     issuer_side=issuer_side,
+                    terrain_context=terrain_context,
+                    contacts_context=contacts_context,
+                    objectives_context=objectives_context,
+                    friendly_status_context=friendly_status_context,
                 )
                 return result if result else keyword_result
             else:
                 logger.warning("OrderParser: no API key and no local model — using keyword result")
                 return keyword_result
+
+        # ── Step 5: LLM-first mode (default) ──
+        if parsing_mode == "llm_first":
+            # Always call LLM — use nano for simple messages, full for complex
+            # Use keyword hints to pick model tier
+            kw_conf = keyword_result.confidence
+            if kw_conf >= 0.70 and keyword_result.classification != MessageClassification.unclear:
+                model = settings.OPENAI_MODEL_NANO
+                tier = "nano"
+            else:
+                model = settings.OPENAI_MODEL
+                tier = "full"
+
+            logger.info(
+                "OrderParser[llm_first]: keyword hint class=%s conf=%.2f → using %s (%s)",
+                keyword_result.classification.value, kw_conf, tier, model,
+            )
+
+            result = await self._call_llm(
+                original_text, units, grid_info, game_time,
+                client=self._get_client(),
+                model=model,
+                issuer_side=issuer_side,
+                terrain_context=terrain_context,
+                contacts_context=contacts_context,
+                objectives_context=objectives_context,
+                friendly_status_context=friendly_status_context,
+            )
+
+            # If nano returned unclear, escalate to full model
+            if result and result.classification == MessageClassification.unclear and tier != "full":
+                logger.info(
+                    "OrderParser[llm_first]: %s classified unclear → escalating to full (%s)",
+                    tier, settings.OPENAI_MODEL,
+                )
+                full_result = await self._call_llm(
+                    original_text, units, grid_info, game_time,
+                    client=self._get_client(),
+                    model=settings.OPENAI_MODEL,
+                    issuer_side=issuer_side,
+                    terrain_context=terrain_context,
+                    contacts_context=contacts_context,
+                    objectives_context=objectives_context,
+                    friendly_status_context=friendly_status_context,
+                )
+                if full_result and full_result.classification != MessageClassification.unclear:
+                    return full_result
+                if full_result:
+                    return full_result
+
+            return result if result else keyword_result
+
+        # ── Step 6: keyword_first mode (legacy 3-tier) ──
+        # High confidence keyword → skip LLM
+        if keyword_result.confidence >= CONF_SKIP_LLM:
+            logger.info(
+                "OrderParser[keyword_first]: keyword confidence %.2f ≥ %.2f, skipping LLM. class=%s",
+                keyword_result.confidence, CONF_SKIP_LLM,
+                keyword_result.classification.value,
+            )
+            return keyword_result
 
         # Choose model tier based on keyword confidence
         if keyword_result.confidence >= CONF_USE_NANO:
@@ -156,22 +228,25 @@ class OrderParser:
             tier = "full"
 
         logger.info(
-            "OrderParser: keyword confidence %.2f → using %s model (%s)",
+            "OrderParser[keyword_first]: keyword confidence %.2f → using %s model (%s)",
             keyword_result.confidence, tier, model,
         )
 
-        # ── Step 4: Call LLM ──
         result = await self._call_llm(
             original_text, units, grid_info, game_time,
             client=self._get_client(),
             model=model,
             issuer_side=issuer_side,
+            terrain_context=terrain_context,
+            contacts_context=contacts_context,
+            objectives_context=objectives_context,
+            friendly_status_context=friendly_status_context,
         )
 
-        # ── Step 5: If result is "unclear" and we used a cheaper model, escalate to full model ──
+        # If unclear, escalate to full model
         if result and result.classification == MessageClassification.unclear and tier != "full":
             logger.info(
-                "OrderParser: %s model classified as 'unclear' — escalating to full model (%s)",
+                "OrderParser[keyword_first]: %s classified unclear → escalating to full (%s)",
                 tier, settings.OPENAI_MODEL,
             )
             full_result = await self._call_llm(
@@ -179,10 +254,13 @@ class OrderParser:
                 client=self._get_client(),
                 model=settings.OPENAI_MODEL,
                 issuer_side=issuer_side,
+                terrain_context=terrain_context,
+                contacts_context=contacts_context,
+                objectives_context=objectives_context,
+                friendly_status_context=friendly_status_context,
             )
             if full_result and full_result.classification != MessageClassification.unclear:
                 return full_result
-            # Full model also unclear — return the full model result (or original)
             if full_result:
                 return full_result
 
@@ -197,6 +275,10 @@ class OrderParser:
         client: AsyncOpenAI,
         model: str,
         issuer_side: str | None = None,
+        terrain_context: str = "",
+        contacts_context: str = "",
+        objectives_context: str = "",
+        friendly_status_context: str = "",
     ) -> ParsedOrderData | None:
         """Call LLM and return parsed result, or None on failure."""
         # Filter units to issuer's side only (reduce prompt tokens)
@@ -213,6 +295,10 @@ class OrderParser:
             grid_info=build_grid_info(grid_info),
             game_time=game_time or "Unknown",
             height_tops_context=_build_height_tops_context(grid_info),
+            terrain_context=terrain_context or "No terrain data available.",
+            contacts_context=contacts_context or "No known enemy contacts.",
+            objectives_context=objectives_context or "No specific objectives defined.",
+            friendly_status_context=friendly_status_context or "No detailed status available.",
         )
         user_msg = build_user_message(original_text)
 
@@ -229,7 +315,7 @@ class OrderParser:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_tokens=1000,
+                    max_completion_tokens=1000,
                 )
                 # Progressively strip unsupported params (some models reject
                 # max_tokens, temperature, or both — e.g. gpt-5-nano).

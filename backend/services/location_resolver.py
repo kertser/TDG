@@ -48,6 +48,34 @@ DIRECTION_BEARINGS = {
 # Default offset distance for relative directions (meters)
 DEFAULT_RELATIVE_OFFSET_M = 500
 
+# Cyrillic-to-Latin mapping for grid column letters
+# Maps Russian letters commonly used for grid references to Latin equivalents
+_CYRILLIC_TO_LATIN = {
+    'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D',
+    'Е': 'E', 'Ж': 'J', 'З': 'Z', 'И': 'I', 'К': 'K',
+    'Л': 'L', 'М': 'M', 'Н': 'N', 'О': 'O', 'П': 'P',
+    'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U', 'Ф': 'F',
+    'Х': 'H', 'Ц': 'C', 'а': 'A', 'б': 'B', 'в': 'V',
+    'г': 'G', 'д': 'D', 'е': 'E', 'ж': 'J', 'з': 'Z',
+    'и': 'I', 'к': 'K', 'л': 'L', 'м': 'M', 'н': 'N',
+    'о': 'O', 'п': 'P', 'р': 'R', 'с': 'S', 'т': 'T',
+    'у': 'U', 'ф': 'F', 'х': 'H', 'ц': 'C',
+}
+
+
+def _normalize_grid_ref(ref: str) -> str:
+    """Normalize a grid reference by converting Cyrillic letters to Latin.
+
+    Examples: "Д5" → "D5", "Б4-3" → "B4-3", "Е5-3-7" → "E5-3-7"
+    """
+    result = []
+    for ch in ref:
+        if ch in _CYRILLIC_TO_LATIN:
+            result.append(_CYRILLIC_TO_LATIN[ch])
+        else:
+            result.append(ch)
+    return ''.join(result)
+
 # Meters per degree (approximate at ~48° latitude)
 METERS_PER_DEG_LAT = 111_320.0
 METERS_PER_DEG_LON = 74_000.0
@@ -104,6 +132,9 @@ class LocationResolver:
         """Resolve a single location reference."""
         normalized = ref.normalized.strip()
         ref_type = ref.ref_type
+
+        # Normalize Cyrillic grid letters to Latin (Д→D, Б→B, etc.)
+        normalized = _normalize_grid_ref(normalized)
 
         # 0. Contact-target reference — "на цель" / "at the target"
         # This is resolved later from known enemy contacts; we pass it through as-is.
@@ -405,7 +436,69 @@ class LocationResolver:
         unit_pos: tuple[float, float] | None,
         heading_deg: float | None,
     ) -> ResolvedLocation:
-        """Resolve a relative direction like 'southeast' or 'слева'."""
+        """Resolve a relative direction like 'southeast' or 'north of E5'."""
+        normalized_lower = normalized.lower().strip()
+
+        # ── Check for "direction of [grid]" pattern ──
+        # e.g., "north of E5", "east of B7", "southwest of C6"
+        grid_relative_pattern = re.match(
+            r'(north|south|east|west|northeast|northwest|southeast|southwest|'
+            r'n|s|e|w|ne|nw|se|sw|'
+            r'север\w*|юг\w*|восток\w*|запад\w*|'
+            r'северо-восток\w*|северо-запад\w*|юго-восток\w*|юго-запад\w*)'
+            r'\s+(?:of|от|от\s+квадрата?|от\s+сектора?)\s*'
+            r'([A-Za-z]\d{1,2}(?:-\d{1,3})?)',
+            normalized_lower,
+            re.IGNORECASE
+        )
+
+        if grid_relative_pattern and self.grid_service:
+            direction = grid_relative_pattern.group(1).lower()
+            grid_ref = grid_relative_pattern.group(2).upper()
+
+            # Get bearing from direction
+            bearing = DIRECTION_BEARINGS.get(direction)
+            if bearing is None:
+                # Try shortened forms
+                direction_map = {
+                    "n": 0, "s": 180, "e": 90, "w": 270,
+                    "ne": 45, "nw": 315, "se": 135, "sw": 225,
+                }
+                bearing = direction_map.get(direction)
+
+            if bearing is not None:
+                # Resolve the grid reference first
+                try:
+                    if '-' in grid_ref:
+                        center = self.grid_service.snail_to_center(grid_ref)
+                    elif self.grid_service.validate_square(grid_ref):
+                        poly = self.grid_service.square_to_polygon(grid_ref)
+                        center = poly.centroid
+                    else:
+                        center = None
+
+                    if center:
+                        # Offset from grid center in the specified direction
+                        offset_m = DEFAULT_RELATIVE_OFFSET_M  # 500m default
+                        bearing_rad = math.radians(bearing)
+                        d_lat = offset_m * math.cos(bearing_rad) / METERS_PER_DEG_LAT
+                        d_lon = offset_m * math.sin(bearing_rad) / METERS_PER_DEG_LON
+
+                        target_lat = center.y + d_lat
+                        target_lon = center.x + d_lon
+
+                        return ResolvedLocation(
+                            source_text=ref.source_text,
+                            ref_type="relative",
+                            normalized_ref=normalized,
+                            lat=target_lat,
+                            lon=target_lon,
+                            confidence=0.75,
+                        )
+                except Exception as e:
+                    logger.warning("Grid-relative resolution failed for %r: %s", normalized, e)
+
+        # ── Fallback: relative to unit position ──
         if unit_pos is None:
             return ResolvedLocation(
                 source_text=ref.source_text,
@@ -415,7 +508,7 @@ class LocationResolver:
             )
 
         # Look up bearing
-        key = normalized.lower().strip()
+        key = normalized_lower
         bearing = DIRECTION_BEARINGS.get(key)
 
         if bearing is None:

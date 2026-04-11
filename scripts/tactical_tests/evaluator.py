@@ -384,6 +384,69 @@ class Evaluator:
             return True, f"Correctly classified as 'unclear'"
         return False, f"Expected 'unclear', got '{snap.classification}'"
 
+    def _check_llm_all_orders_parsed(self, result: ScenarioResult, params: dict) -> tuple[bool, str]:
+        """Check that ALL orders in the scenario were successfully parsed by LLM.
+        
+        This is a bulk assertion that validates every order snapshot has a non-error,
+        non-unclear classification. Used to verify LLM handles all order types.
+        """
+        if not result.order_snapshots:
+            return False, "No order snapshots found — LLM pipeline may not have been used"
+
+        failed = []
+        for i, snap in enumerate(result.order_snapshots):
+            if snap.error:
+                failed.append(f"Order {i} error: {snap.error}")
+            elif not snap.classification:
+                failed.append(f"Order {i}: no classification (text: '{snap.original_text[:40]}')")
+
+        if failed:
+            return False, f"{len(failed)} orders failed: {'; '.join(failed[:3])}"
+
+        total = len(result.order_snapshots)
+        classifications = [s.classification for s in result.order_snapshots]
+        return True, f"All {total} orders parsed by LLM: {classifications}"
+
+    def _check_llm_all_commands_correct(self, result: ScenarioResult, params: dict) -> tuple[bool, str]:
+        """Check that ALL command-type orders have correct classification and order_type.
+        
+        Compares against expected_classification and expected_order_type stored
+        in each order snapshot.
+        """
+        if not result.order_snapshots:
+            return False, "No order snapshots"
+
+        total = 0
+        correct = 0
+        details = []
+        for i, snap in enumerate(result.order_snapshots):
+            if not snap.expected_classification:
+                continue
+            total += 1
+
+            cls_ok = snap.classification == snap.expected_classification
+            type_ok = True
+            if snap.expected_order_type:
+                type_ok = snap.order_type == snap.expected_order_type
+
+            if cls_ok and type_ok:
+                correct += 1
+            else:
+                issue = []
+                if not cls_ok:
+                    issue.append(f"class={snap.classification} expected={snap.expected_classification}")
+                if not type_ok:
+                    issue.append(f"type={snap.order_type} expected={snap.expected_order_type}")
+                details.append(f"Order {i} '{snap.original_text[:40]}': {', '.join(issue)}")
+
+        if total == 0:
+            return True, "No orders with expected classification to validate"
+
+        if correct == total:
+            return True, f"All {total} command orders correctly parsed by LLM"
+
+        return False, f"{correct}/{total} correct. Failures: {'; '.join(details[:5])}"
+
     # ── Statistical assertions ──
 
     def evaluate_statistical(self, stat_result: StatisticalResult, assertions: list[dict]) -> list[AssertionResult]:

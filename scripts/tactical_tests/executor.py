@@ -357,7 +357,13 @@ class ScenarioExecutor:
 
     async def _inject_orders(self, db: AsyncSession, orders: list[dict], current_tick: int,
                              result: ScenarioResult | None = None):
-        """Inject orders scheduled for the current tick."""
+        """Inject orders scheduled for the current tick.
+
+        Supports three modes:
+        1. Pure LLM (use_llm_pipeline=True, no parsed_order): LLM parses everything
+        2. Hybrid (use_llm_pipeline=True + parsed_order): LLM first, pre-parsed fallback
+        3. Pre-parsed only (use_llm_pipeline=False): direct engine injection
+        """
         for o_data in orders:
             if o_data.get("inject_at_tick", 0) != current_tick:
                 continue
@@ -374,9 +380,10 @@ class ScenarioExecutor:
                 continue
 
             use_llm = o_data.get("use_llm_pipeline", False)
+            has_preparsed = "parsed_order" in o_data and o_data["parsed_order"]
 
             if use_llm:
-                # Route through real LLM pipeline
+                # ── LLM pipeline (pure or hybrid) ──
                 order = Order(
                     session_id=self._session_id,
                     issued_by_side=o_data.get("issued_by_side", "blue"),
@@ -393,6 +400,13 @@ class ScenarioExecutor:
                     order, self._session_id, db,
                     o_data.get("issued_by_side", "blue")
                 )
+
+                llm_succeeded = (
+                    snap and not snap.error
+                    and snap.classification
+                    and snap.classification != "unclear"
+                )
+
                 if snap and result:
                     snap.target_unit_names = o_data.get("target_unit_names", [])
                     snap.inject_tick = current_tick
@@ -402,8 +416,77 @@ class ScenarioExecutor:
                     snap.expected_locations = o_data.get("expected_locations", [])
                     snap.expected_model_tier = o_data.get("expected_model_tier")
                     result.order_snapshots.append(snap)
-            else:
-                # Pre-parsed order (existing behavior)
+
+                # ── Merge pre-parsed target_location if LLM didn't resolve one ──
+                # LLM may succeed parsing the order but not extract a target_location
+                # (e.g., text has no grid references). Use pre-parsed as fallback.
+                # NOTE: Only merge into parsed_order, NOT parsed_intent. parsed_intent
+                # contains action names like "deliberate_attack" which aren't valid
+                # engine task types. The tick engine's _order_to_task falls through
+                # from parsed_intent to parsed_order when intent has no target_location.
+                if llm_succeeded and has_preparsed:
+                    preparsed = o_data.get("parsed_order", {})
+                    order_po = order.parsed_order or {}
+                    
+                    # Check if LLM didn't resolve a target_location
+                    has_llm_target = order_po.get("target_location") is not None
+                    has_preparsed_target = preparsed.get("target_location") is not None
+                    
+                    if not has_llm_target and has_preparsed_target:
+                        logger.debug(
+                            "Merging pre-parsed target_location for '%s'",
+                            (o_data.get("original_text", ""))[:60],
+                        )
+                        order.parsed_order = {
+                            **order_po,
+                            "target_location": preparsed["target_location"],
+                        }
+                        if preparsed.get("speed") and not order_po.get("speed"):
+                            order.parsed_order["speed"] = preparsed["speed"]
+                        if preparsed.get("formation") and not order_po.get("formation"):
+                            order.parsed_order["formation"] = preparsed["formation"]
+
+                # Hybrid fallback: if LLM failed and we have pre-parsed data,
+                # apply pre-parsed order/intent directly to ensure engine works
+                if not llm_succeeded and has_preparsed:
+                    logger.info(
+                        "LLM pipeline failed/unclear for '%s' — using pre-parsed fallback",
+                        (o_data.get("original_text", ""))[:60],
+                    )
+                    order.parsed_order = o_data.get("parsed_order")
+                    order.parsed_intent = o_data.get("parsed_intent")
+                    order.status = OrderStatus.validated
+
+                    # Also assign task to units directly (matches pre-parsed flow)
+                    parsed_order = o_data.get("parsed_order", {})
+                    parsed_intent = o_data.get("parsed_intent", {})
+                    for uid in target_ids:
+                        unit_result = await db.execute(
+                            select(Unit).where(Unit.id == uid)
+                        )
+                        unit = unit_result.scalar_one_or_none()
+                        if unit:
+                            task = {"type": parsed_order.get("order_type", "move")}
+                            if parsed_order.get("target_location"):
+                                task["target_location"] = parsed_order["target_location"]
+                            if parsed_order.get("speed"):
+                                task["speed"] = parsed_order["speed"]
+                            if parsed_order.get("formation"):
+                                task["formation"] = parsed_order["formation"]
+                            if parsed_order.get("target_unit_id"):
+                                task["target_unit_id"] = parsed_order["target_unit_id"]
+                            if parsed_order.get("salvos"):
+                                task["salvos_remaining"] = parsed_order["salvos"]
+                            if parsed_order.get("phases"):
+                                unit.order_queue = parsed_order["phases"]
+                            unit.current_task = task
+                            if parsed_order.get("formation"):
+                                caps = dict(unit.capabilities or {})
+                                caps["formation"] = parsed_order["formation"]
+                                unit.capabilities = caps
+
+            elif has_preparsed:
+                # ── Pre-parsed order (legacy, no LLM) ──
                 order = Order(
                     session_id=self._session_id,
                     issued_by_side=o_data.get("issued_by_side", "blue"),

@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     LOCAL_MODEL_URL: str = ""                     # e.g. "http://localhost:8080/v1"
     LOCAL_MODEL_NAME: str = "local"               # model name to send in API requests
 
+    # ── LLM Parsing Mode ────────────────────────────────
+    # Controls how radio messages are routed through the parsing pipeline:
+    #   "llm_first"    — always call LLM first; keyword fallback only when no API key (default)
+    #   "keyword_first" — keyword parser runs first; LLM only for low-confidence (legacy)
+    #   "keyword_only"  — no LLM calls at all; pure keyword parsing (for offline/testing)
+    LLM_PARSING_MODE: str = "llm_first"
+
     # ── Application ───────────────────────────────────
     APP_NAME: str = "TDG Tactical Decision Game Platform"
     APP_VERSION: str = "0.6.0"

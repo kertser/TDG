@@ -195,8 +195,13 @@ def make_order(
     inject_at_tick: int = 0,
     salvos: int | None = None,
     phases: list[dict] | None = None,
+    use_llm: bool = True,
 ) -> dict:
-    """Create an order definition dict with pre-parsed data."""
+    """Create an order definition dict with pre-parsed data.
+
+    When use_llm=True (default), the order also goes through the LLM pipeline
+    for validation. The pre-parsed data serves as engine fallback if LLM fails.
+    """
     parsed_order = {"order_type": order_type}
     if target_location:
         parsed_order["target_location"] = target_location
@@ -228,6 +233,10 @@ def make_order(
         "parsed_order": parsed_order,
         "parsed_intent": parsed_intent,
         "inject_at_tick": inject_at_tick,
+        # LLM pipeline: all orders go through LLM for validation
+        "use_llm_pipeline": use_llm,
+        "expected_classification": "command",
+        "expected_order_type": order_type,
     }
     if phases:
         result["parsed_order"]["phases"] = phases
