@@ -923,12 +923,24 @@ class OrderService:
             matched = [u for u in units_context
                        if u.get("side") == issuer_side and not u.get("is_destroyed")]
 
+        # Pre-build all situations in parallel for speed (each does ~10 DB queries)
+        import asyncio as _asyncio_sr
+        from backend.database import async_session_factory as _asf_sr
+
+        async def _par_build_sit(ud):
+            async with _asf_sr() as s:
+                return ud.get("id", ""), await self._build_unit_situation(
+                    ud, session_id, issuer_side, units_context, s, grid_service,
+                )
+
+        if matched:
+            _sit_results = await _asyncio_sr.gather(*[_par_build_sit(ud) for ud in matched])
+            _sit_map = {uid: sit for uid, sit in _sit_results}
+        else:
+            _sit_map = {}
+
         for unit_dict in matched:
-            # Build situational awareness for rich status reports
-            situation = await self._build_unit_situation(
-                unit_dict, session_id, issuer_side, units_context,
-                db, grid_service,
-            )
+            situation = _sit_map.get(unit_dict.get("id", ""), {})
             status_text = response_generator.generate_status_report(
                 unit_dict, parsed.language.value, situation=situation,
             )

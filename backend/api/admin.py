@@ -1076,6 +1076,81 @@ async def admin_set_session_time(session_id: uuid.UUID, body: SetSessionTimeRequ
     }
 
 
+async def _warm_session_caches(session_id: uuid.UUID, db):
+    """Pre-warm in-memory caches (terrain, pathfinding graph, elevation peaks)
+    so the first order after reset doesn't suffer a 10-15s cold-cache penalty.
+    Called after session reset / resync / apply-scenario."""
+    import logging as _wlog
+    import time as _wtime
+    _t0 = _wtime.monotonic()
+    sid = str(session_id)
+    try:
+        from backend.models.terrain_cell import TerrainCell
+        from backend.models.elevation_cell import ElevationCell
+        from backend.engine.terrain import set_cached_terrain_data
+
+        # 1. Load terrain + elevation cells into memory cache
+        tc_result = await db.execute(
+            select(TerrainCell.snail_path, TerrainCell.terrain_type)
+            .where(TerrainCell.session_id == session_id)
+        )
+        tc_rows = tc_result.all()
+        terrain_cells = {row[0]: row[1] for row in tc_rows} if tc_rows else None
+
+        elevation_cells = None
+        if tc_rows:
+            ec_result = await db.execute(
+                select(
+                    ElevationCell.snail_path,
+                    ElevationCell.elevation_m,
+                    ElevationCell.slope_deg,
+                    ElevationCell.aspect_deg,
+                ).where(ElevationCell.session_id == session_id)
+            )
+            ec_rows = ec_result.all()
+            if ec_rows:
+                elevation_cells = {
+                    row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                    for row in ec_rows
+                }
+
+        set_cached_terrain_data(sid, terrain_cells, elevation_cells)
+
+        # 2. Pre-build pathfinding graph
+        if terrain_cells:
+            gd_result = await db.execute(
+                select(GridDefinition).where(GridDefinition.session_id == session_id)
+            )
+            gd = gd_result.scalar_one_or_none()
+            if gd:
+                from backend.services.grid_service import GridService
+                from backend.services.pathfinding_service import load_or_build_static_graph
+                grid_service = GridService(gd)
+                gd_settings = dict(gd.settings_json) if gd.settings_json else None
+                load_or_build_static_graph(
+                    sid, terrain_cells, elevation_cells,
+                    None, grid_service,
+                    grid_def_settings_json=gd_settings,
+                )
+
+        # 3. Pre-warm elevation peaks cache
+        try:
+            from backend.api.terrain import get_elevation_peaks_cached
+            await get_elevation_peaks_cached(session_id, db)
+        except Exception:
+            pass
+
+        _elapsed = _wtime.monotonic() - _t0
+        _wlog.getLogger(__name__).info(
+            "Cache warm-up for session %s: %.1fs (terrain=%s cells, elev=%s cells)",
+            session_id, _elapsed,
+            len(terrain_cells) if terrain_cells else 0,
+            len(elevation_cells) if elevation_cells else 0,
+        )
+    except Exception as e:
+        _wlog.getLogger(__name__).warning("Cache warm-up failed for %s: %s", session_id, e)
+
+
 @router.post("/sessions/{session_id}/reset")
 async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     """Admin: reset session to tick 0, re-create units from scenario.
@@ -1114,6 +1189,9 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     from backend.services.session_service import initialize_session_from_scenario
     await initialize_session_from_scenario(session, session.scenario, db)
 
+    # Pre-warm caches so first order is fast
+    await _warm_session_caches(session_id, db)
+
     return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0", "current_time": session.current_time.isoformat() if session.current_time else None}
 
 
@@ -1151,6 +1229,9 @@ async def admin_resync_units(session_id: uuid.UUID, db: DB, user: CurrentUser):
         select(func.count()).select_from(Unit).where(Unit.session_id == session_id)
     )
     unit_count = unit_count_result.scalar() or 0
+
+    # Pre-warm caches
+    await _warm_session_caches(session_id, db)
 
     return {
         "status": session.status.value,
@@ -1213,6 +1294,9 @@ async def admin_apply_scenario(session_id: uuid.UUID, body: ApplyScenarioRequest
     # Re-initialize from new scenario
     from backend.services.session_service import initialize_session_from_scenario
     await initialize_session_from_scenario(session, scenario, db)
+
+    # Pre-warm caches
+    await _warm_session_caches(session_id, db)
 
     return {
         "status": session.status.value,

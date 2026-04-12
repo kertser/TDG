@@ -551,15 +551,65 @@ def process_movement(
         using_waypoints = False
 
         if waypoints and isinstance(waypoints, list) and len(waypoints) > 0:
-            # Pop waypoints that we've already passed (within ~40m threshold)
+            # ── Stale destination check ──
+            # If the last waypoint doesn't match the current target_location
+            # (target moved, e.g. enemy unit repositioned), fix or discard waypoints.
+            last_wp = waypoints[-1]
+            last_wp_lat = last_wp[0] if isinstance(last_wp, (list, tuple)) else last_wp.get("lat", 0)
+            last_wp_lon = last_wp[1] if isinstance(last_wp, (list, tuple)) else last_wp.get("lon", 0)
+            dest_drift = _distance_m(last_wp_lat, last_wp_lon, target_lat, target_lon)
+            if dest_drift > 500:
+                # Target moved a lot — discard all waypoints, use straight-line
+                waypoints = []
+            elif dest_drift > 80:
+                # Target drifted moderately — update last waypoint to current target
+                waypoints[-1] = [target_lat, target_lon]
+
+            # Pop waypoints that we've already passed:
+            # 1. Within ~40m proximity threshold
+            # 2. "Behind" the unit (farther from destination than unit is)
+            # 3. Would cause backward/sideways movement (> ~80° from destination)
+            unit_to_dest = _distance_m(cur_lat, cur_lon, target_lat, target_lon)
+            # Pre-compute direction toward destination for angle checks
+            dx_dest = (target_lon - cur_lon) * METERS_PER_DEG_LON_AT_48
+            dy_dest = (target_lat - cur_lat) * METERS_PER_DEG_LAT
+            len_dest = math.sqrt(dx_dest * dx_dest + dy_dest * dy_dest)
+
+            is_first_wp = True  # Track whether we're checking the first waypoint
             while len(waypoints) > 0:
                 wp = waypoints[0]
                 wp_lat = wp[0] if isinstance(wp, (list, tuple)) else wp.get("lat", 0)
                 wp_lon = wp[1] if isinstance(wp, (list, tuple)) else wp.get("lon", 0)
-                if _distance_m(cur_lat, cur_lon, wp_lat, wp_lon) < 40:
+                dist_to_wp = _distance_m(cur_lat, cur_lon, wp_lat, wp_lon)
+                # Close enough — already passed
+                if dist_to_wp < 40:
                     waypoints.pop(0)
-                else:
-                    break
+                    is_first_wp = False
+                    continue
+                # Waypoint is farther from destination than the unit —
+                # the unit has progressed past it (tight 2% tolerance)
+                wp_to_dest = _distance_m(wp_lat, wp_lon, target_lat, target_lon)
+                if wp_to_dest > unit_to_dest * 1.02 and len(waypoints) > 1:
+                    waypoints.pop(0)
+                    is_first_wp = False
+                    continue
+
+                # ── Direction check: skip waypoint that takes us backward/sideways ──
+                if len(waypoints) > 1 and dist_to_wp > 50 and len_dest > 50:
+                    dx_wp = (wp_lon - cur_lon) * METERS_PER_DEG_LON_AT_48
+                    dy_wp = (wp_lat - cur_lat) * METERS_PER_DEG_LAT
+                    len_wp = math.sqrt(dx_wp * dx_wp + dy_wp * dy_wp)
+                    if len_wp > 10:
+                        cos_angle = (dx_wp * dx_dest + dy_wp * dy_dest) / (len_wp * len_dest)
+                        # First waypoint: be very aggressive (cos < 0.25 = ~75°)
+                        # to prevent backward movement arrows
+                        threshold = 0.25 if is_first_wp else 0.0
+                        if cos_angle < threshold:
+                            waypoints.pop(0)
+                            is_first_wp = False
+                            continue
+
+                break
 
             if len(waypoints) > 0:
                 wp = waypoints[0]
@@ -684,8 +734,9 @@ def process_movement(
         if wp_exhausted and remaining_to_final <= max(distance_left, 30):
             # Arrived at final destination
             new_lat, new_lon = target_lat, target_lon
-            dy = (target_lat - cur_lat) * METERS_PER_DEG_LAT
-            dx = (target_lon - cur_lon) * METERS_PER_DEG_LON_AT_48
+            # Use move_lat/move_lon (position after traversal) for heading, not cur_lat/cur_lon
+            dy = (target_lat - move_lat) * METERS_PER_DEG_LAT
+            dx = (target_lon - move_lon) * METERS_PER_DEG_LON_AT_48
             heading = math.degrees(math.atan2(dx, dy)) % 360 if remaining_to_final > 1 else _heading
 
             unit.position = from_shape(Point(new_lon, new_lat), srid=4326)

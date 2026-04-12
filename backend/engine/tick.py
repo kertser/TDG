@@ -262,8 +262,25 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 best_lon = c_lon
 
         if best_lat is not None:
-            task["target_location"] = {"lat": best_lat, "lon": best_lon}
-            unit.current_task = task
+            new_task = dict(task)
+            # Check if target actually moved significantly
+            old_target = task.get("target_location")
+            target_moved = True
+            if old_target:
+                old_lat = old_target.get("lat", 0)
+                old_lon = old_target.get("lon", 0)
+                dlat = (best_lat - old_lat) * 111320
+                dlon = (best_lon - old_lon) * 74000
+                if (dlat**2 + dlon**2) ** 0.5 < 80:
+                    target_moved = False  # target barely moved, keep waypoints
+
+            new_task["target_location"] = {"lat": best_lat, "lon": best_lon}
+
+            if target_moved:
+                # Target moved — invalidate waypoints so step 1.5 recomputes them
+                new_task.pop("waypoints", None)
+                new_task["path_calc_tick"] = -999
+            unit.current_task = new_task
 
     # ── Load map objects (obstacles, structures) ─────────────
     mo_result = await db.execute(
@@ -553,6 +570,17 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
             if best_lat is not None:
                 new_task = dict(task)
+                # Check if target moved significantly from existing target
+                old_target = task.get("target_location")
+                _target_moved = True
+                if old_target:
+                    _old_lat = old_target.get("lat", 0)
+                    _old_lon = old_target.get("lon", 0)
+                    _dlat_chk = (best_lat - _old_lat) * 111320
+                    _dlon_chk = (best_lon - _old_lon) * 74000
+                    if (_dlat_chk**2 + _dlon_chk**2) ** 0.5 < 80:
+                        _target_moved = False
+
                 new_task["target_location"] = {"lat": best_lat, "lon": best_lon}
                 if best_target_uid:
                     new_task["target_unit_id"] = best_target_uid
@@ -561,6 +589,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 # Only set this flag if unit doesn't have a target already
                 if not task.get("target_unit_id") and best_target_uid:
                     new_task["request_artillery"] = True
+
+                # Invalidate waypoints if target moved — force recalc next tick
+                if _target_moved:
+                    new_task.pop("waypoints", None)
+                    new_task["path_calc_tick"] = -999
+
                 unit.current_task = new_task
 
     # ── 4. Decay stale contacts ──────────────────────────────────
@@ -1045,6 +1079,9 @@ def clear_pathfinding_cache(session_id_str: str | None = None):
         else:
             _centroid_cache.clear()
             _static_graph_cache.clear()
+    # Also clear the graph cache in pathfinding_service
+    from backend.services.pathfinding_service import clear_graph_cache
+    clear_graph_cache(session_id_str)
 
 
 def _extract_waypoint_unit_data(all_units: list, tick: int) -> list[dict]:

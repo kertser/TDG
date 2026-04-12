@@ -41,6 +41,7 @@ const KUnits = (() => {
     let _pathCache = {};           // key → [[lat, lon], ...] or null
     let _pathPending = {};         // key → true (fetch in-flight)
     let _pathCacheTick = -1;       // invalidate cache when tick changes
+    let _updateSeq = 0;           // monotonic counter: incremented on every update()
 
     // ── Pending orders (queued for next tick) ─────────
     // unit_id → {type, target_location, target_snail, speed, order_id}
@@ -2007,40 +2008,59 @@ const KUnits = (() => {
     }
 
     /** Draw a single movement arrow: elegant tapered line (max 300m) with pointed arrowhead.
-     *  When waypoints are available, the arrow is aligned tangent to the trajectory. */
+     *  When waypoints are available, the arrow is aligned tangent to the trajectory
+     *  (same trimming logic as the trajectory renderer). */
     function _drawMovementArrow(from, target, accent, unitData) {
         const aCfg = (CFG && CFG.movement_arrows) || {};
 
         // ── Determine arrow direction ──
-        // If unit has waypoints (trajectory), use direction toward the first distant waypoint
-        // instead of straight-line to the final target. This aligns the short arrow with the path.
+        // Arrow must be tangent to the actual movement path.
+        // Use trimmed waypoints (same as trajectory renderer) to find the
+        // first upcoming waypoint — that's the true movement tangent.
+        // Only reject truly opposite directions (cos < -0.5 = >120° off).
         let dirLat, dirLon;
+        const destDirLat = target.lat - from.lat;
+        const destDirLon = target.lng - from.lng;
+        const destLen = Math.sqrt(destDirLat * destDirLat + destDirLon * destDirLon);
+
+        let usedWaypoint = false;
         const waypoints = unitData && unitData.current_task && unitData.current_task.waypoints;
-        if (waypoints && waypoints.length >= 1) {
-            // Find the first waypoint that's at least a small distance away from the unit
-            // (skip very close waypoints that the unit is about to reach)
-            const MIN_DIST_DEG = 0.00015; // ~15m
-            let wpTarget = null;
+        if (waypoints && waypoints.length >= 1 && destLen > 0.00005) {
+            // Build LatLng array and trim passed waypoints (same as trajectory code)
+            const rawWps = [];
             for (const wp of waypoints) {
                 const wLat = Array.isArray(wp) ? wp[0] : wp.lat;
                 const wLon = Array.isArray(wp) ? wp[1] : wp.lon;
-                if (wLat == null || wLon == null) continue;
-                const d = Math.sqrt((wLat - from.lat) ** 2 + (wLon - from.lng) ** 2);
-                if (d > MIN_DIST_DEG) {
-                    wpTarget = { lat: wLat, lng: wLon };
-                    break;
+                if (wLat != null && wLon != null) rawWps.push(L.latLng(wLat, wLon));
+            }
+            if (rawWps.length > 0) {
+                const trimIdx = _trimPassedWaypoints(from, target, rawWps);
+                const trimmed = rawWps.slice(trimIdx);
+                // Find the first trimmed waypoint far enough from unit
+                const MIN_DIST_DEG = 0.0002; // ~22m
+                for (const wp of trimmed) {
+                    const d = Math.sqrt((wp.lat - from.lat) ** 2 + (wp.lng - from.lng) ** 2);
+                    if (d > MIN_DIST_DEG) {
+                        const wpDirLat = wp.lat - from.lat;
+                        const wpDirLon = wp.lng - from.lng;
+                        const wpLen = Math.sqrt(wpDirLat * wpDirLat + wpDirLon * wpDirLon);
+                        if (wpLen > 0.00001) {
+                            // Only reject truly opposite waypoints (cos < -0.5 = >120°)
+                            const cosAngle = (wpDirLat * destDirLat + wpDirLon * destDirLon) / (wpLen * destLen);
+                            if (cosAngle > -0.5) {
+                                dirLat = wpDirLat;
+                                dirLon = wpDirLon;
+                                usedWaypoint = true;
+                            }
+                        }
+                        break;
+                    }
                 }
             }
-            if (wpTarget) {
-                dirLat = wpTarget.lat - from.lat;
-                dirLon = wpTarget.lng - from.lng;
-            } else {
-                dirLat = target.lat - from.lat;
-                dirLon = target.lng - from.lng;
-            }
-        } else {
-            dirLat = target.lat - from.lat;
-            dirLon = target.lng - from.lng;
+        }
+        if (!usedWaypoint) {
+            dirLat = destDirLat;
+            dirLon = destDirLon;
         }
 
         const geoLen = Math.sqrt(dirLat * dirLat + dirLon * dirLon);
@@ -2300,6 +2320,94 @@ const KUnits = (() => {
     }
 
     /**
+     * Determine the first waypoint index that is still AHEAD of the unit.
+     *
+     * Strategy: walk forward through waypoints; skip any that the unit has
+     * progressed past (unit is closer to the destination than the waypoint,
+     * or unit is closer to the next waypoint than the current one).
+     *
+     * @param {L.LatLng} pos  - unit's current position
+     * @param {L.LatLng} dest - final destination
+     * @param {L.LatLng[]} wps - waypoint array
+     * @returns {number} index of the first non-passed waypoint
+     */
+    function _trimPassedWaypoints(pos, dest, wps) {
+        if (!wps || wps.length === 0) return 0;
+
+        const M = 111320; // approx meters per degree lat
+        const M2 = 74000; // approx meters per degree lon at mid-lat
+
+        // Unit's distance to destination (squared, in meters²)
+        const posToDest2 = ((pos.lat - dest.lat) * M) ** 2 + ((pos.lng - dest.lng) * M2) ** 2;
+
+        // Direction from unit to destination (for angle checks)
+        const dxDest = (dest.lng - pos.lng) * M2;
+        const dyDest = (dest.lat - pos.lat) * M;
+        const lenDest = Math.sqrt(dxDest * dxDest + dyDest * dyDest);
+
+        let trimIdx = 0;
+        for (let i = 0; i < wps.length; i++) {
+            const wp = wps[i];
+            const dLat = (pos.lat - wp.lat) * M;
+            const dLon = (pos.lng - wp.lng) * M2;
+            const distToWp = Math.sqrt(dLat * dLat + dLon * dLon);
+
+            // If unit is very close to this waypoint, skip it (already there)
+            if (distToWp < 50) {
+                trimIdx = i + 1;
+                continue;
+            }
+
+            // Check if this waypoint is "behind" the unit:
+            // A waypoint is behind if it is farther from the destination
+            // than the unit is (the unit has progressed past it).
+            const wpToDest2 = ((wp.lat - dest.lat) * M) ** 2 + ((wp.lng - dest.lng) * M2) ** 2;
+            if (wpToDest2 > posToDest2 * 1.02 && i + 1 < wps.length) {
+                // Waypoint is farther from dest than unit — it's behind us
+                trimIdx = i + 1;
+                continue;
+            }
+
+            // ── Direction check: skip waypoint that is sideways/backward ──
+            // First waypoint: aggressive (> ~75° off = cos < 0.25)
+            // Subsequent: moderate (> ~90° off = cos < 0.0)
+            if (i + 1 < wps.length && distToWp > 50 && lenDest > 50) {
+                const dxWp = (wp.lng - pos.lng) * M2;
+                const dyWp = (wp.lat - pos.lat) * M;
+                const lenWp = Math.sqrt(dxWp * dxWp + dyWp * dyWp);
+                if (lenWp > 10) {
+                    const cosAngle = (dxWp * dxDest + dyWp * dyDest) / (lenWp * lenDest);
+                    const threshold = (i === trimIdx) ? 0.25 : 0.0;
+                    if (cosAngle < threshold) {
+                        trimIdx = i + 1;
+                        continue;
+                    }
+                }
+            }
+
+            // Also check: if the NEXT waypoint is closer to us than this one,
+            // and we haven't passed the next one, then skip this one
+            if (i + 1 < wps.length) {
+                const nextWp = wps[i + 1];
+                const dLat2 = (pos.lat - nextWp.lat) * M;
+                const dLon2 = (pos.lng - nextWp.lng) * M2;
+                const distToNext = Math.sqrt(dLat2 * dLat2 + dLon2 * dLon2);
+                if (distToNext < distToWp * 0.85) {
+                    // We're closer to the next waypoint — skip this one
+                    trimIdx = i + 1;
+                    continue;
+                }
+            }
+
+            // This waypoint is still ahead — stop trimming
+            break;
+        }
+
+        // Don't trim past the last waypoint (keep at least 1)
+        return Math.min(trimIdx, wps.length - 1);
+    }
+
+    /**
      * Draw an elegant trajectory from a unit to its destination.
      *
      * @param {L.LayerGroup} layer - target layer (hoverLayer or selectionLayer)
@@ -2333,18 +2441,27 @@ const KUnits = (() => {
 
         // (1) Check task.waypoints (server-computed each tick)
         if (u.current_task && u.current_task.waypoints && u.current_task.waypoints.length >= 1) {
-            pathPoints = [pos];
+            // Build raw waypoint list
+            const rawWps = [];
             for (const wp of u.current_task.waypoints) {
                 const lat = Array.isArray(wp) ? wp[0] : wp.lat;
                 const lon = Array.isArray(wp) ? wp[1] : wp.lon;
                 if (lat != null && lon != null) {
-                    pathPoints.push(L.latLng(lat, lon));
+                    rawWps.push(L.latLng(lat, lon));
                 }
             }
-            // Ensure the last point is the actual target
-            const last = pathPoints[pathPoints.length - 1];
-            if (Math.abs(last.lat - to.lat) > 0.00001 || Math.abs(last.lng - to.lng) > 0.00001) {
-                pathPoints.push(to);
+            // Trim waypoints the unit has already passed (forward-progress detection)
+            if (rawWps.length > 0) {
+                const trimIdx = _trimPassedWaypoints(pos, to, rawWps);
+                const trimmed = rawWps.slice(trimIdx);
+                pathPoints = [pos, ...trimmed];
+            }
+            if (pathPoints && pathPoints.length >= 2) {
+                // Ensure the last point is the actual target
+                const last = pathPoints[pathPoints.length - 1];
+                if (Math.abs(last.lat - to.lat) > 0.00001 || Math.abs(last.lng - to.lng) > 0.00001) {
+                    pathPoints.push(to);
+                }
             }
         }
 
@@ -2352,7 +2469,9 @@ const KUnits = (() => {
         if (!pathPoints || pathPoints.length < 2) {
             const cachedPath = _getCachedPath(u.id, pos.lat, pos.lng, trajTarget.lat, trajTarget.lon);
             if (cachedPath && cachedPath.length >= 2) {
-                pathPoints = cachedPath.map(p => L.latLng(p[0], p[1]));
+                const rawCached = cachedPath.map(p => L.latLng(p[0], p[1]));
+                const trimIdx = _trimPassedWaypoints(pos, to, rawCached);
+                pathPoints = [pos, ...rawCached.slice(trimIdx)];
             }
         }
 
@@ -2703,7 +2822,16 @@ const KUnits = (() => {
     const ANIM_DURATION_MS = 800;
 
     function update(units, tick) {
-        if (tick !== undefined) _invalidateViewshedCache(tick);
+        _updateSeq++;
+        if (tick !== undefined) {
+            _invalidateViewshedCache(tick);
+        } else {
+            // God view / no tick param: advance viewshed tick via monotonic
+            // counter so path cache global invalidation fires properly
+            _viewshedTick = _updateSeq;
+            _viewshedCache = {};
+            _viewshedPending = {};
+        }
         _invalidateMovedUnitsViewshed(units);
 
         // Clear pending orders that have been picked up by the tick engine
@@ -2785,6 +2913,7 @@ const KUnits = (() => {
                     m.marker.setLatLng([m.toLat, m.toLon]);
                 }
                 _drawMovementArrows();
+                _drawSelectionOverlays();
             }
         }
 
@@ -2800,6 +2929,12 @@ const KUnits = (() => {
             if (!old) continue;
             if (old.lat !== nu.lat || old.lon !== nu.lon) {
                 delete _viewshedCache[nu.id];
+                // Also invalidate path cache entries for this unit (stale trajectory)
+                for (const key of Object.keys(_pathCache)) {
+                    if (key.startsWith(nu.id + '_')) {
+                        delete _pathCache[key];
+                    }
+                }
             }
         }
     }

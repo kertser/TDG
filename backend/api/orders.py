@@ -712,7 +712,13 @@ async def list_chat_messages(
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
-    """Load chat message history for a session."""
+    """Load chat message history for a session.
+
+    Side-filtering: unit radio messages (📻 prefix) and outgoing order
+    messages (📋 prefix) are only returned to the matching side.
+    Human chat messages are visible to all participants.
+    Admin/observer see everything.
+    """
     from backend.models.chat_message import ChatMessage
 
     query = (
@@ -725,9 +731,26 @@ async def list_chat_messages(
     messages = result.scalars().all()
 
     my_user_id = participant.user_id
+    my_side = participant.side.value if hasattr(participant.side, 'value') else str(participant.side)
+    is_privileged = my_side in ("admin", "observer")
 
-    return [
-        {
+    out = []
+    for m in messages:
+        # Basic recipient check: broadcast or I'm sender/recipient
+        if not (m.recipient == "all" or m.sender_id == my_user_id or m.recipient == str(my_user_id)):
+            continue
+
+        is_unit_msg = bool(m.sender_name and m.sender_name.startswith("📻"))
+        is_order_msg = bool(m.sender_name and m.sender_name.startswith("📋"))
+
+        # Side-filter unit radio and outgoing order messages:
+        # these are side-specific — Red unit reports must not leak to Blue and vice versa.
+        if (is_unit_msg or is_order_msg) and not is_privileged:
+            msg_side = m.side or ""
+            if msg_side and msg_side != my_side:
+                continue  # Skip enemy-side unit/order messages
+
+        out.append({
             "sender_id": str(m.sender_id) if m.sender_id else "",
             "sender_name": m.sender_name,
             "text": m.text,
@@ -736,12 +759,10 @@ async def list_chat_messages(
             "timestamp": m.created_at.isoformat() if m.created_at else None,
             "game_time": m.game_time.isoformat() if m.game_time else None,
             "own": m.sender_id == my_user_id,
-            "is_unit_response": bool(m.sender_name and m.sender_name.startswith("📻")),
-            "is_order": bool(m.sender_name and m.sender_name.startswith("📋")),
-        }
-        for m in messages
-        # Include if broadcast (all) or if I'm sender or recipient
-        if m.recipient == "all" or m.sender_id == my_user_id or m.recipient == str(my_user_id)
-    ]
+            "is_unit_response": is_unit_msg,
+            "is_order": is_order_msg,
+        })
+
+    return out
 
 
