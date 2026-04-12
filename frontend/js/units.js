@@ -2845,6 +2845,27 @@ const KUnits = (() => {
         render(allUnitsData);
     }
 
+    /**
+     * Inject server-computed waypoints directly into the path cache.
+     * Called by orders.js when the backend provides pre-computed waypoints
+     * in the order_status payload (avoids the round-trip API fetch).
+     */
+    function injectPathCache(unitIds, toLat, toLon, pathArr) {
+        if (!unitIds || !unitIds.length || !pathArr) return;
+        for (const uid of unitIds) {
+            const key = `${uid}_${toLat.toFixed(5)}_${toLon.toFixed(5)}`;
+            _pathCache[key] = pathArr;
+            // Also store as pending order
+            if (!_pendingOrders[uid]) {
+                _pendingOrders[uid] = {
+                    type: 'move',
+                    target_location: { lat: toLat, lon: toLon },
+                };
+            }
+        }
+        render(allUnitsData);
+    }
+
     return {
         init, load, update, render, getMarker,
         toggle, isVisible,
@@ -2856,6 +2877,7 @@ const KUnits = (() => {
         getPendingOrdersCount: () => Object.keys(_pendingOrders).length,
         clearPendingOrders: () => { _pendingOrders = {}; },
         prefetchPaths,
+        injectPathCache,
         // Config accessors
         getConfig, getFireRange, getPersonnel, getEyeHeight,
         getStatusIcon, getStatusColor, getSpeedOptions, getFormations,

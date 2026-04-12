@@ -38,6 +38,9 @@ async def _run_order_pipeline(
 
     logger.info("Order pipeline STARTING for order=%s", order_id)
 
+    import time as _pipeline_time
+    _pipeline_t0 = _pipeline_time.monotonic()
+
     try:
         async with async_session_factory() as db:
             try:
@@ -209,11 +212,56 @@ async def _run_order_pipeline(
                         only_side=issuer_side,
                     )
 
+                # ── Immediately assign task to units (don't wait for tick) ──
+                # This makes units show "moving" right away instead of staying
+                # "idle" until "Execute Orders" is pressed.
+                _should_broadcast_units = False
+                if (
+                    order.status == OrderStatus.validated
+                    and parse_result.engine_task
+                    and order.target_unit_ids
+                ):
+                    await _assign_task_to_units_immediately(
+                        order, parse_result.engine_task,
+                        session_id, issuer_side, db,
+                    )
+                    _should_broadcast_units = True
+
                 await db.commit()
+
+                # Broadcast updated unit state so frontend sees "moving" immediately
+                if _should_broadcast_units:
+                    try:
+                        from backend.services.visibility_service import get_visible_units, get_visible_contacts
+                        units = await get_visible_units(session_id, issuer_side, db)
+                        contacts = await get_visible_contacts(session_id, issuer_side, db)
+                        from backend.models.session import Session as _Sess2
+                        _sess_r2 = await db.execute(select(_Sess2.tick, _Sess2.current_time).where(_Sess2.id == session_id))
+                        _sess_row = _sess_r2.first()
+                        _tick = _sess_row[0] if _sess_row else 0
+                        _gt = _sess_row[1].isoformat() + 'Z' if _sess_row and _sess_row[1] else None
+                        await ws_manager.broadcast(
+                            session_id,
+                            {
+                                "type": "state_update",
+                                "data": {
+                                    "units": units,
+                                    "contacts": contacts,
+                                    "tick": _tick,
+                                    "game_time": _gt,
+                                },
+                            },
+                            only_side=issuer_side,
+                        )
+                    except Exception as e2:
+                        logger.warning("Failed to broadcast immediate state update: %s", e2)
+
+                _pipeline_elapsed = _pipeline_time.monotonic() - _pipeline_t0
                 logger.info(
-                    "Order pipeline completed: order=%s status=%s classification=%s",
+                    "Order pipeline completed: order=%s status=%s classification=%s total=%.1fs",
                     order_id, order.status.value,
                     parse_result.parsed.classification.value,
+                    _pipeline_elapsed,
                 )
 
             except Exception as e:
@@ -235,6 +283,84 @@ async def _run_order_pipeline(
 
     except Exception as e:
         logger.error("Order pipeline CRASHED for order=%s: %s", order_id, e, exc_info=True)
+
+
+async def _assign_task_to_units_immediately(
+    order: Order,
+    task: dict,
+    session_id: uuid.UUID,
+    issuer_side: str,
+    db: AsyncSession,
+):
+    """
+    Immediately assign the validated order's task to target units.
+
+    Mirrors the logic in tick.py's _process_orders() so units become
+    "moving"/"defending"/etc. right away instead of waiting for the next tick.
+    Sets order.status = executing to prevent tick from re-processing.
+    """
+    from backend.models.unit import Unit
+    from backend.api.units import UNIT_TYPE_SPEEDS, DEFAULT_SPEEDS
+
+    if not order.target_unit_ids:
+        return
+
+    task_type = task.get("type", "")
+
+    for unit_id in order.target_unit_ids:
+        result = await db.execute(
+            select(Unit).where(
+                Unit.id == unit_id,
+                Unit.session_id == session_id,
+                Unit.is_destroyed == False,
+            )
+        )
+        unit = result.scalar_one_or_none()
+        if not unit:
+            continue
+
+        if task_type == "halt":
+            unit.current_task = None
+        elif task_type == "disengage":
+            speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+            unit.move_speed_mps = speeds.get("fast", speeds.get("slow", 3.0))
+            unit.current_task = {
+                "type": "disengage",
+                "order_id": str(order.id),
+                "disengaging": True,
+            }
+        else:
+            unit.current_task = dict(task)
+
+            # Apply move speed from order
+            speed_label = task.get("speed")
+            if speed_label and task_type in ("move", "attack", "advance", "resupply"):
+                speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+                if speed_label in speeds:
+                    unit.move_speed_mps = speeds[speed_label]
+            elif task_type == "resupply" and not speed_label:
+                speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
+                unit.move_speed_mps = speeds.get("fast", speeds.get("slow", 3.0))
+
+            # Apply formation if specified
+            formation = task.get("formation")
+            if formation:
+                caps = dict(unit.capabilities or {})
+                caps["formation"] = formation
+                unit.capabilities = caps
+
+            # Handle phased/conditional orders
+            phases = task.get("phases") or (order.parsed_order or {}).get("phases")
+            if phases and isinstance(phases, list) and len(phases) > 1:
+                unit.order_queue = phases[1:]
+
+    # Mark order as executing so tick.py doesn't re-process it
+    order.status = OrderStatus.executing
+    await db.flush()
+    logger.info(
+        "Immediate task assignment: order=%s task=%s units=%d",
+        order.id, task_type, len(order.target_unit_ids),
+    )
 
 
 @router.post("/{session_id}/orders")

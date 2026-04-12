@@ -1064,12 +1064,16 @@ class OrderService:
         sid_str = str(session_id)
 
         try:
+            import time as _pf_time
+            _t0 = _pf_time.monotonic()
+
             # Load terrain data from cache or DB
             from backend.engine.terrain import get_cached_terrain_data
             cached = get_cached_terrain_data(sid_str)
             if cached:
                 terrain_cells = cached.get("terrain_cells")
                 elevation_cells = cached.get("elevation_cells")
+                _terrain_src = "cache"
             else:
                 from backend.models.terrain_cell import TerrainCell
                 from backend.models.elevation_cell import ElevationCell
@@ -1095,6 +1099,9 @@ class OrderService:
                             row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
                             for row in ec_rows
                         }
+                _terrain_src = "db"
+
+            _t_terrain = _pf_time.monotonic()
 
             if not terrain_cells:
                 return None, True  # No terrain data → can't pathfind, not an error
@@ -1102,23 +1109,34 @@ class OrderService:
             # Load static graph from memory → DB → build
             from backend.services.pathfinding_service import (
                 load_or_build_static_graph,
+                get_cached_graph,
                 PathfindingService,
             )
-            from backend.models.grid import GridDefinition
-            gd_result = await db.execute(
-                select(GridDefinition).where(GridDefinition.session_id == session_id)
-            )
-            gd = gd_result.scalar_one_or_none()
-            gd_settings = dict(gd.settings_json) if gd and gd.settings_json else None
 
-            static_graph, cell_centroids = load_or_build_static_graph(
-                sid_str,
-                terrain_cells,
-                elevation_cells,
-                None,  # let it use cached or build
-                grid_service,
-                grid_def_settings_json=gd_settings,
-            )
+            # Fast path: check in-memory cache first (avoids DB query for GridDefinition)
+            cached_graph = get_cached_graph(sid_str)
+            if cached_graph and cached_graph.get("centroids"):
+                static_graph = cached_graph
+                cell_centroids = cached_graph["centroids"]
+            else:
+                # Slow path: load GridDefinition from DB for persisted graph
+                from backend.models.grid import GridDefinition
+                gd_result = await db.execute(
+                    select(GridDefinition).where(GridDefinition.session_id == session_id)
+                )
+                gd = gd_result.scalar_one_or_none()
+                gd_settings = dict(gd.settings_json) if gd and gd.settings_json else None
+
+                static_graph, cell_centroids = load_or_build_static_graph(
+                    sid_str,
+                    terrain_cells,
+                    elevation_cells,
+                    None,  # let it use cached or build
+                    grid_service,
+                    grid_def_settings_json=gd_settings,
+                )
+
+            _t_graph = _pf_time.monotonic()
 
             if not static_graph or not static_graph.get("centroids"):
                 return None, True  # No graph → can't compute, not an error
@@ -1142,6 +1160,16 @@ class OrderService:
                 from_lon=u_lon,
                 to_lat=tgt_lat,
                 to_lon=tgt_lon,
+            )
+
+            _t_path = _pf_time.monotonic()
+            logger.info(
+                "Immediate pathfinding timing: terrain=%s %.0fms, graph=%.0fms, A*=%.0fms, total=%.0fms",
+                _terrain_src,
+                (_t_terrain - _t0) * 1000,
+                (_t_graph - _t_terrain) * 1000,
+                (_t_path - _t_graph) * 1000,
+                (_t_path - _t0) * 1000,
             )
 
             if path is None:

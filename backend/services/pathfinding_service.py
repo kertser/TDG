@@ -483,7 +483,7 @@ class PathfindingService:
         from_lon: float,
         to_lat: float,
         to_lon: float,
-        max_iterations: int = 5000,
+        max_iterations: int = 50000,
     ) -> list[tuple[float, float]] | None:
         """
         Find optimal path using A* search with proper closed set.
@@ -494,20 +494,33 @@ class PathfindingService:
         if not self._centroids or not self._neighbors:
             return None
 
+        t0 = _time.monotonic()
+
         # Snap start/end to nearest cells
         start_cell = self._nearest_cell(from_lat, from_lon)
         end_cell = self._nearest_cell(to_lat, to_lon)
 
         if start_cell is None or end_cell is None:
+            logger.debug("Pathfinding: start=%s end=%s — one is None", start_cell, end_cell)
             return None
 
         if start_cell == end_cell:
             return [(from_lat, from_lon), (to_lat, to_lon)]
 
+        # Check if end cell has neighbors (not isolated)
+        end_neighbors = self._neighbors.get(end_cell, [])
+        if not end_neighbors:
+            logger.warning(
+                "Pathfinding: end cell %s has no neighbors — likely outside grid",
+                end_cell,
+            )
+            return None
+
         end_lat, end_lon = self._centroids[end_cell]
 
         # A* search with closed set
         counter = 0
+        iterations_used = 0
         open_set: list[tuple[float, int, str]] = []
         heapq.heappush(open_set, (0.0, counter, start_cell))
 
@@ -517,9 +530,16 @@ class PathfindingService:
 
         while open_set:
             if max_iterations <= 0:
-                logger.warning("Pathfinding: max iterations reached")
+                elapsed = _time.monotonic() - t0
+                logger.warning(
+                    "Pathfinding: max iterations (%d used) from %s to %s in %.1fms — "
+                    "closed_set=%d, open_set=%d",
+                    iterations_used, start_cell, end_cell,
+                    elapsed * 1000, len(closed_set), len(open_set),
+                )
                 break
             max_iterations -= 1
+            iterations_used += 1
 
             _, _, current = heapq.heappop(open_set)
 
@@ -545,6 +565,13 @@ class PathfindingService:
                     waypoints.append((lat, lon))
                 waypoints.append((to_lat, to_lon))
 
+                elapsed = _time.monotonic() - t0
+                logger.debug(
+                    "Pathfinding: found path %s→%s, %d cells, %d iterations, %.1fms",
+                    start_cell, end_cell, len(path_cells),
+                    iterations_used, elapsed * 1000,
+                )
+
                 return self._simplify_path(waypoints)
 
             for neighbor, step_dist in self._neighbors.get(current, []):
@@ -564,7 +591,12 @@ class PathfindingService:
                     counter += 1
                     heapq.heappush(open_set, (f, counter, neighbor))
 
-        logger.debug("Pathfinding: no path found from %s to %s", start_cell, end_cell)
+        elapsed = _time.monotonic() - t0
+        logger.warning(
+            "Pathfinding: no path %s→%s, %d iterations, closed=%d, %.1fms",
+            start_cell, end_cell, iterations_used, len(closed_set),
+            elapsed * 1000,
+        )
         return None
 
     def _nearest_cell(self, lat: float, lon: float) -> str | None:
@@ -594,24 +626,44 @@ class PathfindingService:
         tolerance_m: float = 50.0,
     ) -> list[tuple[float, float]]:
         """
-        Simplify path: Douglas-Peucker + U-turn removal.
+        Simplify path: DP → loop shortcut → U-turn removal → final DP.
 
-        Lower tolerance (50m vs 80m) preserves more detail.
-        Post-process removes obvious direction reversals.
+        Multi-pass cleanup ensures clean trajectories.
         """
         if len(waypoints) <= 3:
             return waypoints
 
-        # Step 1: Remove U-turns (consecutive segments with >120° direction change)
-        cleaned = self._remove_uturn_waypoints(waypoints)
+        # Step 1: Douglas-Peucker to remove noise FIRST
+        cleaned = self._douglas_peucker(waypoints, tolerance_m)
 
-        # Step 2: Douglas-Peucker simplification
-        if len(cleaned) <= 3:
-            return cleaned
+        # Step 2: Remove loops (path coming back near a previous position)
+        cleaned = self._remove_loops(cleaned)
 
+        # Step 3: Remove U-turns (sharp direction reversals)
+        cleaned = self._remove_uturn_waypoints(cleaned, angle_threshold_deg=100.0)
+
+        # Step 4: Final light DP pass to clean up after loop/uturn removal
+        if len(cleaned) > 4:
+            cleaned = self._douglas_peucker(cleaned, tolerance_m * 0.6)
+
+        # Ensure start/end points are preserved exactly
+        if len(cleaned) >= 2:
+            cleaned[0] = waypoints[0]
+            cleaned[-1] = waypoints[-1]
+
+        return cleaned
+
+    @staticmethod
+    def _douglas_peucker(
+        waypoints: list[tuple[float, float]],
+        tolerance_m: float,
+    ) -> list[tuple[float, float]]:
+        """Douglas-Peucker simplification via Shapely."""
+        if len(waypoints) <= 3:
+            return list(waypoints)
         try:
             from shapely.geometry import LineString
-            coords = [(lon, lat) for lat, lon in cleaned]
+            coords = [(lon, lat) for lat, lon in waypoints]
             line = LineString(coords)
             tol_deg = tolerance_m / _M_PER_DEG_LAT
             simplified = line.simplify(tol_deg, preserve_topology=True)
@@ -621,25 +673,75 @@ class PathfindingService:
                 result[-1] = waypoints[-1]
             return result
         except Exception:
-            return cleaned
+            return list(waypoints)
 
     @staticmethod
-    def _remove_uturn_waypoints(
+    def _remove_loops(
         waypoints: list[tuple[float, float]],
-        angle_threshold_deg: float = 120.0,
+        proximity_m: float = 400.0,
+        min_loop_len: int = 3,
     ) -> list[tuple[float, float]]:
         """
-        Remove intermediate waypoints that cause sharp direction reversals (U-turns).
+        Detect and shortcut path loops.
 
-        If three consecutive points A→B→C have a direction change > threshold,
-        remove B (the turning point). Repeat until stable.
+        If point i and point j (j > i+min_loop_len) are within proximity_m,
+        remove all intermediate points between i and j — the path was going
+        out and coming back, creating a visual loop / U-turn.
         """
-        if len(waypoints) <= 3:
+        if len(waypoints) <= min_loop_len + 2:
             return waypoints
 
         result = list(waypoints)
         changed = True
-        max_passes = 5  # prevent infinite loop
+        max_passes = 3
+
+        while changed and max_passes > 0:
+            changed = False
+            max_passes -= 1
+            i = 0
+            while i < len(result) - min_loop_len - 1:
+                lat_i, lon_i = result[i]
+                # Check forward points for proximity (skip immediate neighbors)
+                j = i + min_loop_len + 1
+                while j < len(result):
+                    lat_j, lon_j = result[j]
+                    dist = _geo_dist(lat_i, lon_i, lat_j, lon_j)
+                    if dist < proximity_m:
+                        # Found a loop: i and j are close but have many points between
+                        # Keep the later point (j) to preserve forward progress
+                        result = result[:i + 1] + result[j:]
+                        changed = True
+                        break
+                    j += 1
+                if changed:
+                    break
+                i += 1
+
+        return result
+
+    @staticmethod
+    def _remove_uturn_waypoints(
+        waypoints: list[tuple[float, float]],
+        angle_threshold_deg: float = 100.0,
+    ) -> list[tuple[float, float]]:
+        """
+        Remove intermediate waypoints that cause sharp direction reversals (U-turns).
+
+        Two strategies:
+        1. Angle check: if A→B→C direction change > threshold, remove B.
+        2. Backward progress: if B is farther from the destination than A
+           AND C is closer than A, the detour through B is unnecessary.
+
+        Repeat until stable (multi-pass).
+        """
+        if len(waypoints) <= 3:
+            return waypoints
+
+        dest_lat, dest_lon = waypoints[-1]
+
+        result = list(waypoints)
+        changed = True
+        max_passes = 5
 
         while changed and max_passes > 0 and len(result) > 3:
             changed = False
@@ -651,7 +753,9 @@ class PathfindingService:
                 bx, by = result[i]
                 cx, cy = result[i + 1]
 
-                # Direction vectors (in meters)
+                remove = False
+
+                # Strategy 1: Sharp angle check
                 d1y = (bx - ax) * _M_PER_DEG_LAT
                 d1x = (by - ay) * _M_PER_DEG_LON_48
                 d2y = (cx - bx) * _M_PER_DEG_LAT
@@ -662,17 +766,28 @@ class PathfindingService:
 
                 if len1 < 1 or len2 < 1:
                     # Very short segment — skip this point
-                    changed = True
-                    i += 1
-                    continue
+                    remove = True
+                else:
+                    cos_angle = (d1x * d2x + d1y * d2y) / (len1 * len2)
+                    cos_angle = max(-1.0, min(1.0, cos_angle))
+                    angle_deg = math.degrees(math.acos(cos_angle))
+                    if angle_deg > angle_threshold_deg:
+                        remove = True
 
-                # Cosine of angle between segments
-                cos_angle = (d1x * d2x + d1y * d2y) / (len1 * len2)
-                cos_angle = max(-1.0, min(1.0, cos_angle))
-                angle_deg = math.degrees(math.acos(cos_angle))
+                # Strategy 2: Backward progress detection
+                # If B is farther from destination than both A and C,
+                # the path makes a detour through B
+                if not remove and i >= 2:
+                    dist_a = _geo_dist(ax, ay, dest_lat, dest_lon)
+                    dist_b = _geo_dist(bx, by, dest_lat, dest_lon)
+                    dist_c = _geo_dist(cx, cy, dest_lat, dest_lon)
+                    if dist_b > dist_a * 1.05 and dist_b > dist_c * 1.05:
+                        # B is a detour point — skip it if shortcut is reasonable
+                        shortcut_dist = _geo_dist(ax, ay, cx, cy)
+                        if shortcut_dist < (len1 + len2) * 0.85:
+                            remove = True
 
-                if angle_deg > angle_threshold_deg:
-                    # This is a U-turn — skip this waypoint
+                if remove:
                     changed = True
                     i += 1
                     continue

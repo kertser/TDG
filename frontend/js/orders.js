@@ -1003,8 +1003,10 @@ const KOrders = (() => {
 
         // Pre-fetch terrain paths for move/attack orders so trajectory shows
         // immediately after radio confirmation (before tick runs)
+        // Skip failed/cancelled orders — no trajectory for impassable routes
         const moveTypes = ['move', 'attack', 'advance', 'resupply'];
         if (moveTypes.includes(data.order_type)
+            && data.status !== 'failed' && data.status !== 'cancelled'
             && data.matched_unit_ids && data.matched_unit_ids.length > 0
             && data.resolved_locations && data.resolved_locations.length > 0
             && typeof KUnits !== 'undefined') {
