@@ -356,6 +356,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     _wp_contact_data = _extract_waypoint_contact_data(active_contacts)
     # Extract all unit positions for friendly proximity (not just moving units)
     _all_positions = _extract_all_unit_positions(all_units)
+    # Extract grid settings for DB-persisted pathfinding graph
+    _gd_settings = dict(gd.settings_json) if gd and gd.settings_json else None
 
     if _wp_unit_data and terrain_cells_dict and grid_service:
         loop = asyncio.get_running_loop()
@@ -367,6 +369,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 terrain_cells_dict, elevation_cells_dict,
                 grid_service, map_objects_list,
                 session_id_str=_sid_str,
+                grid_def_settings_json=_gd_settings,
             ),
         )
         # Apply results back to SQLAlchemy models (main thread)
@@ -1166,6 +1169,7 @@ def _compute_waypoints_pure(
     map_objects_list: list,
     *,
     session_id_str: str = "",
+    grid_def_settings_json: dict | None = None,
 ) -> dict:
     """
     Pure computation: runs in thread pool, no SQLAlchemy access.
@@ -1180,33 +1184,24 @@ def _compute_waypoints_pure(
     if not terrain_cells_dict or not grid_service:
         return results
 
-    # ── Get or build cell centroids (cached across ticks) ──
-    cell_centroids = _get_cached_centroids(session_id_str) if session_id_str else None
-    if not cell_centroids:
-        cell_centroids = {}
-        for path in terrain_cells_dict:
-            try:
-                center = grid_service.snail_to_center(path)
-                if center:
-                    cell_centroids[path] = (center.y, center.x)
-            except Exception:
-                pass
-        if session_id_str and cell_centroids:
-            _set_cached_centroids(session_id_str, cell_centroids)
+    # ── Get or build cell centroids + static graph (cached or DB-persisted) ──
+    from backend.services.pathfinding_service import load_or_build_static_graph
+    static_graph, cell_centroids = load_or_build_static_graph(
+        session_id_str,
+        terrain_cells_dict,
+        elevation_cells_dict,
+        _get_cached_centroids(session_id_str) if session_id_str else None,
+        grid_service,
+        grid_def_settings_json=grid_def_settings_json,
+    )
 
     if not cell_centroids:
         return results
 
-    # ── Get or build static graph (cached across ticks) ──
-    static_graph = _get_cached_static_graph(session_id_str) if session_id_str else None
-    if not static_graph:
-        from backend.services.pathfinding_service import build_static_graph
-        static_graph = build_static_graph(
-            terrain_cells_dict, elevation_cells_dict,
-            cell_centroids, grid_service,
-        )
-        if session_id_str and static_graph.get("centroids"):
-            _set_cached_static_graph(session_id_str, static_graph)
+    # Cache centroids for future calls
+    if session_id_str and cell_centroids:
+        _set_cached_centroids(session_id_str, cell_centroids)
+
 
     blue_contacts = contact_data.get("blue_contacts", [])
     red_contacts = contact_data.get("red_contacts", [])

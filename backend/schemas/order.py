@@ -64,6 +64,7 @@ class ResponseType(str, enum.Enum):
     unable = "unable"                 # cannot comply
     unable_range = "unable_range"     # cannot comply — target beyond max fire range
     unable_area = "unable_area"       # cannot comply — target outside operations area
+    unable_route = "unable_route"     # cannot comply — no passable route to destination
     clarify = "clarify"              # request clarification
     status = "status"                # status report
     no_response = "no_response"      # comms down / destroyed

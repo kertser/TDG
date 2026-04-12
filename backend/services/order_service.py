@@ -456,6 +456,45 @@ class OrderService:
                         "error": "target_outside_grid",
                     }
 
+        # ── Immediate pathfinding: compute waypoints before tick ──
+        # This gives the frontend an optimized trajectory line immediately
+        # instead of showing a straight line until the next tick processes.
+        route_impassable = False
+        route_target_snail = ""
+        MOVEABLE_TASK_TYPES = {"move", "attack", "advance", "disengage", "resupply"}
+        if (
+            task
+            and not target_outside_grid
+            and task.get("target_location")
+            and task.get("type") in MOVEABLE_TASK_TYPES
+        ):
+            waypoints, path_ok = await self._compute_immediate_waypoints(
+                task, matched_units, session_id, grid_service, db,
+            )
+            if path_ok and waypoints:
+                task["waypoints"] = waypoints
+                task["path_calc_tick"] = -1  # sentinel: pre-computed, recalc on first tick
+                order.parsed_order = {**order.parsed_order, **task}
+            elif not path_ok:
+                route_impassable = True
+                tgt = task.get("target_location", {})
+                route_target_snail = task.get("target_snail", "")
+                if not route_target_snail and grid_service:
+                    try:
+                        route_target_snail = grid_service.point_to_snail(
+                            tgt.get("lat", 0), tgt.get("lon", 0), depth=2
+                        ) or ""
+                    except Exception:
+                        pass
+                # Clear the task — unit can't reach destination
+                task = None
+                result.engine_task = None
+                order.status = OrderStatus.failed
+                order.parsed_intent = {
+                    **(order.parsed_intent or {}),
+                    "error": "route_impassable",
+                }
+
         # ── Fire range validation for artillery/mortar units ──
         # Check if fire-type orders target a location beyond the unit's weapon range.
         # If so, prepare range info for the unit response.
@@ -517,6 +556,12 @@ class OrderService:
                 reason = "target_outside_area"
                 all_ok = False
 
+            # ── Override: route impassable (pathfinding failed) ──
+            if route_impassable:
+                resp_type = ResponseType.unable_route
+                reason = "route_impassable"
+                all_ok = False
+
             # Build situational awareness for status and command acknowledgments
             status_text = ""
             if resp_type == ResponseType.unable_area:
@@ -556,6 +601,31 @@ class OrderService:
                         f"Bearing {range_info['compass']} ({range_info['bearing_deg']}°), "
                         f"need to advance at least {range_info['deficit_m']}m."
                     )
+            elif resp_type == ResponseType.unable_route:
+                lang = parsed.language.value
+                ref = route_target_snail or ""
+                if lang == "ru":
+                    if ref:
+                        status_text = (
+                            f"Маршрут до {ref} непроходим. "
+                            "Запрашиваю альтернативные координаты или инженерное обеспечение."
+                        )
+                    else:
+                        status_text = (
+                            "Маршрут до указанной позиции непроходим. "
+                            "Запрашиваю альтернативные координаты или инженерное обеспечение."
+                        )
+                else:
+                    if ref:
+                        status_text = (
+                            f"Route to {ref} impassable. "
+                            "Requesting alternate coordinates or engineer support."
+                        )
+                    else:
+                        status_text = (
+                            "Route to designated position impassable. "
+                            "Requesting alternate coordinates or engineer support."
+                        )
             elif resp_type in (ResponseType.status, ResponseType.wilco, ResponseType.wilco_fire,
                                ResponseType.wilco_disengage, ResponseType.wilco_resupply,
                                ResponseType.wilco_observe, ResponseType.wilco_standby,
@@ -954,6 +1024,145 @@ class OrderService:
             return task  # Return task anyway — engine will handle as best it can
 
         return task
+
+    async def _compute_immediate_waypoints(
+        self,
+        task: dict,
+        matched_units: list[dict],
+        session_id: uuid.UUID,
+        grid_service: Any,
+        db: AsyncSession,
+    ) -> tuple[list[dict] | None, bool]:
+        """
+        Compute A* pathfinding waypoints immediately after order confirmation.
+
+        Returns:
+            (waypoints_list, path_ok)
+            - waypoints_list: list of {"lat", "lon"} dicts, or None
+            - path_ok: True if path was found (or pathfinding not applicable),
+                       False if route is impassable
+        """
+        if not grid_service or not matched_units:
+            return None, True  # No grid → can't compute, not an error
+
+        tgt = task.get("target_location")
+        if not tgt:
+            return None, True
+
+        tgt_lat = tgt.get("lat")
+        tgt_lon = tgt.get("lon")
+        if tgt_lat is None or tgt_lon is None:
+            return None, True
+
+        # Use first matched unit's position as origin
+        unit_dict = matched_units[0]
+        u_lat = unit_dict.get("lat")
+        u_lon = unit_dict.get("lon")
+        if u_lat is None or u_lon is None:
+            return None, True
+
+        sid_str = str(session_id)
+
+        try:
+            # Load terrain data from cache or DB
+            from backend.engine.terrain import get_cached_terrain_data
+            cached = get_cached_terrain_data(sid_str)
+            if cached:
+                terrain_cells = cached.get("terrain_cells")
+                elevation_cells = cached.get("elevation_cells")
+            else:
+                from backend.models.terrain_cell import TerrainCell
+                from backend.models.elevation_cell import ElevationCell
+                tc_result = await db.execute(
+                    select(TerrainCell.snail_path, TerrainCell.terrain_type)
+                    .where(TerrainCell.session_id == session_id)
+                )
+                tc_rows = tc_result.all()
+                terrain_cells = {row[0]: row[1] for row in tc_rows} if tc_rows else None
+                elevation_cells = None
+                if tc_rows:
+                    ec_result = await db.execute(
+                        select(
+                            ElevationCell.snail_path,
+                            ElevationCell.elevation_m,
+                            ElevationCell.slope_deg,
+                            ElevationCell.aspect_deg,
+                        ).where(ElevationCell.session_id == session_id)
+                    )
+                    ec_rows = ec_result.all()
+                    if ec_rows:
+                        elevation_cells = {
+                            row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                            for row in ec_rows
+                        }
+
+            if not terrain_cells:
+                return None, True  # No terrain data → can't pathfind, not an error
+
+            # Load static graph from memory → DB → build
+            from backend.services.pathfinding_service import (
+                load_or_build_static_graph,
+                PathfindingService,
+            )
+            from backend.models.grid import GridDefinition
+            gd_result = await db.execute(
+                select(GridDefinition).where(GridDefinition.session_id == session_id)
+            )
+            gd = gd_result.scalar_one_or_none()
+            gd_settings = dict(gd.settings_json) if gd and gd.settings_json else None
+
+            static_graph, cell_centroids = load_or_build_static_graph(
+                sid_str,
+                terrain_cells,
+                elevation_cells,
+                None,  # let it use cached or build
+                grid_service,
+                grid_def_settings_json=gd_settings,
+            )
+
+            if not static_graph or not static_graph.get("centroids"):
+                return None, True  # No graph → can't compute, not an error
+
+            # Build PathfindingService and find path
+            speed_mode = task.get("speed", "slow")
+            unit_side = unit_dict.get("side", "blue")
+
+            service = PathfindingService(
+                terrain_cells=terrain_cells,
+                elevation_cells=elevation_cells,
+                cell_centroids=cell_centroids,
+                grid_service=grid_service,
+                side=unit_side,
+                speed_mode=speed_mode,
+                static_graph=static_graph,
+            )
+
+            path = service.find_path(
+                from_lat=u_lat,
+                from_lon=u_lon,
+                to_lat=tgt_lat,
+                to_lon=tgt_lon,
+            )
+
+            if path is None:
+                # Route is truly impassable
+                logger.info(
+                    "Pathfinding: no route from (%.4f,%.4f) to (%.4f,%.4f) for %s",
+                    u_lat, u_lon, tgt_lat, tgt_lon, unit_dict.get("name", "?"),
+                )
+                return None, False
+
+            if len(path) <= 2:
+                # Straight line is fine, no need for waypoints
+                return None, True
+
+            # Convert to waypoint dicts
+            waypoints = [{"lat": p[0], "lon": p[1]} for p in path]
+            return waypoints, True
+
+        except Exception as e:
+            logger.warning("Immediate pathfinding failed: %s", e)
+            return None, True  # Fail gracefully → show straight line
 
     def _match_units(
         self,

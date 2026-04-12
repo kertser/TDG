@@ -69,6 +69,11 @@ TEMPLATES_RU = {
         "{unit}, приём. Цель за пределами района операции. Запрашиваю уточнение.",
         "Здесь {unit}. Указанные координаты вне зоны ответственности. {status_text}",
     ],
+    "unable_route": [
+        "Здесь {unit}. Маршрут до указанной точки невозможен. Местность непроходима. {status_text}",
+        "{unit}, приём. Не могу выполнить — нет проходимого маршрута к указанной позиции. {status_text}",
+        "Здесь {unit}. Отказ. Маршрут заблокирован, необходим альтернативный маршрут или инженерное обеспечение. {status_text}",
+    ],
     "clarify": [
         "Здесь {unit}. Не понял приказ. Повторите, приём!",
         "{unit}, приём. Приказ неясен. Уточните задачу!",
@@ -147,6 +152,11 @@ TEMPLATES_EN = {
         "This is {unit}. Cannot comply! {status_text}",
         "{unit} here. Target is outside the area of operations. Requesting corrected coordinates.",
         "This is {unit}. Designated location outside our AO. {status_text}",
+    ],
+    "unable_route": [
+        "This is {unit}. Route to designated position impassable. Terrain does not permit passage. {status_text}",
+        "{unit} here. No viable route to objective. Terrain blocked. Requesting alternate coordinates. {status_text}",
+        "This is {unit}. Cannot comply — route impassable. Require engineer support or alternate route. {status_text}",
     ],
     "clarify": [
         "This is {unit}. Say again? Orders unclear. Please repeat, over.",

@@ -324,6 +324,58 @@ async def start_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
         session.current_time = _get_scenario_start_time(session.scenario) or datetime.now(timezone.utc)
     await db.flush()
 
+    # Pre-load pathfinding graph into memory (from DB-persisted GridDefinition.settings_json)
+    try:
+        from backend.models.grid import GridDefinition
+        from backend.models.terrain_cell import TerrainCell
+        from backend.models.elevation_cell import ElevationCell
+        from backend.services.pathfinding_service import load_or_build_static_graph
+        from backend.services.grid_service import GridService as _GS
+        from backend.engine.terrain import get_cached_terrain_data, set_cached_terrain_data
+
+        _sid_str = str(session_id)
+        gd_result = await db.execute(
+            select(GridDefinition).where(GridDefinition.session_id == session_id)
+        )
+        gd = gd_result.scalar_one_or_none()
+        if gd and gd.settings_json and "pathfinding_graph" in (gd.settings_json or {}):
+            # Load terrain cells for the graph builder (needed for cost lookups)
+            _cached = get_cached_terrain_data(_sid_str)
+            if not _cached:
+                tc_result = await db.execute(
+                    select(TerrainCell.snail_path, TerrainCell.terrain_type)
+                    .where(TerrainCell.session_id == session_id)
+                )
+                tc_rows = tc_result.all()
+                if tc_rows:
+                    _tc = {row[0]: row[1] for row in tc_rows}
+                    ec_result = await db.execute(
+                        select(
+                            ElevationCell.snail_path, ElevationCell.elevation_m,
+                            ElevationCell.slope_deg, ElevationCell.aspect_deg,
+                        ).where(ElevationCell.session_id == session_id)
+                    )
+                    ec_rows = ec_result.all()
+                    _ec = {
+                        row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+                        for row in ec_rows
+                    } if ec_rows else None
+                    set_cached_terrain_data(_sid_str, _tc, _ec)
+                    _cached = get_cached_terrain_data(_sid_str)
+
+            if _cached:
+                gs = _GS(gd)
+                load_or_build_static_graph(
+                    _sid_str,
+                    _cached.get("terrain_cells") or {},
+                    _cached.get("elevation_cells"),
+                    None,
+                    gs,
+                    grid_def_settings_json=dict(gd.settings_json),
+                )
+    except Exception:
+        pass  # Non-critical — graph will be built on first use
+
     import logging
     _logger = logging.getLogger(__name__)
     _logger.info("Session start took %.2fs (init=%.2fs, total=%.2fs)",

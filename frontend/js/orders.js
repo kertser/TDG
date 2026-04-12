@@ -1010,7 +1010,18 @@ const KOrders = (() => {
             && typeof KUnits !== 'undefined') {
             const loc = data.resolved_locations[0];
             if (loc && loc.lat != null && loc.lon != null) {
-                KUnits.prefetchPaths(data.matched_unit_ids, loc.lat, loc.lon);
+                // Check if server already computed waypoints in parsed_order
+                const serverWaypoints = data.parsed_order && data.parsed_order.waypoints;
+                if (serverWaypoints && serverWaypoints.length >= 2) {
+                    // Convert server waypoints to [[lat, lon], ...] format and inject into path cache
+                    const pathArr = serverWaypoints.map(wp =>
+                        Array.isArray(wp) ? wp : [wp.lat, wp.lon]
+                    );
+                    KUnits.injectPathCache(data.matched_unit_ids, loc.lat, loc.lon, pathArr);
+                } else {
+                    // Fall back to API fetch
+                    KUnits.prefetchPaths(data.matched_unit_ids, loc.lat, loc.lon);
+                }
             }
         }
 

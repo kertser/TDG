@@ -29,6 +29,84 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+# ── Persist pathfinding graph to DB after terrain analysis ────
+async def _persist_pathfinding_graph(session_id: uuid.UUID, db):
+    """Build static pathfinding graph and save to GridDefinition.settings_json.
+
+    Called after terrain analysis completes. The graph (~200-400KB JSON for
+    900 depth-1 cells) is loaded on next session start instead of rebuilding
+    from scratch, saving 1-3 seconds on the first tick.
+    """
+    try:
+        sid = str(session_id)
+        # Load terrain + elevation cells
+        tc_result = await db.execute(
+            select(TerrainCell.snail_path, TerrainCell.terrain_type)
+            .where(TerrainCell.session_id == session_id)
+        )
+        tc_rows = tc_result.all()
+        if not tc_rows:
+            return
+        terrain_cells = {row[0]: row[1] for row in tc_rows}
+
+        ec_result = await db.execute(
+            select(
+                ElevationCell.snail_path, ElevationCell.elevation_m,
+                ElevationCell.slope_deg, ElevationCell.aspect_deg,
+            ).where(ElevationCell.session_id == session_id)
+        )
+        ec_rows = ec_result.all()
+        elevation_cells = {
+            row[0]: {"elevation_m": row[1], "slope_deg": row[2], "aspect_deg": row[3]}
+            for row in ec_rows
+        } if ec_rows else None
+
+        # Load grid definition
+        gd_result = await db.execute(
+            select(GridDefinition).where(GridDefinition.session_id == session_id)
+        )
+        gd = gd_result.scalar_one_or_none()
+        if not gd:
+            return
+        grid_service = GridService(gd)
+
+        # Build centroids + graph
+        from backend.services.pathfinding_service import (
+            build_static_graph, serialize_static_graph, set_cached_graph,
+        )
+        from backend.engine.tick import _set_cached_centroids
+
+        cell_centroids = {}
+        for path in terrain_cells:
+            try:
+                center = grid_service.snail_to_center(path)
+                if center:
+                    cell_centroids[path] = (center.y, center.x)
+            except Exception:
+                pass
+
+        if not cell_centroids:
+            return
+
+        graph = build_static_graph(terrain_cells, elevation_cells, cell_centroids, grid_service)
+        if not graph.get("centroids"):
+            return
+
+        # Cache in memory
+        set_cached_graph(sid, graph)
+        _set_cached_centroids(sid, cell_centroids)
+
+        # Persist to DB
+        serialized = serialize_static_graph(graph)
+        settings = dict(gd.settings_json or {})
+        settings["pathfinding_graph"] = serialized
+        gd.settings_json = settings
+        await db.flush()
+        logger.info("Persisted pathfinding graph for session %s (%d cells)", sid, len(cell_centroids))
+    except Exception as e:
+        logger.warning("Failed to persist pathfinding graph: %s", e)
+
 # ── In-memory peaks cache per session ────────────────────────
 # Avoids recomputing peaks (expensive 8-ray algorithm) on every request.
 # Invalidated when terrain is analyzed or cleared.
@@ -165,6 +243,8 @@ async def analyze_terrain(
         _invalidate_peaks_cache(str(session_id))
         _path_cache.pop(str(session_id), None)
         await _clear_db_peaks_cache(session_id, db)
+        # Pre-build and persist pathfinding graph for instant availability
+        await _persist_pathfinding_graph(session_id, db)
         return summary
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -211,6 +291,11 @@ async def analyze_terrain_stream(
                     clear_pathfinding_cache(str(session_id))
                     from backend.services.pathfinding_service import clear_graph_cache
                     clear_graph_cache(str(session_id))
+                    # Pre-build and persist graph in background
+                    try:
+                        await _persist_pathfinding_graph(session_id, db)
+                    except Exception:
+                        pass  # best effort
                 yield f"data: {json.dumps(progress)}\n\n"
         except Exception as e:
             logger.error(f"Terrain analysis stream error: {e}", exc_info=True)
@@ -1219,16 +1304,18 @@ async def find_path(
         except Exception:
             pass
 
-    # Build pathfinder with session-cached static graph
-    from backend.services.pathfinding_service import PathfindingService, build_static_graph, get_cached_graph, set_cached_graph
+    # Build pathfinder with session-cached or DB-persisted static graph
+    from backend.services.pathfinding_service import PathfindingService, load_or_build_static_graph
     sid_str = str(session_id)
-    static_graph = get_cached_graph(sid_str)
-    if not static_graph:
-        static_graph = build_static_graph(
-            terrain_cells, elevation_cells, cell_centroids, grid_service,
-        )
-        if static_graph.get("centroids"):
-            set_cached_graph(sid_str, static_graph)
+    gd_settings = dict(grid_def.settings_json) if grid_def and grid_def.settings_json else None
+    static_graph, cell_centroids = load_or_build_static_graph(
+        sid_str,
+        terrain_cells,
+        elevation_cells,
+        cell_centroids if cell_centroids else None,
+        grid_service,
+        grid_def_settings_json=gd_settings,
+    )
 
     pathfinder = PathfindingService(
         terrain_cells=terrain_cells,

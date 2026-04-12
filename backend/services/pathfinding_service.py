@@ -102,6 +102,93 @@ def clear_graph_cache(session_id: str | None = None):
             _graph_cache.clear()
 
 
+def serialize_static_graph(graph: dict) -> dict:
+    """Serialize static graph for JSON storage (GridDefinition.settings_json).
+
+    Converts centroid tuples to lists and neighbor tuples to nested lists.
+    Result is ~200-400KB for 900 cells — fits comfortably in JSONB.
+    """
+    centroids_ser = {k: [v[0], v[1]] for k, v in graph.get("centroids", {}).items()}
+    neighbors_ser = {
+        k: [[nb, round(dist, 1)] for nb, dist in v]
+        for k, v in graph.get("neighbors", {}).items()
+    }
+    return {
+        "centroids": centroids_ser,
+        "neighbors": neighbors_ser,
+        "base_costs": {k: round(v, 4) for k, v in graph.get("base_costs", {}).items()},
+        "cell_spacing": graph.get("cell_spacing", 350.0),
+    }
+
+
+def deserialize_static_graph(data: dict) -> dict:
+    """Deserialize static graph from JSON (GridDefinition.settings_json).
+
+    Converts centroid lists back to tuples and neighbor lists to tuples.
+    """
+    centroids = {k: (v[0], v[1]) for k, v in data.get("centroids", {}).items()}
+    neighbors = {
+        k: [(nb, dist) for nb, dist in v]
+        for k, v in data.get("neighbors", {}).items()
+    }
+    return {
+        "centroids": centroids,
+        "neighbors": neighbors,
+        "base_costs": data.get("base_costs", {}),
+        "cell_spacing": data.get("cell_spacing", 350.0),
+    }
+
+
+def load_or_build_static_graph(
+    session_id_str: str,
+    terrain_cells: dict[str, str],
+    elevation_cells: dict[str, dict] | None,
+    cell_centroids: dict[str, tuple[float, float]] | None,
+    grid_service: Any,
+    grid_def_settings_json: dict | None = None,
+) -> tuple[dict, dict[str, tuple[float, float]]]:
+    """
+    Load static graph from cache → DB → build from scratch.
+
+    Returns (static_graph, cell_centroids).
+    Populates in-memory caches for future calls.
+    """
+    # 1. Check in-memory cache
+    cached = get_cached_graph(session_id_str)
+    if cached and cached.get("centroids"):
+        return cached, cached["centroids"]
+
+    # 2. Check DB-persisted graph (GridDefinition.settings_json.pathfinding_graph)
+    if grid_def_settings_json and "pathfinding_graph" in grid_def_settings_json:
+        try:
+            graph = deserialize_static_graph(grid_def_settings_json["pathfinding_graph"])
+            if graph.get("centroids") and graph.get("neighbors"):
+                set_cached_graph(session_id_str, graph)
+                return graph, graph["centroids"]
+        except Exception as e:
+            logger.warning("Failed to deserialize persisted graph: %s", e)
+
+    # 3. Build centroids if not provided
+    if not cell_centroids:
+        cell_centroids = {}
+        for path in terrain_cells:
+            try:
+                center = grid_service.snail_to_center(path)
+                if center:
+                    cell_centroids[path] = (center.y, center.x)
+            except Exception:
+                pass
+
+    if not cell_centroids:
+        return {"centroids": {}, "neighbors": {}, "base_costs": {}, "cell_spacing": 350.0}, {}
+
+    # 4. Build graph from scratch
+    graph = build_static_graph(terrain_cells, elevation_cells, cell_centroids, grid_service)
+    if graph.get("centroids"):
+        set_cached_graph(session_id_str, graph)
+    return graph, cell_centroids
+
+
 def build_static_graph(
     terrain_cells: dict[str, str],
     elevation_cells: dict[str, dict] | None,
