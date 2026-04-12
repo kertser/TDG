@@ -38,43 +38,38 @@ def _find_nearest_cover(
     Searches nearby terrain cells (from the TerrainService's cell DB)
     for cover terrain types (forest, urban, scrub, orchard, mountain).
     Returns (lat, lon) of best cover position, or None if not found.
+
+    Optimized: uses fast_point_to_snail for nearby sampling instead of
+    iterating all cells (which calls snail_to_center with pyproj each time).
     """
     if not terrain._cells or not terrain._grid:
-        # No cell data — try moving away from current position toward
-        # best terrain based on protection factor at nearby sample points
         return _sample_cover_position(cur_lat, cur_lon, terrain)
 
-    # Search through known terrain cells for the nearest cover
+    # Strategy: sample points in 8 directions at multiple radii
+    # and check terrain type at each point using the fast index.
+    # This avoids iterating ALL cells and calling snail_to_center.
     best_dist = float("inf")
     best_pos = None
 
-    for snail_path, terrain_type in terrain._cells.items():
-        if terrain_type not in COVER_TERRAIN_TYPES:
-            continue
+    for dist_m in (100, 200, 350, 500, 700):
+        for angle_deg in range(0, 360, 30):  # 12 directions
+            angle_rad = math.radians(angle_deg)
+            dlat = dist_m * math.cos(angle_rad) / METERS_PER_DEG_LAT
+            dlon = dist_m * math.sin(angle_rad) / METERS_PER_DEG_LON_AT_48
+            sample_lat = cur_lat + dlat
+            sample_lon = cur_lon + dlon
+            t = terrain.get_terrain_at(sample_lon, sample_lat)
+            if t in COVER_TERRAIN_TYPES:
+                if dist_m < best_dist:
+                    best_dist = dist_m
+                    best_pos = (sample_lat, sample_lon)
 
-        # Get centroid of this cell via grid service
-        cell_lat, cell_lon = None, None
-        try:
-            center = terrain._grid.snail_to_center(snail_path)
-            if center:
-                cell_lon, cell_lat = center.x, center.y
-        except Exception:
-            continue
+        # If we found cover at this radius, don't search further
+        if best_pos is not None:
+            return best_pos
 
-        if cell_lat is None or cell_lon is None:
-            continue
-
-        dist = _distance_m(cur_lat, cur_lon, cell_lat, cell_lon)
-        # Only consider cells within ~800m
-        if dist < best_dist and dist < 800:
-            best_dist = dist
-            best_pos = (cell_lat, cell_lon)
-
-    # If no cell-based cover found within 800m, sample positions
-    if best_pos is None:
-        return _sample_cover_position(cur_lat, cur_lon, terrain)
-
-    return best_pos
+    # Fallback to sampling with protection factor
+    return _sample_cover_position(cur_lat, cur_lon, terrain)
 
 
 def _sample_cover_position(
@@ -548,10 +543,40 @@ def process_movement(
         except Exception:
             continue
 
+        # ── Waypoint-following: determine immediate movement target ──
+        # If the task has waypoints, move toward the next waypoint
+        # instead of the final target_location.
+        waypoints = task.get("waypoints")
+        immediate_lat, immediate_lon = target_lat, target_lon
+        using_waypoints = False
+
+        if waypoints and isinstance(waypoints, list) and len(waypoints) > 0:
+            # Pop waypoints that we've already passed (within ~40m threshold)
+            while len(waypoints) > 0:
+                wp = waypoints[0]
+                wp_lat = wp[0] if isinstance(wp, (list, tuple)) else wp.get("lat", 0)
+                wp_lon = wp[1] if isinstance(wp, (list, tuple)) else wp.get("lon", 0)
+                if _distance_m(cur_lat, cur_lon, wp_lat, wp_lon) < 40:
+                    waypoints.pop(0)
+                else:
+                    break
+
+            if len(waypoints) > 0:
+                wp = waypoints[0]
+                immediate_lat = wp[0] if isinstance(wp, (list, tuple)) else wp.get("lat", 0)
+                immediate_lon = wp[1] if isinstance(wp, (list, tuple)) else wp.get("lon", 0)
+                using_waypoints = True
+
+            # Update waypoints in task (mutate JSONB)
+            new_task = dict(task)
+            new_task["waypoints"] = waypoints
+            unit.current_task = new_task
+            task = new_task
+
         # ── Check for discovered minefields ahead ──
         if map_objects:
             mine_event = _check_minefield_ahead(
-                cur_lat, cur_lon, target_lat, target_lon, unit, map_objects
+                cur_lat, cur_lon, immediate_lat, immediate_lon, unit, map_objects
             )
             if mine_event:
                 # Halt the unit — don't walk into the minefield
@@ -561,7 +586,7 @@ def process_movement(
 
         # ── Check for water/river crossing without bridge ──
         water_event = _check_water_crossing(
-            cur_lat, cur_lon, target_lat, target_lon, unit, terrain, map_objects
+            cur_lat, cur_lon, immediate_lat, immediate_lon, unit, terrain, map_objects
         )
         if water_event:
             unit.current_task = None
@@ -579,7 +604,7 @@ def process_movement(
         obstacle_damage = 0.0
         if map_objects:
             obstacle_factor, obstacle_damage, obs_events = _check_obstacles(
-                cur_lat, cur_lon, target_lat, target_lon, unit, map_objects or []
+                cur_lat, cur_lon, immediate_lat, immediate_lon, unit, map_objects or []
             )
             events.extend(obs_events)
 
@@ -614,15 +639,54 @@ def process_movement(
 
         distance_this_tick = effective_speed * tick_duration_sec
 
-        # Check if we'll arrive this tick
-        remaining = _distance_m(cur_lat, cur_lon, target_lat, target_lon)
+        # Check if we'll arrive at the immediate target this tick
+        remaining_to_wp = _distance_m(cur_lat, cur_lon, immediate_lat, immediate_lon)
+        remaining_to_final = _distance_m(cur_lat, cur_lon, target_lat, target_lon)
 
-        if remaining <= distance_this_tick:
-            # Arrived
+        # If following waypoints, we may pass through multiple waypoints in one tick
+        distance_left = distance_this_tick
+        move_lat, move_lon = cur_lat, cur_lon
+        _heading = unit.heading_deg or 0.0
+
+        if using_waypoints:
+            while distance_left > 0 and waypoints and len(waypoints) > 0:
+                wp = waypoints[0]
+                wp_lat = wp[0] if isinstance(wp, (list, tuple)) else wp.get("lat", 0)
+                wp_lon = wp[1] if isinstance(wp, (list, tuple)) else wp.get("lon", 0)
+                dist_to_wp = _distance_m(move_lat, move_lon, wp_lat, wp_lon)
+
+                if dist_to_wp <= distance_left:
+                    # Reach this waypoint, advance to next
+                    # Compute heading from this segment (before updating position)
+                    dy = (wp_lat - move_lat) * METERS_PER_DEG_LAT
+                    dx = (wp_lon - move_lon) * METERS_PER_DEG_LON_AT_48
+                    if dist_to_wp > 1:
+                        _heading = math.degrees(math.atan2(dx, dy)) % 360
+                    move_lat, move_lon = wp_lat, wp_lon
+                    distance_left -= dist_to_wp
+                    waypoints.pop(0)
+                else:
+                    # Move partway toward this waypoint
+                    move_lat, move_lon, _heading = _move_toward(
+                        move_lat, move_lon, wp_lat, wp_lon, distance_left
+                    )
+                    distance_left = 0
+
+            # Update waypoints in task
+            new_task = dict(task)
+            new_task["waypoints"] = waypoints
+            unit.current_task = new_task
+
+        # After waypoint traversal, check if we're close to the final target
+        remaining_to_final = _distance_m(move_lat, move_lon, target_lat, target_lon)
+        wp_exhausted = not waypoints or len(waypoints) == 0
+
+        if wp_exhausted and remaining_to_final <= max(distance_left, 30):
+            # Arrived at final destination
             new_lat, new_lon = target_lat, target_lon
             dy = (target_lat - cur_lat) * METERS_PER_DEG_LAT
             dx = (target_lon - cur_lon) * METERS_PER_DEG_LON_AT_48
-            heading = math.degrees(math.atan2(dx, dy)) % 360 if remaining > 1 else (unit.heading_deg or 0.0)
+            heading = math.degrees(math.atan2(dx, dy)) % 360 if remaining_to_final > 1 else _heading
 
             unit.position = from_shape(Point(new_lon, new_lat), srid=4326)
             unit.heading_deg = heading
@@ -650,6 +714,7 @@ def process_movement(
                 # to process the actual resupply. Clear target_location so we stop moving.
                 new_task = dict(task)
                 new_task.pop("target_location", None)
+                new_task.pop("waypoints", None)
                 unit.current_task = new_task
                 events.append({
                     "event_type": "movement",
@@ -657,13 +722,65 @@ def process_movement(
                     "text_summary": f"{unit.name} arrived at resupply point",
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
+        elif not using_waypoints:
+            # No waypoints — use original straight-line movement
+            if remaining_to_final <= distance_this_tick:
+                new_lat, new_lon = target_lat, target_lon
+                dy = (target_lat - cur_lat) * METERS_PER_DEG_LAT
+                dx = (target_lon - cur_lon) * METERS_PER_DEG_LON_AT_48
+                heading = math.degrees(math.atan2(dx, dy)) % 360 if remaining_to_final > 1 else (unit.heading_deg or 0.0)
+
+                unit.position = from_shape(Point(new_lon, new_lat), srid=4326)
+                unit.heading_deg = heading
+
+                if task_type == "move":
+                    unit.current_task = None
+                    events.append({
+                        "event_type": "order_completed",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} arrived at destination",
+                        "payload": {"lat": new_lat, "lon": new_lon},
+                    })
+                elif task_type == "disengage":
+                    unit.current_task = {"type": "defend", "order_id": task.get("order_id")}
+                    events.append({
+                        "event_type": "order_completed",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} disengaged and reached cover",
+                        "payload": {"lat": new_lat, "lon": new_lon},
+                    })
+                elif task_type == "resupply":
+                    new_task = dict(task)
+                    new_task.pop("target_location", None)
+                    unit.current_task = new_task
+                    events.append({
+                        "event_type": "movement",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} arrived at resupply point",
+                        "payload": {"lat": new_lat, "lon": new_lon},
+                    })
+            else:
+                new_lat, new_lon, heading = _move_toward(
+                    cur_lat, cur_lon, target_lat, target_lon, distance_this_tick
+                )
+                unit.position = from_shape(Point(new_lon, new_lat), srid=4326)
+                unit.heading_deg = heading
+
+                events.append({
+                    "event_type": "movement",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} moving ({distance_this_tick:.0f}m this tick)",
+                    "payload": {
+                        "from": {"lat": cur_lat, "lon": cur_lon},
+                        "to": {"lat": new_lat, "lon": new_lon},
+                        "remaining_m": remaining_to_final - distance_this_tick,
+                        "speed_mps": effective_speed,
+                    },
+                })
         else:
-            # Move toward target
-            new_lat, new_lon, heading = _move_toward(
-                cur_lat, cur_lon, target_lat, target_lon, distance_this_tick
-            )
-            unit.position = from_shape(Point(new_lon, new_lat), srid=4326)
-            unit.heading_deg = heading
+            # Waypoints mode: moved along waypoints but not yet at final destination
+            unit.position = from_shape(Point(move_lon, move_lat), srid=4326)
+            unit.heading_deg = _heading
 
             events.append({
                 "event_type": "movement",
@@ -671,8 +788,8 @@ def process_movement(
                 "text_summary": f"{unit.name} moving ({distance_this_tick:.0f}m this tick)",
                 "payload": {
                     "from": {"lat": cur_lat, "lon": cur_lon},
-                    "to": {"lat": new_lat, "lon": new_lon},
-                    "remaining_m": remaining - distance_this_tick,
+                    "to": {"lat": move_lat, "lon": move_lon},
+                    "remaining_m": remaining_to_final,
                     "speed_mps": effective_speed,
                 },
             })

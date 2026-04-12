@@ -101,10 +101,16 @@
     },
 
     "selection_trajectory": {
-        "dash_array": "10, 8",
-        "weight": 1.8,
-        "opacity": 0.5,
+        "dash_array": "10, 6",
+        "weight": 2.0,
+        "opacity": 0.6,
         "endpoint_radius": 5
+    },
+
+    "hover_trajectory": {
+        "dash_array": "8, 5",
+        "weight": 2.0,
+        "opacity": 0.55
     },
 
     "size_suffixes": [

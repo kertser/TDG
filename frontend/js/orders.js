@@ -1001,6 +1001,18 @@ const KOrders = (() => {
         }
         _renderOrders();
 
+        // Pre-fetch terrain paths for move/attack orders so trajectory shows
+        // immediately after radio confirmation (before tick runs)
+        const moveTypes = ['move', 'attack', 'advance', 'resupply'];
+        if (moveTypes.includes(data.order_type)
+            && data.matched_unit_ids && data.matched_unit_ids.length > 0
+            && data.resolved_locations && data.resolved_locations.length > 0
+            && typeof KUnits !== 'undefined') {
+            const loc = data.resolved_locations[0];
+            if (loc && loc.lat != null && loc.lon != null) {
+                KUnits.prefetchPaths(data.matched_unit_ids, loc.lat, loc.lon);
+            }
+        }
 
         // Highlight resolved locations on the map
         if (data.resolved_locations && data.resolved_locations.length > 0) {

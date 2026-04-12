@@ -158,6 +158,10 @@ async def analyze_terrain(
         # Invalidate terrain cache after analysis (in-memory + DB)
         from backend.engine.terrain import clear_terrain_cache
         clear_terrain_cache(str(session_id))
+        from backend.engine.tick import clear_pathfinding_cache
+        clear_pathfinding_cache(str(session_id))
+        from backend.services.pathfinding_service import clear_graph_cache
+        clear_graph_cache(str(session_id))
         _invalidate_peaks_cache(str(session_id))
         _path_cache.pop(str(session_id), None)
         await _clear_db_peaks_cache(session_id, db)
@@ -203,6 +207,10 @@ async def analyze_terrain_stream(
                 if progress.get("step") == "complete":
                     from backend.engine.terrain import clear_terrain_cache
                     clear_terrain_cache(str(session_id))
+                    from backend.engine.tick import clear_pathfinding_cache
+                    clear_pathfinding_cache(str(session_id))
+                    from backend.services.pathfinding_service import clear_graph_cache
+                    clear_graph_cache(str(session_id))
                 yield f"data: {json.dumps(progress)}\n\n"
         except Exception as e:
             logger.error(f"Terrain analysis stream error: {e}", exc_info=True)
@@ -613,7 +621,10 @@ async def batch_paint_terrain(
     # Invalidate terrain cache
     from backend.engine.terrain import clear_terrain_cache
     clear_terrain_cache(str(session_id))
-
+    from backend.engine.tick import clear_pathfinding_cache
+    clear_pathfinding_cache(str(session_id))
+    from backend.services.pathfinding_service import clear_graph_cache
+    clear_graph_cache(str(session_id))
     return {"painted": painted, "terrain_type": body.terrain_type}
 
 
@@ -639,6 +650,10 @@ async def clear_terrain(
     # Invalidate terrain cache (in-memory + DB peaks cache)
     from backend.engine.terrain import clear_terrain_cache
     clear_terrain_cache(str(session_id))
+    from backend.engine.tick import clear_pathfinding_cache
+    clear_pathfinding_cache(str(session_id))
+    from backend.services.pathfinding_service import clear_graph_cache
+    clear_graph_cache(str(session_id))
     _invalidate_peaks_cache(str(session_id))
     _path_cache.pop(str(session_id), None)
     await _clear_db_peaks_cache(session_id, db)
@@ -1040,6 +1055,8 @@ async def find_path(
     from_lon: float = Query(..., description="Start longitude"),
     to_lat: float = Query(..., description="End latitude"),
     to_lon: float = Query(..., description="End longitude"),
+    speed_mode: str = Query("fast", description="'fast' (roads/speed) or 'slow' (cover/concealment)"),
+    unit_id: str | None = Query(None, description="Unit ID — if provided, loads contacts for tactical routing"),
 ):
     """
     Find optimal movement path between two points using A* search.
@@ -1047,9 +1064,16 @@ async def find_path(
     Returns a list of (lat, lon) waypoints that avoids water, minefields,
     and prefers roads/open terrain over forest/marsh/mountain.
 
+    When unit_id is provided, the path also considers:
+    - Known enemy positions (avoids their detection zones)
+    - Friendly unit positions (prefers routes with mutual support)
+    - Speed mode: 'slow' maximizes cover, 'fast' prioritizes speed
+
     Falls back to empty path (straight line) if no terrain data or path not found.
     """
     sid = str(session_id)
+    if speed_mode not in ("fast", "slow"):
+        speed_mode = "fast"
 
     # Load grid definition
     result = await db.execute(
@@ -1061,13 +1085,14 @@ async def find_path(
 
     grid_service = GridService(grid_def)
 
-    # Snap to snail paths for cache key
+    # Snap to snail paths for cache key (include speed_mode)
     from_snail = grid_service.point_to_snail(from_lat, from_lon, depth=1) or ""
     to_snail = grid_service.point_to_snail(to_lat, to_lon, depth=1) or ""
+    cache_key_snail = f"{from_snail}_{speed_mode}" if from_snail else ""
 
     # Check path cache
-    if from_snail and to_snail:
-        cached_path = _get_cached_path(sid, from_snail, to_snail)
+    if cache_key_snail and to_snail:
+        cached_path = _get_cached_path(sid, cache_key_snail, to_snail)
         if cached_path is not None:
             return {"path": cached_path, "cost": 0, "cells": len(cached_path), "cached": True}
 
@@ -1130,6 +1155,7 @@ async def find_path(
     )
     participant = part_result.scalar_one_or_none()
     side = participant.side if participant else "blue"
+    side_str = side.value if hasattr(side, "value") else str(side)
 
     # Load active map objects (for obstacle avoidance)
     from backend.models.map_object import MapObject
@@ -1141,15 +1167,78 @@ async def find_path(
     )
     map_objects = obj_result.scalars().all()
 
-    # Build pathfinder and find path
-    from backend.services.pathfinding_service import PathfindingService
+    # ── Load tactical data (enemy contacts + friendly positions) ──
+    enemy_positions: list[tuple[float, float, float]] = []
+    friendly_positions: list[tuple[float, float]] = []
+
+    if unit_id:
+        from backend.models.contact import Contact
+        from backend.models.unit import Unit as UnitModel
+        from geoalchemy2.shape import to_shape as _to_shape
+
+        # Load known enemy contacts for this side
+        try:
+            contact_result = await db.execute(
+                select(Contact).where(
+                    Contact.session_id == session_id,
+                    Contact.observing_side == side_str,
+                    Contact.is_stale == False,  # noqa: E712
+                )
+            )
+            contacts = contact_result.scalars().all()
+            for c in contacts:
+                if c.location_estimate is None:
+                    continue
+                try:
+                    cp = _to_shape(c.location_estimate)
+                    det_range = c.location_accuracy_m or 1500.0
+                    enemy_positions.append((cp.y, cp.x, det_range))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Load friendly unit positions
+        try:
+            friendly_result = await db.execute(
+                select(UnitModel).where(
+                    UnitModel.session_id == session_id,
+                    UnitModel.side == side_str,
+                    UnitModel.is_destroyed == False,  # noqa: E712
+                )
+            )
+            friendlies = friendly_result.scalars().all()
+            for fu in friendlies:
+                if fu.position is None or str(fu.id) == unit_id:
+                    continue
+                try:
+                    fp = _to_shape(fu.position)
+                    friendly_positions.append((fp.y, fp.x))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # Build pathfinder with session-cached static graph
+    from backend.services.pathfinding_service import PathfindingService, build_static_graph, get_cached_graph, set_cached_graph
+    sid_str = str(session_id)
+    static_graph = get_cached_graph(sid_str)
+    if not static_graph:
+        static_graph = build_static_graph(
+            terrain_cells, elevation_cells, cell_centroids, grid_service,
+        )
+        if static_graph.get("centroids"):
+            set_cached_graph(sid_str, static_graph)
+
     pathfinder = PathfindingService(
         terrain_cells=terrain_cells,
-        elevation_cells=elevation_cells,
-        cell_centroids=cell_centroids,
         grid_service=grid_service,
         map_objects=map_objects if map_objects else None,
-        side=side,
+        side=side_str,
+        enemy_positions=enemy_positions if enemy_positions else None,
+        friendly_positions=friendly_positions if friendly_positions else None,
+        speed_mode=speed_mode,
+        static_graph=static_graph,
     )
 
     path = pathfinder.find_path(from_lat, from_lon, to_lat, to_lon)
@@ -1160,8 +1249,8 @@ async def find_path(
     path_list = [[round(lat, 7), round(lon, 7)] for lat, lon in path]
 
     # Cache result
-    if from_snail and to_snail:
-        _set_cached_path(sid, from_snail, to_snail, path_list)
+    if cache_key_snail and to_snail:
+        _set_cached_path(sid, cache_key_snail, to_snail, path_list)
 
     return {"path": path_list, "cost": 0, "cells": len(path_list)}
 

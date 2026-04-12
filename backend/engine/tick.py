@@ -18,6 +18,8 @@ AGENTS.MD Section 8.1 tick sequence:
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import time
 import uuid
@@ -342,6 +344,37 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     # Combine weather and night modifiers for detection
     combined_visibility_mod = weather_mod * night_mod
+
+    # ── 1.5. Compute tactical waypoints for moving units ────────
+    # Build pathfound routes for units that have move/attack tasks but no waypoints
+    # (or that need recalculation due to new contacts). Runs in thread pool executor
+    # to avoid blocking the async event loop (A* is CPU-bound).
+    _t0 = time.monotonic()
+
+    # Extract plain data from SQLAlchemy models before entering thread
+    _wp_unit_data = _extract_waypoint_unit_data(all_units, tick)
+    _wp_contact_data = _extract_waypoint_contact_data(active_contacts)
+    # Extract all unit positions for friendly proximity (not just moving units)
+    _all_positions = _extract_all_unit_positions(all_units)
+
+    if _wp_unit_data and terrain_cells_dict and grid_service:
+        loop = asyncio.get_running_loop()
+        _wp_results = await loop.run_in_executor(
+            None,  # default thread pool
+            functools.partial(
+                _compute_waypoints_pure,
+                _wp_unit_data, _wp_contact_data, _all_positions, tick,
+                terrain_cells_dict, elevation_cells_dict,
+                grid_service, map_objects_list,
+                session_id_str=_sid_str,
+            ),
+        )
+        # Apply results back to SQLAlchemy models (main thread)
+        _apply_waypoint_results(all_units, _wp_results)
+
+    _t_waypoints = time.monotonic() - _t0
+    if _debug:
+        dlog(f"  [1.5] Waypoints: {_t_waypoints:.2f}s")
 
     # ── 2. Execute movement (with obstacle effects) ──────────
     _t0 = time.monotonic()
@@ -962,6 +995,301 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         "_raw_events": all_events,  # for combat impact visualization
         "_smoke_updated": smoke_updated,  # smoke MapObjects whose state changed
     }
+
+
+# ── Waypoint computation helper ────────────────────────────────────
+
+# How often to recalculate paths (in ticks). Immediate recalc on new contacts.
+_PATH_RECALC_INTERVAL = 5
+
+WAYPOINT_MOVE_TASK_TYPES = {"move", "attack", "advance", "disengage", "resupply"}
+
+# ── Session-level centroid + static graph cache ──
+# Cell centroids (snail_path → (lat,lon)) and the neighbor map are expensive
+# to compute but never change within a session. Cache them.
+import threading as _threading
+_centroid_cache_lock = _threading.Lock()
+_centroid_cache: dict[str, dict[str, tuple[float, float]]] = {}  # session_id → centroids
+_static_graph_cache: dict[str, dict] = {}  # session_id → static graph
+
+
+def _get_cached_centroids(session_id_str: str) -> dict[str, tuple[float, float]] | None:
+    with _centroid_cache_lock:
+        return _centroid_cache.get(session_id_str)
+
+
+def _set_cached_centroids(session_id_str: str, centroids: dict[str, tuple[float, float]]):
+    with _centroid_cache_lock:
+        _centroid_cache[session_id_str] = centroids
+
+
+def _get_cached_static_graph(session_id_str: str) -> dict | None:
+    with _centroid_cache_lock:
+        return _static_graph_cache.get(session_id_str)
+
+
+def _set_cached_static_graph(session_id_str: str, graph: dict):
+    with _centroid_cache_lock:
+        _static_graph_cache[session_id_str] = graph
+
+
+def clear_pathfinding_cache(session_id_str: str | None = None):
+    """Clear pathfinding caches (call when terrain is re-analyzed)."""
+    with _centroid_cache_lock:
+        if session_id_str:
+            _centroid_cache.pop(session_id_str, None)
+            _static_graph_cache.pop(session_id_str, None)
+        else:
+            _centroid_cache.clear()
+            _static_graph_cache.clear()
+
+
+def _extract_waypoint_unit_data(all_units: list, tick: int) -> list[dict]:
+    """Extract plain data from SQLAlchemy unit models for thread-safe pathfinding."""
+    result = []
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        task = unit.current_task
+        if not task:
+            continue
+
+        task_type = task.get("type", "")
+        if task_type not in WAYPOINT_MOVE_TASK_TYPES:
+            continue
+
+        target = task.get("target_location")
+        if not target or target.get("lat") is None:
+            continue
+
+        if unit.position is None:
+            continue
+
+        # Check if we need to compute/recalculate waypoints
+        existing_waypoints = task.get("waypoints")
+        path_calc_tick = task.get("path_calc_tick", -999)
+        ticks_since_calc = tick - path_calc_tick
+
+        needs_calc = (
+            existing_waypoints is None  # No waypoints yet
+            or ticks_since_calc >= _PATH_RECALC_INTERVAL  # Periodic recalc
+        )
+
+        if not needs_calc:
+            continue
+
+        try:
+            pt = to_shape(unit.position)
+            cur_lat, cur_lon = pt.y, pt.x
+        except Exception:
+            continue
+
+        target_lat = target["lat"]
+        target_lon = target["lon"]
+
+        # Skip pathfinding for very short distances (<100m)
+        dlat = (target_lat - cur_lat) * 111320
+        dlon = (target_lon - cur_lon) * 74000
+        dist = (dlat**2 + dlon**2) ** 0.5
+        if dist < 100:
+            continue
+
+        speed = task.get("speed", "fast")
+        side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+        result.append({
+            "unit_id": str(unit.id),
+            "cur_lat": cur_lat,
+            "cur_lon": cur_lon,
+            "target_lat": target_lat,
+            "target_lon": target_lon,
+            "speed": speed,
+            "side": side,
+            "task": dict(task),  # Shallow copy of task dict
+        })
+    return result
+
+
+def _extract_waypoint_contact_data(contacts: list) -> dict:
+    """Extract plain contact data for thread-safe pathfinding."""
+    blue_contacts = []
+    red_contacts = []
+
+    for c in contacts:
+        c_side = c.observing_side.value if hasattr(c.observing_side, 'value') else str(c.observing_side)
+        if c.location_estimate is None:
+            continue
+        try:
+            c_pt = to_shape(c.location_estimate)
+            det_range = c.location_accuracy_m or 1500.0
+            entry = (c_pt.y, c_pt.x, det_range)
+            if c_side == "blue":
+                blue_contacts.append(entry)
+            else:
+                red_contacts.append(entry)
+        except Exception:
+            pass
+
+    return {
+        "blue_contacts": blue_contacts,
+        "red_contacts": red_contacts,
+    }
+
+
+def _extract_all_unit_positions(all_units: list) -> dict:
+    """Extract all non-destroyed unit positions for friendly proximity in pathfinding."""
+    blue_positions = []
+    red_positions = []
+    for u in all_units:
+        if u.is_destroyed or u.position is None:
+            continue
+        try:
+            up = to_shape(u.position)
+            side = u.side.value if hasattr(u.side, 'value') else str(u.side)
+            if side == "blue":
+                blue_positions.append((up.y, up.x))
+            else:
+                red_positions.append((up.y, up.x))
+        except Exception:
+            pass
+    return {"blue": blue_positions, "red": red_positions}
+
+
+def _compute_waypoints_pure(
+    unit_data_list: list[dict],
+    contact_data: dict,
+    all_positions: dict,
+    tick: int,
+    terrain_cells_dict: dict,
+    elevation_cells_dict: dict | None,
+    grid_service,
+    map_objects_list: list,
+    *,
+    session_id_str: str = "",
+) -> dict:
+    """
+    Pure computation: runs in thread pool, no SQLAlchemy access.
+
+    Uses session-level cached static graph (centroids, neighbor map, base costs)
+    to avoid rebuilding the expensive topology every tick.
+
+    Returns dict mapping unit_id → {"waypoints": [...], "path_failed": bool}
+    """
+    results = {}
+
+    if not terrain_cells_dict or not grid_service:
+        return results
+
+    # ── Get or build cell centroids (cached across ticks) ──
+    cell_centroids = _get_cached_centroids(session_id_str) if session_id_str else None
+    if not cell_centroids:
+        cell_centroids = {}
+        for path in terrain_cells_dict:
+            try:
+                center = grid_service.snail_to_center(path)
+                if center:
+                    cell_centroids[path] = (center.y, center.x)
+            except Exception:
+                pass
+        if session_id_str and cell_centroids:
+            _set_cached_centroids(session_id_str, cell_centroids)
+
+    if not cell_centroids:
+        return results
+
+    # ── Get or build static graph (cached across ticks) ──
+    static_graph = _get_cached_static_graph(session_id_str) if session_id_str else None
+    if not static_graph:
+        from backend.services.pathfinding_service import build_static_graph
+        static_graph = build_static_graph(
+            terrain_cells_dict, elevation_cells_dict,
+            cell_centroids, grid_service,
+        )
+        if session_id_str and static_graph.get("centroids"):
+            _set_cached_static_graph(session_id_str, static_graph)
+
+    blue_contacts = contact_data.get("blue_contacts", [])
+    red_contacts = contact_data.get("red_contacts", [])
+
+    # Use pre-extracted unit positions for friendly proximity
+    blue_positions = all_positions.get("blue", [])
+    red_positions = all_positions.get("red", [])
+
+    # Cache pathfinder instances per side+speed_mode
+    # (each only rebuilds tactical costs, not the full graph)
+    _pathfinders = {}
+    from backend.services.pathfinding_service import PathfindingService
+
+    def _get_pathfinder(side: str, speed_mode: str):
+        key = f"{side}_{speed_mode}"
+        if key in _pathfinders:
+            return _pathfinders[key]
+
+        enemy_pos = blue_contacts if side == "blue" else red_contacts
+        friendly_pos = blue_positions if side == "blue" else red_positions
+
+        pf = PathfindingService(
+            terrain_cells=terrain_cells_dict,
+            grid_service=grid_service,
+            map_objects=map_objects_list if map_objects_list else None,
+            side=side,
+            enemy_positions=enemy_pos if enemy_pos else None,
+            friendly_positions=friendly_pos if friendly_pos else None,
+            speed_mode=speed_mode,
+            static_graph=static_graph,
+        )
+        _pathfinders[key] = pf
+        return pf
+
+    for ud in unit_data_list:
+        uid = ud["unit_id"]
+        try:
+            pathfinder = _get_pathfinder(ud["side"], ud["speed"])
+            path = pathfinder.find_path(
+                ud["cur_lat"], ud["cur_lon"],
+                ud["target_lat"], ud["target_lon"],
+            )
+
+            if path and len(path) >= 2:
+                wp_list = [[round(lat, 7), round(lon, 7)] for lat, lon in path[1:]]
+                results[uid] = {
+                    "waypoints": wp_list,
+                    "path_calc_tick": tick,
+                    "path_failed": False,
+                }
+            else:
+                results[uid] = {
+                    "waypoints": None,
+                    "path_calc_tick": tick,
+                    "path_failed": True,
+                }
+        except Exception:
+            results[uid] = {
+                "waypoints": None,
+                "path_calc_tick": tick,
+                "path_failed": True,
+            }
+
+    return results
+
+
+def _apply_waypoint_results(all_units: list, results: dict):
+    """Apply computed waypoints back to SQLAlchemy unit models (main thread)."""
+    if not results:
+        return
+
+    units_by_id = {str(u.id): u for u in all_units}
+    for uid, wp_data in results.items():
+        unit = units_by_id.get(uid)
+        if not unit or not unit.current_task:
+            continue
+
+        new_task = dict(unit.current_task)
+        if wp_data.get("waypoints"):
+            new_task["waypoints"] = wp_data["waypoints"]
+        new_task["path_calc_tick"] = wp_data.get("path_calc_tick", -1)
+        new_task["path_failed"] = wp_data.get("path_failed", False)
+        unit.current_task = new_task
 
 
 async def _process_orders(
