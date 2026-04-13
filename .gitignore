@@ -14,4 +14,7 @@ node_modules/
 *.db
 *.sqlite3
 
+# Local LLM model files (large binaries)
+models/*.gguf
+
 /TODO.text

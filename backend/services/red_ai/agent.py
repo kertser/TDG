@@ -85,16 +85,18 @@ class RedAIAgent:
     ) -> list[dict]:
         """Use LLM to make strategic decisions."""
         from backend.prompts.red_commander import build_red_commander_prompt
-        from backend.config import settings
-        import openai
+        from backend.services.llm_client import get_llm_client
 
         system_prompt, user_message = build_red_commander_prompt(
             agent_data, doctrine, mission, knowledge, tick
         )
 
-        client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        llm = get_llm_client()
+        if llm is None:
+            raise RuntimeError("No LLM available for Red AI decisions")
+
         create_kwargs = dict(
-            model=settings.OPENAI_MODEL,
+            model=llm.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
@@ -104,12 +106,12 @@ class RedAIAgent:
             response_format={"type": "json_object"},
         )
         try:
-            response = await client.chat.completions.create(**create_kwargs)
+            response = await llm.client.chat.completions.create(**create_kwargs)
         except Exception as api_err:
             err_str = str(api_err)
             if "max_tokens" in err_str or "max_completion_tokens" in err_str:
                 create_kwargs.pop("max_completion_tokens", None)
-                response = await client.chat.completions.create(**create_kwargs)
+                response = await llm.client.chat.completions.create(**create_kwargs)
             else:
                 raise
 

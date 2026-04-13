@@ -29,7 +29,46 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Local LLM sidecar (OpenAI-compatible API) ───────────────────
+  # Optional: provides a local LLM for air-gapped / offline use.
+  # Uses the official pre-built llama.cpp server image — NO compilation.
+  #
+  # Start with:  docker compose --profile llm up -d
+  # Model file must exist at ./models/model.gguf
+  # Download one:  .\scripts\download_model.ps1
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: tdg-llm
+    profiles: ["llm"]
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "8081:8080"            # llama.cpp server listens on 8080 by default
+    # IPC_LOCK allows use_mlock (model pinned in RAM) if enabled
+    cap_add:
+      - IPC_LOCK
+    shm_size: "512m"
+    # llama.cpp server CLI args — tuned for single-user TDG workload
+    command: >
+      --model /models/model.gguf
+      --alias local
+      --ctx-size 4096
+      --threads 4
+      --parallel 1
+      --flash-attn on
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --mlock
+      --host 0.0.0.0
+      --port 8080
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s       # pre-built image loads model much faster
+
 volumes:
   pgdata:
-
 

@@ -127,6 +127,22 @@ class OrderParser:
                     friendly_status_context=friendly_status_context,
                 )
                 return result if result else keyword_result
+            # No cloud key — try local model for force_full_model too
+            local_client = self._get_local_client()
+            if local_client:
+                logger.info("OrderParser: force_full_model — no API key, using local model at %s",
+                            settings.LOCAL_MODEL_URL)
+                result = await self._call_llm(
+                    original_text, units, grid_info, game_time,
+                    client=local_client,
+                    model=settings.LOCAL_MODEL_NAME,
+                    issuer_side=issuer_side,
+                    terrain_context=terrain_context,
+                    contacts_context=contacts_context,
+                    objectives_context=objectives_context,
+                    friendly_status_context=friendly_status_context,
+                )
+                return result if result else keyword_result
             return keyword_result
 
         # ── Step 3: keyword_only mode → return keyword result immediately ──

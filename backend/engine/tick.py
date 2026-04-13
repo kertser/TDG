@@ -2037,28 +2037,27 @@ Respond with ONLY a valid JSON object:
 """
 
     try:
-        from backend.config import settings
-        if not settings.OPENAI_API_KEY:
-            return None
-
-        from openai import AsyncOpenAI
+        from backend.services.llm_client import get_llm_client
         import json
 
-        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        llm = get_llm_client()
+        if llm is None:
+            return None
+
         create_kwargs = dict(
-            model=settings.OPENAI_MODEL_NANO or "gpt-4o-mini",
+            model=llm.model_nano,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.1,
             max_completion_tokens=200,
         )
         try:
-            response = await client.chat.completions.create(**create_kwargs)
+            response = await llm.client.chat.completions.create(**create_kwargs)
         except Exception as api_err:
             err_str = str(api_err)
             if "max_tokens" in err_str or "max_completion_tokens" in err_str:
                 create_kwargs.pop("max_completion_tokens", None)
-                response = await client.chat.completions.create(**create_kwargs)
+                response = await llm.client.chat.completions.create(**create_kwargs)
             else:
                 raise
 
