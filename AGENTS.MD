@@ -1131,7 +1131,7 @@ if unit.ammo <= 0:
 
 ## Appendix A: Implementation Status
 
-> Last updated: 2026-04-11
+> Last updated: 2026-04-13
 
 ### Phases Completed / In Progress
 
@@ -1142,7 +1142,7 @@ if unit.ammo <= 0:
 | **Phase 3: Session & User Management** | ✅ Complete | Auth (JWT+bcrypt), session CRUD, join, start/pause/tick, participants |
 | **Phase 4: Map — Units, Fog of War** | ✅ Complete | milsymbol rendering, fog-of-war via PostGIS `ST_DWithin`, detection range filtering |
 | **Phase 5: Collaborative Overlays** | ✅ Complete | Drawing tools (arrow, polyline, rect, marker, ellipse, measure), WebSocket sync, overlay context menu (color/width/label/delete) |
-| **Phase 6: Order Entry** | ✅ Complete | Text order submission, bottom command panel with radio chat, parsed_order for direct task (move), unit selection UI. **LLM pipeline**: OrderParser (GPT-4.1, bilingual EN/RU, 5 message classifications, few-shot examples), IntentInterpreter (GPT-4.1-mini, tactical action taxonomy), LocationResolver (deterministic: snail/grid/coordinate/relative direction resolution), ResponseGenerator (template-based unit radio responses in RU/EN, state-aware: morale/comms/ammo checks), OrderService orchestrator (full pipeline with background task, WS broadcast of order status + unit responses as chat messages). Keyword fallback when LLM unavailable (unit ref extraction, speed/engagement detection). **Map coordinates support**: units understand lat/lon decimal-degree coordinates in orders (e.g. "move to 48.8566, 24.0122"), LLM parser + keyword fallback both extract coordinate refs, coordinate locations auto-resolve to snail path for engine tasks. **Enriched situational awareness**: units report with full context including: (1) map coordinates + grid ref, (2) compass heading/facing, (3) terrain type + elevation + slope, (4) surrounding terrain analysis (adjacent cells), (5) weather/environment from scenario, (6) game time + time-of-day period, (7) combat status (nominal/under_fire/suppressed/broken), (8) contacts with bearing + coordinates + grid ref, (9) discovered map objects nearby (minefields, obstacles, structures), (10) parent unit + subordinate units with strength, (11) task target with both snail + coordinates, (12) recent events and orders. **Brief sitrep on ack/wilco**: units append position + terrain + threat summary when acknowledging commands. Context built per-unit from DB (terrain cells, elevation cells, contacts, events, orders, map objects, session/scenario environment). **Cost-optimized LLM pipeline**: (a) IntentInterpreter is now fully deterministic (25+ rules, no LLM call — saves 100% of intent API costs), (b) 3-tier model routing: keyword parser runs first; confidence ≥0.80 skips LLM entirely (~60% of messages: acks, reports, clear commands), 0.50-0.80 uses cheap nano model (gpt-4o-mini at $0.15/M), <0.50 uses full model (gpt-4.1); (c) unit roster filtered to issuer's side only (halves prompt tokens); (d) local model fallback via `LOCAL_MODEL_URL` for air-gapped deployments. **Additional context**: route ETA (distance + estimated ticks to target), ammo projection (level + estimated fire ticks remaining), supply chain proximity (nearest logistics/medical/command unit). |
+| **Phase 6: Order Entry** | ✅ Complete | Text order submission, bottom command panel with radio chat, parsed_order for direct task (move), unit selection UI. **LLM pipeline**: OrderParser (GPT-4.1, bilingual EN/RU, 5 message classifications, few-shot examples), IntentInterpreter (GPT-4.1-mini, tactical action taxonomy), LocationResolver (deterministic: snail/grid/coordinate/relative direction resolution), ResponseGenerator (template-based unit radio responses in RU/EN, state-aware: morale/comms/ammo checks), OrderService orchestrator (full pipeline with background task, WS broadcast of order status + unit responses as chat messages). Keyword fallback when LLM unavailable (unit ref extraction, speed/engagement detection). **Map coordinates support**: units understand lat/lon decimal-degree coordinates in orders (e.g. "move to 48.8566, 24.0122"), LLM parser + keyword fallback both extract coordinate refs, coordinate locations auto-resolve to snail path for engine tasks. **Enriched situational awareness**: units report with full context including: (1) map coordinates + grid ref, (2) compass heading/facing, (3) terrain type + elevation + slope, (4) surrounding terrain analysis (adjacent cells), (5) weather/environment from scenario, (6) game time + time-of-day period, (7) combat status (nominal/under_fire/suppressed/broken), (8) contacts with bearing + coordinates + grid ref, (9) discovered map objects nearby (minefields, obstacles, structures), (10) parent unit + subordinate units with strength, (11) task target with both snail + coordinates, (12) recent events and orders. **Brief sitrep on ack/wilco**: units append position + terrain + threat summary when acknowledging commands. Context built per-unit from DB (terrain cells, elevation cells, contacts, events, orders, map objects, session/scenario environment). **Cost-optimized LLM pipeline**: (a) IntentInterpreter is now fully deterministic (25+ rules, no LLM call — saves 100% of intent API costs), (b) Commands ALWAYS go through LLM regardless of keyword confidence; only non-command classifications (acks, reports) with confidence ≥0.95 skip LLM; model tier: keyword conf ≥0.70 → nano model (cheap), <0.70 → full model; complex multi-verb commands capped at 0.65 confidence to force LLM; (c) unit roster filtered to issuer's side only (halves prompt tokens); (d) local model fallback via `LOCAL_MODEL_URL` for air-gapped deployments. **Additional context**: route ETA (distance + estimated ticks to target), ammo projection (level + estimated fire ticks remaining), supply chain proximity (nearest logistics/medical/command unit). |
 | **Phase 7: Rules Engine** | ✅ Complete | Tick processing: movement, detection, combat, morale, comms, suppression, ammo, contacts, events || **Phase 8: Red AI** | ✅ Complete | RedAgent model, 4 doctrine profiles (aggressive/balanced/cautious/defensive), knowledge builder (Red-side only, no Blue leaks), LLM decision engine (GPT-4.1 + rule-based fallback), tick-integrated runner (every 3 ticks, 6 when human Red), LLM prompt with terrain/grid/elevation context, Pydantic schemas (RedDecision/RedDecisionBatch), admin API (CRUD + force-decide), frontend Red AI panel (create/update/delete/force-decide). **Rule-based enhancements**: broken/offline units skipped, no-ammo check, critical-damage auto-withdraw, reasoning text in all orders. **Knowledge improvements**: grid references for units/contacts/objects, terrain at unit positions, elevation data, bearing to contacts, enhanced summary stats. **42 tests** covering doctrine, decisions, output validation, prompt safety, schemas. |
 | **Phase 9: Reports, Events, Log** | ✅ Complete | Events endpoint + frontend panel. Reports auto-generated: SPOTREP (new contacts), SHELREP (units under fire), CASREP (unit destroyed), SITREP (periodic every 5 ticks), INTSUM (intelligence summary every 10 ticks). Report generator wired into tick loop. Reports persisted to DB and broadcast via WebSocket. Frontend Reports tab with channel filtering (All/SPOTREP/SHELREP/SITREP/INTSUM/CASREP), click-to-locate, export. Bilingual RU/EN. Gamelog combines events+reports+orders. |
 | **Phase 10: Polish & Deployment** | ⚠ Partial | Dev workflow works. Dockerfile/nginx not yet tested in production. |
@@ -1386,11 +1386,16 @@ if unit.ammo <= 0:
 ```
 KShU/
 ├── AGENTS.MD
+├── FIELD_MANUAL.md
 ├── README.md
 ├── Task.MD
 ├── requirements.txt
 ├── docker-compose.yml
+├── Dockerfile.llm
 ├── alembic.ini
+├── package.json
+├── run_server.bat
+├── .env
 ├── alembic/
 │   ├── env.py
 │   ├── script.py.mako
@@ -1432,7 +1437,8 @@ KShU/
 │   │   ├── reports.py
 │   │   ├── scenarios.py
 │   │   ├── map_objects.py         ← Tactical object CRUD (barbed wire, mines, entrenchments, etc.)
-│   │   ├── terrain.py             ← Terrain analysis + painting + elevation endpoints
+│   │   ├── terrain.py             ← Terrain analysis + painting + elevation + pathfinding endpoints
+│   │   ├── red_ai.py             ← Red AI agent CRUD + force-decide endpoints
 │   │   └── websocket.py
 │   ├── services/
 │   │   ├── __init__.py
@@ -1451,6 +1457,7 @@ KShU/
 │   │   ├── pathfinding_service.py ← A* pathfinding over terrain cells (movement trajectory)
 │   │   ├── report_generator.py   ← Auto-generate tick reports: SPOTREP, SHELREP, CASREP, SITREP, INTSUM
 │   │   ├── debug_logger.py      ← Debug log recording to file (admin toggle, tick timing, combat trace)
+│   │   ├── llm_client.py        ← Unified OpenAI/local LLM client wrapper (model routing, fallback)
 │   │   └── terrain_analysis/      ← Terrain intelligence package
 │   │       ├── __init__.py
 │   │       ├── service.py         ← Orchestrator: analyze_grid()
@@ -1489,6 +1496,7 @@ KShU/
 │   │   ├── order_parser.py        ← System prompt + few-shot examples for bilingual order parsing
 │   │   ├── intent_interpreter.py  ← Prompt for tactical intent extraction
 │   │   ├── response_generator.py  ← Template-based + optional LLM unit radio response prompts
+│   │   ├── red_commander.py       ← System prompt template for Red AI decision-making
 │   │   └── tactical_doctrine.py   ← Condensed FIELD_MANUAL doctrine for LLM injection (full + brief)
 │   └── tests/
 │       ├── __init__.py
@@ -1528,6 +1536,8 @@ KShU/
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 ├── frontend/
 │   ├── verify_sidc.html          ← SIDC verification page: renders all unit types with milsymbol v2.2.0
+│   ├── sidc_check.html
+│   ├── sidc_corrected.html
 │   └── static/
 │       └── topbar-pattern.svg    ← Decorative SVG pattern for UI top bar
 └── scripts/
@@ -1535,12 +1545,16 @@ KShU/
     ├── seed_scenario.py
     ├── add_password_column.py
     ├── apply_discovery_migration.py
+    ├── download_model.ps1          ← PowerShell script to download local LLM model
     ├── set_passwords.py
     ├── set_user_passwords.py
     ├── verify_sidc.py            ← SIDC code verification tool
     ├── test_api_quick.py
+    ├── test_distance.py
+    ├── test_doctrine_load.py
     ├── test_flow.py
     ├── test_grid_quick.py
+    ├── test_local_llm.py
     ├── test_order_pipeline.py
     ├── test_simulation.py
     ├── test_tick.py

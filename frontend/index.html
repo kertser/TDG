@@ -1348,28 +1348,32 @@
 
                 <div class="rules-section">
                     <div class="rules-section-title">Orders</div>
-                    <p>Select units, then type a natural-language order. The system understands grid references, coordinates, and tactical intent. Examples:</p>
+                    <p>Select units, then type a natural-language order. The system understands grid references, coordinates, height tops, and tactical intent. Examples:</p>
                     <ul>
                         <li><b>Move</b> — <code>1st Plt move to B4-3</code> or <code>Move to 48.856, 24.012</code></li>
-                        <li><b>Attack</b> — <code>Attack enemy position at C6</code></li>
+                        <li><b>Attack</b> — <code>Attack enemy position at C6</code> or <code>Advance to F8. Eliminate enemy forces.</code></li>
                         <li><b>Defend</b> — <code>Defend current position</code></li>
-                        <li><b>Observe</b> — <code>Observe sector from D2 to E5</code></li>
+                        <li><b>Observe / Standby</b> — <code>Observe sector from D2 to E5</code> or <code>Get ready for fire support on request</code></li>
                         <li><b>Disengage</b> — <code>Break contact</code> or <code>Разорвать контакт</code> — unit retreats to nearest cover</li>
                         <li><b>Fire at location</b> — <code>Fire at B4-3</code> (artillery/mortar area fire, 3 salvos)</li>
+                        <li><b>Request fire</b> — <code>Request fire on enemy position</code> (infantry calls CoC artillery)</li>
+                        <li><b>Resupply</b> — <code>Resupply</code> or <code>Пополнить боекомплект</code> — unit moves to nearest supply source</li>
+                        <li><b>Height reference</b> — <code>Move toward height 170</code> or <code>Выдвинуться к высоте 170</code></li>
                     </ul>
-                    <p style="margin-top:4px;">You can also set move targets via <b>right-click → Move (🐢 Slow / ⚡ Fast)</b> on a unit, then click a destination on the map. Units acknowledge orders via radio with a status report.</p>
+                    <p style="margin-top:4px;">You can also set move targets via <b>right-click → Move (🐢 Slow / ⚡ Fast)</b> on a unit, then click a destination on the map. Units acknowledge orders via radio with a tactical assessment.</p>
+                    <p style="margin-top:4px;"><b>Speed modes</b> affect pathfinding: <b>🐢 Slow</b> routes through concealed terrain (forest, urban); <b>⚡ Fast</b> routes via roads and open ground.</p>
                 </div>
 
                 <div class="rules-section">
                     <div class="rules-section-title">Fog of War &amp; Detection</div>
-                    <p>You can only see enemy units within your units' <b>line of sight</b> (LOS). Detection uses ray-casting: terrain obstacles like forests, buildings, and hills block visibility. Enemy contacts appear with limited information (approximate type and strength estimate) and may become <b>stale</b> if not re-detected.</p>
-                    <p>Your own units are always fully visible with all stats. Enemy strength is shown as approximate categories (full / reduced / weakened / critical).</p>
+                    <p>You can only see enemy units within your units' <b>line of sight</b> (LOS). Detection uses ray-casting: terrain obstacles like forests, buildings, and hills block visibility. Enemy contacts appear with limited information — <b>unit type is generalized</b> (e.g., "infantry" instead of "infantry_squad"), <b>echelon is masked</b> (no size bar on symbol), and <b>strength is approximate</b> (full / reduced / weakened / critical). Personnel count shows as "?" for detected enemies.</p>
+                    <p>Your own units are always fully visible with all stats. Contact circles appear for detected enemies; they disappear when the contact becomes stale.</p>
                     <p><b>Concealed recon/sniper units</b> (stationary, not moving or firing) are extremely hard to detect — enemies must get within ~120-300m depending on terrain and weather. Forest concealment is best (~120m detection range).</p>
                 </div>
 
                 <div class="rules-section">
                     <div class="rules-section-title">Terrain &amp; Map Objects</div>
-                    <p>The map features <b>terrain intelligence</b> (12 terrain types: road, open, forest, urban, water, fields, marsh, desert, scrub, bridge, mountain, orchard) that affects movement speed, visibility, protection, and combat effectiveness.</p>
+                    <p>The map features <b>terrain intelligence</b> (12 terrain types: road, open, forest, urban, water, fields, marsh, desert, scrub, bridge, mountain, orchard) that affects movement speed, visibility, protection, and combat effectiveness. <b>Height tops</b> (▲) mark elevation peaks with altitude numbers — reference them in orders.</p>
                     <p><b>Tactical map objects</b> include barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, and more. Some objects are hidden until discovered by your units' LOS. Minefields damage and slow units; barbed wire slows movement; entrenchments provide protection.</p>
                     <p><b>Area effects</b>: Smoke (blocks detection ×0.1), Fog (reduces visibility ×0.15), Fire (damages 3%/tick, blocks movement), Chemical Cloud (heavy damage 5-6%/tick infantry). All effects are temporary and decay over several ticks.</p>
                 </div>
@@ -1378,14 +1382,19 @@
                     <div class="rules-section-title">Simulation Mechanics</div>
                     <p>Each turn advances game time (default: 1 minute per turn). The rules engine resolves:</p>
                     <ul>
-                        <li><b>Movement</b> — Units advance toward targets; terrain, slope, weather, and suppression affect speed. Two speed modes: 🐢 Slow (tactical) and ⚡ Fast (rapid). Rain/mud and snow slow movement further. Units halt before discovered minefields and rivers without bridges.</li>
+                        <li><b>Pathfinding</b> — Units navigate via <b>tactical A* pathfinding</b> over terrain cells (~333m resolution). Routes consider terrain cost, slope, discovered minefields, enemy detection ranges, and cover availability. <b>🐢 Slow</b> mode maximizes concealment (prefers forest, urban, scrub); <b>⚡ Fast</b> mode prioritizes speed (prefers roads). Waypoints recalculated every 5 ticks.</li>
+                        <li><b>Movement</b> — Units advance along A* waypoints; terrain, slope, weather, and suppression affect speed. Two speed modes: 🐢 Slow (tactical) and ⚡ Fast (rapid). Rain/mud and snow slow movement further. Units halt before discovered minefields and rivers without bridges.</li>
+                        <li><b>Contact During Advance</b> — Units on <b>move</b> tasks (not attack) that detect enemies <b>halt automatically</b> and radio for orders: <i>"Contact ahead — engage or bypass?"</i> After 3 ticks without orders, they resume on own initiative. Attack tasks continue normally.</li>
                         <li><b>Detection</b> — LOS-based visibility checks between opposing units. Height advantage improves detection range. Night-time heavily reduces vision (units with NVG are penalized less). Weather (rain, fog, snow) reduces visibility. Targets in obscuring terrain (forest, urban) are harder to spot.</li>
                         <li><b>Recon Concealment</b> — Stationary recon, sniper, and observation units enter <b>concealment mode</b>, becoming nearly undetectable. Max detection range drops to 300m (further reduced by terrain/weather/night), probability capped at 25%. Moving, firing, or panicking breaks concealment.</li>
-                        <li><b>Combat</b> — Engaged units exchange fire. Damage reduces strength; fire causes suppression. Elevation advantage boosts effectiveness (+15%). Artillery units auto-support attacking allies. <b>Danger close</b>: artillery ceases fire if friendly units are within 50m of the target.</li>
+                        <li><b>Combat Role Coordination</b> — When multiple units attack the same enemy, they auto-coordinate: <b>suppress</b> (~40% — stay at weapon range, covering fire with ×1.5 suppression), <b>assault</b> (1–2 strongest infantry close in), <b>flank</b> (remainder approach from 60° offset via covered terrain). Units announce their roles via radio.</li>
+                        <li><b>Combat</b> — Engaged units exchange fire. Damage reduces strength; fire causes suppression. Elevation advantage boosts effectiveness (+15%). <b>Danger close</b>: artillery ceases fire if friendly units are within 50m of the target.</li>
+                        <li><b>Artillery Coordination</b> — Artillery auto-supports attacking <b>and defending</b> allies. Infantry approaching a friendly bombardment zone (250m) halts and requests cease-fire — artillery finishes last salvo, infantry confirms and resumes. <b>Explicit fire requests</b> override standby orders. Units auto-request artillery on first target acquisition.</li>
                         <li><b>Area Fire</b> — Artillery/mortar can fire at a <b>grid location</b> (not just specific enemies). Blast radius: 150m, damage falls off with distance. <b>Finite salvos</b>: fire missions limited to 3 salvos, then auto-complete.</li>
                         <li><b>Area Effects</b> — Transient hazard zones on the map: <b>Smoke</b> (blocks detection), <b>Fog</b> (reduces visibility), <b>Fire</b> (damages units 3%/tick, blocks movement), <b>Chemical Cloud</b> (heavy damage 5-6%/tick to infantry). All effects decay over time.</li>
                         <li><b>Disengage</b> — Order units to <b>break contact</b>: unit stops fighting, moves at fast speed to nearest cover (forest, urban, scrub within 800m), then defends. Disengaging units do NOT auto-return fire.</li>
                         <li><b>Defensive Posture</b> — Units ordered to <b>Defend</b> gradually dig in over time (3 ticks per level, max level 5). Higher dig-in levels provide increasing protection. Entrenchments and urban terrain add additional bonuses.</li>
+                        <li><b>Resupply</b> — Supply caches resupply nearby units (+10% ammo/tick). Logistics units act as mobile supply points (+8% ammo/tick). Field hospitals restore strength (+1%/tick). Order <code>Resupply</code> to auto-move to nearest supply source.</li>
                         <li><b>Rest &amp; Recovery</b> — Units out of combat (idle or defending, not under fire) slowly recover strength (+0.3%/tick, +0.8%/tick after 5 rest ticks) and morale. This represents reorganization, not replacement of personnel.</li>
                         <li><b>Smoke Screens</b> — Artillery and mortar units can fire smoke rounds (right-click → 🌫 Fire Smoke). Smoke drastically reduces visibility in an area for ~3 minutes, blocking detection and reducing combat effectiveness for units inside.</li>
                         <li><b>Morale</b> — Casualties and suppression erode morale. Nearby friendlies provide mutual support. Units with morale below 15% break and retreat. Destroying enemies boosts nearby units' morale. Long marches (>10 ticks) cause fatigue.</li>
@@ -1393,6 +1402,7 @@
                         <li><b>Ammo</b> — Firing consumes ammunition. Units without ammo cannot engage.</li>
                         <li><b>Return Fire</b> — Units under attack with no orders automatically engage their nearest attacker (except disengaging units).</li>
                         <li><b>Casualty Reports</b> — After an enemy unit is destroyed, all involved units automatically report their situation and casualties over the radio.</li>
+                        <li><b>Victory Evaluation</b> — AI evaluates victory conditions every 5 turns. Game also ends when the turn limit is reached.</li>
                     </ul>
                 </div>
 
@@ -1410,6 +1420,10 @@
                     <div class="rules-section-title">Special Commands</div>
                     <ul>
                         <li><b>Disengage / Break Contact</b> — Order a unit to retreat to the nearest covered terrain (forest, urban, scrub within 800m). The unit moves at fast speed, ignores return fire, and switches to defend on arrival.</li>
+                        <li><b>Standby / Observe</b> — <code>Get ready for fire support on request</code> puts artillery on standby (does NOT fire immediately). Unit waits for explicit fire commands.</li>
+                        <li><b>Request Fire</b> — Infantry can request CoC artillery support: <code>Request fire on enemy position</code>. Artillery on standby responds to explicit fire requests.</li>
+                        <li><b>Resupply</b> — <code>Resupply</code> or <code>Пополнить боекомплект</code> — unit auto-moves to nearest supply cache or logistics unit, resupplies until 95% ammo.</li>
+                        <li><b>Height Reference</b> — <code>Move toward height 170</code> or <code>Выдвинуться к высоте 170</code> — resolves to nearest elevation peak matching the height value.</li>
                         <li><b>Disband Unit</b> — Right-click → ⛔ Disband Unit. Permanently removes a unit from the game (for units with unsustainable losses).</li>
                         <li><b>Cancel Orders</b> — Click ⊘ in the command panel to cancel all orders for selected units (or all your units if none selected).</li>
                         <li><b>Phased Orders</b> — Issue conditional orders: <i>"After capturing C6-6-8, advance to D4"</i>. Subsequent phases are stored in the unit's order queue and activate when conditions are met.</li>
@@ -1424,8 +1438,9 @@
                 </div>
 
                 <div class="rules-section">
-                    <div class="rules-section-title">Scenario Briefing</div>
-                    <p>Click the <b>📋 session name</b> in the top bar to view the scenario briefing, including the situation, mission/task, and environmental conditions (weather, visibility, wind, light level).</p>
+                    <div class="rules-section-title">Scenario Briefing &amp; Victory</div>
+                    <p>Click the <b>📋 session name</b> in the top bar to view the scenario briefing, including the situation, mission/task, environmental conditions (weather, visibility, wind, light level), and operation start time.</p>
+                    <p>The game checks <b>victory conditions</b> every 5 turns using AI evaluation against the scenario objectives. The game also ends when the <b>turn limit</b> is reached (if set). Radio timestamps and the game clock show in-game scenario time.</p>
                 </div>
 
                 <div class="rules-section">

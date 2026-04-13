@@ -60,6 +60,7 @@ Each **tick** represents a configurable time step (default: **60 seconds** of ga
 | 1b | Target Resolution | Units with attack/engage tasks but no target → find nearest known enemy contact |
 | 1c | Effect Decay | Decrement active transient effect timers (smoke, fog, fire, chemical); dissipate expired effects |
 | 1d | Weather/Night | Compute weather and night visibility/movement modifiers from scenario environment |
+| 1.5 | Pathfinding | Compute A* waypoints for all moving units (recalculated every 5 ticks) |
 | 2 | Movement | Execute movement for all units with movement tasks (applies weather movement mod) |
 | 2a | Order Completion | Mark orders as completed when units arrive at destinations |
 | 2a2 | Conditional Orders | Check unit order queues for triggered conditions (task_completed, location_reached) |
@@ -67,9 +68,11 @@ Each **tick** represents a configurable time step (default: **60 seconds** of ga
 | 3 | Detection | Execute detection checks between opposing sides (uses LOS, weather, night modifiers) |
 | 3b | Object Discovery | Check if units have LOS to undiscovered map objects |
 | 4 | Contact Decay | Mark stale contacts, expire old contacts |
-| 4b | Artillery Support | Auto-assign idle artillery to support attacking units in CoC |
+| 4b | Artillery Support | Auto-assign idle artillery to support attacking/defending units in CoC; process explicit fire requests |
+| 4b2 | Ceasefire Check | Check if friendly infantry is near friendly bombardment zone → halt infantry, signal artillery to cease |
 | 4c | Defense | Process dig-in progression for units in defensive posture |
 | 4d | Return Fire | Units under attack with no combat task auto-engage nearest attacker |
+| 4e | Enhanced Support | Artillery also supports defensive units under fire (not just attackers) |
 | 5 | Combat | Resolve combat — damage, suppression, destruction |
 | 5b | Contact Cleanup | Remove contacts referencing destroyed units |
 | 6 | Suppression Recovery | Recover suppression for units NOT under fire |
@@ -1818,6 +1821,187 @@ When a target is outside the area of operations:
 
 ---
 
+## 33. Tactical A* Pathfinding
+
+Units navigate via **A* pathfinding** over depth-1 terrain cells (~333m resolution) instead of straight-line movement.
+
+### 33.1 Pathfinding Factors
+
+| Factor | Effect |
+|--------|--------|
+| **Terrain cost** | road=1.0, open=1.25, fields=1.4, forest=2.0, scrub=1.7, urban=2.5, marsh=3.3, mountain=3.3, water=impassable |
+| **Slope penalty** | Added to base terrain cost based on slope degrees |
+| **Minefield avoidance** | Discovered minefields (side-aware) add heavy penalty; undiscovered ones are invisible to pathfinder |
+| **Enemy avoidance** | Cells in known enemy detection range penalized — heavy penalty in slow mode, light in fast mode |
+| **Cover preference** | Slow mode: forest/urban/scrub cost reduced (×0.6–0.85) to prefer concealed routes |
+| **Friendly proximity** | Routes passing near friendly units get ×0.92 cost reduction |
+
+### 33.2 Speed Mode Routing
+
+| Speed Mode | Strategy |
+|------------|----------|
+| **Slow** | Maximizes concealment — prefers forest, urban, scrub. Avoids enemy observation. |
+| **Fast** | Prioritizes speed — prefers roads and open terrain. Lighter enemy avoidance. |
+
+### 33.3 Waypoint Management
+
+- Tick engine computes waypoints for all moving units at step 1.5 (before movement).
+- Waypoints stored in `current_task.waypoints`. Recalculated every 5 ticks.
+- `movement.py` follows waypoints: units advance through the waypoint list, multi-waypoint traversal per tick, automatic waypoint popping.
+- Straight-line fallback when no terrain data or no path found.
+- Pathfinding also runs immediately on order confirmation (before first tick) for responsive UI.
+
+### 33.4 Path Smoothing
+
+- Douglas-Peucker simplification removes noise
+- Loop shortcutting: if path revisits within 400m, shortcut intermediate waypoints
+- U-turn removal: backward-progress detection removes points farther from destination than neighbors
+- Catmull-Rom spline smoothing on frontend for visually smooth trajectories
+
+### 33.5 Graph Persistence
+
+- Static pathfinding graph (centroids, neighbors, base costs) persisted to `GridDefinition.settings_json["pathfinding_graph"]` after terrain analysis.
+- 3-tier loading: (1) in-memory cache, (2) DB-persisted JSONB, (3) build from scratch.
+- Graph pre-loaded into memory on session start, eliminating 1–3s first-tick delay.
+
+**Source:** `backend/services/pathfinding_service.py`, `backend/engine/movement.py`, `backend/engine/tick.py`
+
+---
+
+## 34. Combat Role Coordination
+
+When multiple units attack the same enemy, they automatically coordinate tactical roles instead of all charging to point-blank range.
+
+### 34.1 Role Assignment
+
+| Role | Selection | Behavior |
+|------|-----------|----------|
+| **Suppress** | ~40% of attacking group | Stay at 80% of weapon range, provide covering fire. ×0.6 damage but ×1.5 suppression. |
+| **Assault** | 1–2 strongest infantry | Close in on the enemy position. |
+| **Flank** | Remainder | Approach from 60° offset angle, prefer covered terrain for approach. |
+
+### 34.2 Mechanics
+
+- Roles stored in `unit.current_task.combat_role`.
+- Suppressing units hold position at weapon range (don't advance further).
+- Flanking units get an offset `target_location` computed with terrain-aware position selection.
+- Role reassignment throttled to prevent oscillation.
+- Radio chatter announces roles: "Обеспечиваю подавление" / "Выхожу на фланг" / "Выдвигаюсь на штурм".
+
+**Source:** `backend/engine/combat.py` (`assign_combat_roles`), `backend/engine/movement.py`, `backend/engine/radio_chatter.py`
+
+---
+
+## 35. Artillery-Infantry Ceasefire Coordination
+
+Three tiers of friendly fire prevention for artillery/infantry coordination:
+
+### 35.1 Proactive Ceasefire Request (250m)
+
+When friendly infantry approaches a position being bombarded by friendly artillery (within 250m):
+1. Infantry detects nearby friendly bombardment → sets `awaiting_ceasefire` flag → **halts movement**
+2. Artillery receives signal → finishes current salvo then ceases fire (`salvos_remaining` set to 1)
+3. Next tick: infantry detects artillery has stopped → clears flag → **resumes advance**
+
+### 35.2 Danger Close Auto-Stop (50m)
+
+Artillery/mortar auto-ceases fire if any friendly unit is within 50m of the target area. Generates `ceasefire_friendly` event.
+
+### 35.3 Area Fire Friendly Check
+
+Artillery area fire checks for friendlies in the 150m blast radius before each salvo.
+
+### 35.4 Radio Coordination
+
+- Infantry: *"Прошу прекратить огонь!"* / *"Request cease-fire!"*
+- Artillery: *"Принял, прекращаю огонь"* / *"Copy, ceasing fire"*
+- Infantry resumes: *"Артиллерия прекратила огонь, продолжаю выдвижение"* / *"Artillery ceased fire, resuming advance"*
+
+**Source:** `backend/engine/combat.py` (`check_artillery_ceasefire_coordination`), `backend/engine/movement.py`, `backend/engine/radio_chatter.py`
+
+---
+
+## 36. Resupply System
+
+### 36.1 Supply Sources
+
+| Source | Range | Ammo Rate | Strength Rate | Notes |
+|--------|-------|-----------|---------------|-------|
+| **Supply cache** (map object) | 50m | +10%/tick | +0.5%/tick | Static, placed by admin |
+| **Logistics unit** | 50m | +8%/tick | — | Mobile, moveable by orders |
+| **Field hospital** (map object) | 50m | — | +1%/tick | Static, recovery only |
+
+### 36.2 Resupply Order
+
+- Order type: `resupply` (EN: resupply/rearm/ammo; RU: пополн/боеприпас/снабж/боекомплект)
+- Unit auto-moves to nearest supply source (cache or logistics unit)
+- Resupplies until ≥95% ammo, then task completes
+- Logistics unit can be ordered to a position; nearby friendlies auto-resupply on proximity
+
+**Source:** `backend/engine/resupply.py`, `backend/engine/tick.py`
+
+---
+
+## 37. Contact During Advance
+
+Units on `move` tasks (NOT `attack`) that detect new enemies **halt automatically** and report.
+
+### 37.1 Sequence
+
+1. Unit moving to destination detects new enemy contact
+2. Unit halts, sends radio report: contact grid, distance, type, asks *"атаковать или обойти?"* / *"engage or bypass?"*
+3. Commander has **3 ticks** (CONTACT_HALT_TICKS) to issue new orders
+4. If no orders received: unit resumes movement on own initiative with radio report
+5. Units on `attack` tasks continue normally (they expect contact)
+
+### 37.2 Events
+
+- `contact_during_advance` — unit halted on contact
+- `contact_advance_resumed` — unit resumed movement after halt timeout
+
+**Source:** `backend/engine/tick.py`, `backend/engine/radio_chatter.py`
+
+---
+
+## 38. Height Tops & Elevation References
+
+### 38.1 Peak Detection
+
+Elevation peaks (local maxima) are detected from ElevationCell data:
+- Cell must be higher than all neighbors by ≥5m prominence
+- Nearby peaks within 500m radius are deduplicated (only highest kept)
+- Peaks rendered on map as brown triangle markers (▲) with height numbers
+
+### 38.2 Orders Referencing Heights
+
+- Orders can reference elevation features: *"Выдвинуться в направлении высоты 170"* / *"Move toward height 170"*
+- Location resolver matches *"высота N"* / *"height N"* to nearest peak by elevation value
+- Keyword parser extracts height refs via regex (EN: height/hill/elevation, RU: высота/выс./отметка)
+- Height tops included in LLM context and unit situational awareness
+
+**Source:** `backend/api/terrain.py`, `backend/services/location_resolver.py`, `frontend/js/terrain.js`
+
+---
+
+## 39. AI Victory Evaluation
+
+### 39.1 Mechanism
+
+LLM-based victory evaluation runs every 5 ticks:
+1. Builds full game state context (all units, positions, grid refs, destroyed counts, tasks, objectives)
+2. GPT-4o-mini evaluates open-text victory conditions from `scenario.objectives.victory_blue`/`victory_red`
+3. Conservative evaluation: requires overwhelming evidence before declaring victory
+
+### 39.2 On Victory
+
+- Session status set to `finished`
+- `game_finished` event emitted with winner, summary, and detailed explanation
+- Game turn limit also auto-finishes session when reached (from `session.settings.turn_limit` or `scenario.objectives.turn_limit`)
+
+**Source:** `backend/engine/tick.py`
+
+---
+
 ## Appendix B: Event Types
 
 | Event Type | Visibility | Description |
@@ -1847,6 +2031,8 @@ When a target is outside the area of operations:
 | `fire_out_of_range` | all | Artillery target out of weapon range |
 | `object_discovered` | discovering side | Map object discovered via LOS |
 | `resupply` | all | Unit resupplied from structure |
+| `contact_during_advance` | all | Unit halted on contact during movement |
+| `contact_advance_resumed` | all | Unit resumed movement after contact halt |
 | `casualty_report` | unit side | Post-combat status report |
 | `game_finished` | all | Game ended (turn limit or victory condition) |
 | `red_ai_decision` | admin | Red AI issued orders |
@@ -2468,6 +2654,6 @@ doctrine.py (posture profiles)
 
 ---
 
-*Last updated: 2026-04-11*
-*Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/prompts/tactical_doctrine.py`, `backend/engine/radio_chatter.py`*
+*Last updated: 2026-04-13*
+*Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/services/pathfinding_service.py`, `backend/prompts/tactical_doctrine.py`, `backend/engine/radio_chatter.py`*
 
