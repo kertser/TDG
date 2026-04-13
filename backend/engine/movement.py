@@ -502,8 +502,13 @@ def process_movement(
                 task["target_location"] = {"lat": cover_target[0], "lon": cover_target[1]}
                 unit.current_task = task  # mark dirty
             else:
-                # No cover found nearby — stay put and defend
-                unit.current_task = {"type": "defend", "order_id": task.get("order_id")}
+                # No cover found nearby — stay put and defend, but keep disengaging flag
+                # so auto-return-fire won't override the commander's retreat order
+                unit.current_task = {
+                    "type": "defend",
+                    "order_id": task.get("order_id"),
+                    "disengaging": True,
+                }
                 events.append({
                     "event_type": "order_completed",
                     "actor_unit_id": unit.id,
@@ -752,8 +757,13 @@ def process_movement(
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
             elif task_type == "disengage":
-                # Arrived at cover — switch to defend
-                unit.current_task = {"type": "defend", "order_id": task.get("order_id")}
+                # Arrived at cover — switch to defend, but keep disengaging flag
+                # so auto-return-fire won't immediately override the retreat order
+                unit.current_task = {
+                    "type": "defend",
+                    "order_id": task.get("order_id"),
+                    "disengaging": True,
+                }
                 events.append({
                     "event_type": "order_completed",
                     "actor_unit_id": unit.id,

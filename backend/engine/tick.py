@@ -632,6 +632,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     # Units being attacked that don't have a combat task → auto-engage nearest attacker
     # (Skip disengaging units — they are breaking contact on purpose)
+    DISENGAGE_COOLDOWN_TICKS = 5  # after this many ticks, disengaging flag expires
     for u in all_units:
         if u.is_destroyed:
             continue
@@ -642,7 +643,25 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         if task and task.get("type") in ("attack", "engage", "fire"):
             continue  # already fighting
         if task and task.get("type") == "disengage":
-            continue  # disengaging — do NOT return fire
+            continue  # actively disengaging — do NOT return fire
+        if task and task.get("disengaging"):
+            # Post-disengage defend — honour retreat order, but expire after cooldown
+            disengage_tick = task.get("disengaged_at_tick")
+            if disengage_tick is None:
+                # First time seeing this — set the timestamp
+                new_task = dict(task)
+                new_task["disengaged_at_tick"] = tick
+                u.current_task = new_task
+                continue  # still in cooldown
+            if tick - disengage_tick < DISENGAGE_COOLDOWN_TICKS:
+                continue  # still in cooldown — do NOT return fire
+            else:
+                # Cooldown expired — clear the disengaging flag, allow auto-return-fire
+                new_task = dict(task)
+                new_task.pop("disengaging", None)
+                new_task.pop("disengaged_at_tick", None)
+                u.current_task = new_task
+                # Fall through to auto-return-fire logic below
         # Find the nearest attacker
         attacker_ids = attacking_map[uid_str]
         if attacker_ids:

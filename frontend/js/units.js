@@ -2138,7 +2138,14 @@ const KUnits = (() => {
     // ── Selection Overlays (range circles, heading) ──
     // ══════════════════════════════════════════════════
 
+    let _selOverlayTimer = null;
     function _drawSelectionOverlays() {
+        // Debounce: many async completions (viewshed, path) trigger this in quick succession
+        if (_selOverlayTimer) cancelAnimationFrame(_selOverlayTimer);
+        _selOverlayTimer = requestAnimationFrame(_drawSelectionOverlaysImpl);
+    }
+    function _drawSelectionOverlaysImpl() {
+        _selOverlayTimer = null;
         if (!_selectionLayer) return;
         _selectionLayer.clearLayers();
 

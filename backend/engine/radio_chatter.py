@@ -694,6 +694,15 @@ def generate_contact_radio_messages(
     # Track which units already reported this tick (avoid spam)
     reported_units = set()
 
+    # Skip units that have contact_during_advance events — those units will
+    # report via generate_contact_halt_messages instead (avoids duplicate messages)
+    contact_halt_unit_ids = set()
+    for evt in tick_events:
+        if evt.get("event_type") == "contact_during_advance":
+            actor = evt.get("actor_unit_id")
+            if actor:
+                contact_halt_unit_ids.add(str(actor))
+
     for evt in tick_events:
         if evt.get("event_type") not in ("contact_new", "contact_refreshed"):
             continue
@@ -708,6 +717,8 @@ def generate_contact_radio_messages(
         observer_id_str = str(observer_id)
         if observer_id_str in reported_units:
             continue  # one report per unit per tick
+        if observer_id_str in contact_halt_unit_ids:
+            continue  # this unit will report via contact_halt_messages instead
 
         unit = units_by_id.get(observer_id_str)
         if not unit or unit.is_destroyed:

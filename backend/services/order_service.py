@@ -1167,11 +1167,19 @@ class OrderService:
                 static_graph=static_graph,
             )
 
-            path = service.find_path(
-                from_lat=u_lat,
-                from_lon=u_lon,
-                to_lat=tgt_lat,
-                to_lon=tgt_lon,
+            # Run CPU-bound A* in thread pool to avoid blocking the async event loop
+            import asyncio as _aio
+            import functools as _ft
+            loop = _aio.get_running_loop()
+            path = await loop.run_in_executor(
+                None,
+                _ft.partial(
+                    service.find_path,
+                    from_lat=u_lat,
+                    from_lon=u_lon,
+                    to_lat=tgt_lat,
+                    to_lon=tgt_lon,
+                ),
             )
 
             _t_path = _pf_time.monotonic()

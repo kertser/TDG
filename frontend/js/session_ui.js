@@ -149,6 +149,42 @@ const KSessionUI = (() => {
         if (turnBtn) {
             turnBtn.addEventListener('click', async () => {
                 if (!currentSessionId || !currentToken) return;
+
+                // ── Check for unconfirmed orders ──
+                // Orders that are pending/validated but not yet executing (no unit radio confirmation)
+                try {
+                    const ordResp = await fetch(`/api/sessions/${currentSessionId}/orders?status=pending,validated`, {
+                        headers: { 'Authorization': `Bearer ${currentToken}` },
+                    });
+                    if (ordResp.ok) {
+                        const pendingOrders = await ordResp.json();
+                        // Filter to only orders still awaiting confirmation (pending or validated, not executing)
+                        const unconfirmed = pendingOrders.filter(o =>
+                            o.status === 'pending' || o.status === 'validated'
+                        );
+                        if (unconfirmed.length > 0) {
+                            const unitNames = unconfirmed.map(o => {
+                                const ids = o.target_unit_ids || o.matched_unit_ids || [];
+                                if (ids.length > 0 && typeof KUnits !== 'undefined') {
+                                    const allU = KUnits.getAllUnits();
+                                    return ids.map(id => {
+                                        const u = allU.find(x => x.id === id);
+                                        return u ? u.name : id.slice(0, 8);
+                                    }).join(', ');
+                                }
+                                return o.original_text ? o.original_text.slice(0, 30) : 'order';
+                            });
+                            const warningText = `⚠ ${unconfirmed.length} order(s) have not received radio confirmation from units yet:\n\n${unitNames.join('\n')}\n\nProceed with turn execution anyway?`;
+                            if (typeof KDialogs !== 'undefined') {
+                                const proceed = await KDialogs.confirm(warningText, { dangerous: false });
+                                if (!proceed) return;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Ignore check errors — proceed with execution
+                }
+
                 turnBtn.disabled = true;
                 turnBtn.textContent = '⏳ Executing...';
                 try {

@@ -454,7 +454,12 @@ async def list_orders(
     """List orders for a session, optionally filtered by status."""
     query = select(Order).where(Order.session_id == session_id)
     if status:
-        query = query.where(Order.status == status)
+        # Support comma-separated status values (e.g. "pending,validated")
+        statuses = [s.strip() for s in status.split(',') if s.strip()]
+        if len(statuses) == 1:
+            query = query.where(Order.status == statuses[0])
+        elif len(statuses) > 1:
+            query = query.where(Order.status.in_(statuses))
     result = await db.execute(query)
     orders = result.scalars().all()
 

@@ -1328,7 +1328,14 @@ async def find_path(
         static_graph=static_graph,
     )
 
-    path = pathfinder.find_path(from_lat, from_lon, to_lat, to_lon)
+    # Run CPU-bound A* in thread pool to avoid blocking the async event loop
+    import asyncio as _aio
+    import functools as _ft
+    loop = _aio.get_running_loop()
+    path = await loop.run_in_executor(
+        None,
+        _ft.partial(pathfinder.find_path, from_lat, from_lon, to_lat, to_lon),
+    )
     if path is None:
         return {"path": [], "cost": 0, "cells": 0}
 
@@ -1342,3 +1349,120 @@ async def find_path(
     return {"path": path_list, "cost": 0, "cells": len(path_list)}
 
 
+# ── LOS (Line-of-Sight) Check ──────────────────────────────────
+
+@router.get("/{session_id}/los-check")
+async def check_line_of_sight(
+    session_id: uuid.UUID,
+    from_lat: float = Query(...),
+    from_lon: float = Query(...),
+    to_lat: float = Query(...),
+    to_lon: float = Query(...),
+    eye_height: float = Query(2.0),
+    db: DB = None,
+):
+    """Check if there is line-of-sight between two points.
+
+    Returns {has_los: bool, distance_m: float, from_elevation_m, to_elevation_m,
+             blocking_terrain: str|null, blocking_elevation_m: float|null}.
+    """
+    from backend.engine.terrain import TerrainService, get_cached_terrain_data, set_cached_terrain_data
+    from backend.services.los_service import LOSService, _distance_m
+
+    sid = str(session_id)
+
+    # Build TerrainService from cache or DB
+    cached = get_cached_terrain_data(sid)
+    terrain_cells = None
+    elevation_cells = None
+
+    if cached:
+        terrain_cells = cached.get("terrain_cells")
+        elevation_cells = cached.get("elevation_cells")
+    else:
+        tc_result = await db.execute(
+            select(TerrainCell.snail_path, TerrainCell.terrain_type)
+            .where(TerrainCell.session_id == session_id)
+        )
+        tc_rows = tc_result.all()
+        terrain_cells = {r[0]: r[1] for r in tc_rows} if tc_rows else None
+
+        ec_result = await db.execute(
+            select(
+                ElevationCell.snail_path,
+                ElevationCell.elevation_m,
+                ElevationCell.slope_deg,
+                ElevationCell.aspect_deg,
+            ).where(ElevationCell.session_id == session_id)
+        )
+        ec_rows = ec_result.all()
+        elevation_cells = {
+            r[0]: {"elevation_m": r[1], "slope_deg": r[2], "aspect_deg": r[3]}
+            for r in ec_rows
+        } if ec_rows else None
+
+        if terrain_cells:
+            set_cached_terrain_data(sid, terrain_cells, elevation_cells)
+
+    # Build grid service
+    gd_result = await db.execute(
+        select(GridDefinition).where(GridDefinition.session_id == session_id)
+    )
+    gd = gd_result.scalar_one_or_none()
+    grid_service = GridService(gd) if gd else None
+
+    terrain_svc = TerrainService(
+        terrain_cells=terrain_cells,
+        elevation_cells=elevation_cells,
+        grid_service=grid_service,
+    )
+
+    los = LOSService(terrain_svc)
+    has_los = los.has_los(from_lon, from_lat, to_lon, to_lat, eye_height=eye_height)
+    dist = _distance_m(from_lat, from_lon, to_lat, to_lon)
+
+    from_elev = terrain_svc.get_elevation_at(from_lon, from_lat)
+    to_elev = terrain_svc.get_elevation_at(to_lon, to_lat)
+
+    # If LOS blocked, find what blocks it
+    blocking_terrain = None
+    blocking_elev = None
+    if not has_los:
+        # Walk the ray to find the blocking point
+        from backend.services.los_service import TERRAIN_OBSTACLE_HEIGHT, MIN_VISIBILITY_BUDGET
+        step_m = 100.0
+        num_steps = max(2, int(dist / step_m))
+        from_eye = from_elev + eye_height
+        to_eye = to_elev + eye_height
+        vis_budget = 1.0
+        for s in range(1, num_steps):
+            t = s / num_steps
+            s_lat = from_lat + t * (to_lat - from_lat)
+            s_lon = from_lon + t * (to_lon - from_lon)
+            los_elev = from_eye + t * (to_eye - from_eye)
+            g_elev = terrain_svc.get_elevation_at(s_lon, s_lat)
+            tt = terrain_svc.get_terrain_at(s_lon, s_lat)
+            obs_h = TERRAIN_OBSTACLE_HEIGHT.get(tt, 0.0)
+            eff = g_elev + obs_h
+            if eff > los_elev:
+                blocking_terrain = tt
+                blocking_elev = round(g_elev, 1)
+                break
+            if t < 0.9:
+                vis_f = terrain_svc.visibility_factor(s_lon, s_lat)
+                if vis_f < 1.0:
+                    absorption = (1.0 - vis_f) * (step_m / 100.0)
+                    vis_budget -= absorption
+                    if vis_budget < MIN_VISIBILITY_BUDGET:
+                        blocking_terrain = tt
+                        blocking_elev = round(g_elev, 1)
+                        break
+
+    return {
+        "has_los": has_los,
+        "distance_m": round(dist, 1),
+        "from_elevation_m": round(from_elev, 1),
+        "to_elevation_m": round(to_elev, 1),
+        "blocking_terrain": blocking_terrain,
+        "blocking_elevation_m": blocking_elev,
+    }

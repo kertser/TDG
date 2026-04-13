@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func, delete as sa_delete
@@ -674,6 +675,8 @@ async def admin_update_unit(
         unit.parent_unit_id = uuid.UUID(body.parent_unit_id) if body.parent_unit_id != "" else None
     if body.assigned_user_ids is not None:
         # Validate: observers cannot be assigned to units
+        # Validate: side matching — blue commanders to blue units only, red to red
+        unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
         if body.assigned_user_ids:
             for uid_str in body.assigned_user_ids:
                 try:
@@ -692,6 +695,14 @@ async def admin_update_unit(
                         status_code=400,
                         detail=f"Cannot assign observer to unit — observers do not control units"
                     )
+                # Side matching: participant side must match unit side (admin side can assign to any)
+                if participant:
+                    p_side = participant.side.value if hasattr(participant.side, 'value') else str(participant.side)
+                    if p_side not in ('admin',) and p_side != unit_side:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot assign {p_side} commander to {unit_side} unit — side mismatch"
+                        )
         unit.assigned_user_ids = body.assigned_user_ids if body.assigned_user_ids else None
     if body.is_destroyed is not None:
         unit.is_destroyed = body.is_destroyed
@@ -1189,8 +1200,20 @@ async def admin_reset_session(session_id: uuid.UUID, db: DB, user: CurrentUser):
     from backend.services.session_service import initialize_session_from_scenario
     await initialize_session_from_scenario(session, session.scenario, db)
 
-    # Pre-warm caches so first order is fast
-    await _warm_session_caches(session_id, db)
+    # Commit immediately so the frontend sees the reset state
+    await db.commit()
+
+    # Fire-and-forget cache warm-up in background (don't block the response)
+    _sid = session_id
+    async def _bg_warm():
+        from backend.database import async_session_factory
+        async with async_session_factory() as bg_db:
+            try:
+                await _warm_session_caches(_sid, bg_db)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("Background cache warm-up failed: %s", e)
+    asyncio.create_task(_bg_warm())
 
     return {"status": session.status.value, "tick": 0, "message": "Session reset to turn 0", "current_time": session.current_time.isoformat() if session.current_time else None}
 

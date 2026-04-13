@@ -3195,10 +3195,21 @@ const KAdmin = (() => {
             }
 
             // Select-all checkbox (scoped to this container)
+            // Side-aware: when a user is selected in dropdown, only select units matching user's side
             const selectAllCb = el.querySelector('#coc-bulk-select-all');
             if (selectAllCb) {
                 selectAllCb.addEventListener('change', () => {
-                    el.querySelectorAll('.coc-bulk-cb').forEach(cb => { cb.checked = selectAllCb.checked; });
+                    const bulkSel = el.querySelector('#coc-bulk-user-select');
+                    const selUserId = bulkSel ? bulkSel.value : '';
+                    const selParticipant = selUserId ? _cachedParticipants.find(p => p.user_id === selUserId) : null;
+                    const filterSide = (selParticipant && selParticipant.side !== 'admin') ? selParticipant.side : null;
+                    el.querySelectorAll('.coc-bulk-cb').forEach(cb => {
+                        if (filterSide && cb.dataset.side !== filterSide) {
+                            cb.checked = false; // Don't select units from wrong side
+                        } else {
+                            cb.checked = selectAllCb.checked;
+                        }
+                    });
                 });
             }
 
@@ -3442,6 +3453,23 @@ const KAdmin = (() => {
 
         const unitIds = Array.from(checkedBoxes).map(cb => cb.dataset.unitId);
         const userName = bulkUserSel.options[bulkUserSel.selectedIndex]?.textContent || '';
+
+        // ── Side-matching validation ──
+        // Find the selected user's side from cached participants
+        const selectedParticipant = _cachedParticipants.find(p => p.user_id === userId);
+        const userSide = selectedParticipant ? selectedParticipant.side : null;
+        if (userSide && userSide !== 'admin') {
+            // Check that all selected units match the user's side
+            const mismatchedUnits = Array.from(checkedBoxes).filter(cb => {
+                const unitSide = cb.dataset.side;
+                return unitSide && unitSide !== userSide;
+            });
+            if (mismatchedUnits.length > 0) {
+                const sideLabel = userSide === 'blue' ? 'Blue' : 'Red';
+                await KDialogs.alert(`Cannot assign ${sideLabel} commander to ${mismatchedUnits.length} unit(s) from the other side.\n\nCommanders can only be assigned to units on their own side.`);
+                return;
+            }
+        }
 
         if (!await KDialogs.confirm(`Assign ${userName} to ${unitIds.length} unit(s)?`)) return;
 

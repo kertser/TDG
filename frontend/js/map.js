@@ -17,6 +17,12 @@ const KMap = (() => {
     let measureGroup = null;
     let _previewLine = null;
 
+    // ── LOS check state ──────────────────────────────
+    let _losChecking = false;
+    let _losPoints = [];
+    let _losGroup = null;
+    let _losPreviewLine = null;
+
     // ── Middle-button pan state ─────────────────────
     let _mdPanning = false;
     let _mdLastPt = null;
@@ -123,6 +129,12 @@ const KMap = (() => {
 
         // ── Measure layer group ─────────────────────────
         measureGroup = L.layerGroup().addTo(map);
+
+        // ── LOS Check layer group (on high-z pane so it overlays units/objects) ──
+        map.createPane('losPane');
+        map.getPane('losPane').style.zIndex = 700;
+        map.getPane('losPane').style.pointerEvents = 'none';  // clicks pass through
+        _losGroup = L.layerGroup({ pane: 'losPane' }).addTo(map);
 
 
         // ── Coordinate + Zoom display ───────────────────
@@ -272,6 +284,7 @@ const KMap = (() => {
     // ── Distance Measurement Tool ───────────────────
     function startMeasure() {
         if (measuring) stopMeasure();
+        if (_losChecking) stopLOSCheck();
         measuring = true;
         measurePoints = [];
         measureGroup.clearLayers();
@@ -412,10 +425,224 @@ const KMap = (() => {
 
     function isMeasuring() { return measuring; }
 
+    // ── LOS (Line-of-Sight) Check Tool ──────────────
+
+    let _losResultDismissHandler = null;  // stored so we can remove it
+
+    function startLOSCheck() {
+        if (_losChecking) stopLOSCheck();
+        _losChecking = true;
+        _losPoints = [];
+        if (!_losGroup) {
+            _losGroup = L.layerGroup({ pane: 'losPane' }).addTo(map);
+        }
+        _losGroup.clearLayers();
+        _losPreviewLine = null;
+        // Remove any previous dismiss handler
+        if (_losResultDismissHandler) {
+            map.off('click', _losResultDismissHandler);
+            _losResultDismissHandler = null;
+        }
+        map.getContainer().style.cursor = 'crosshair';
+        map.on('click', _onLOSClick);
+        map.on('mousemove', _onLOSMouseMove);
+        map.on('contextmenu', _onLOSRightClick);
+        document.addEventListener('keydown', _onLOSKeyDown);
+    }
+
+    function stopLOSCheck() {
+        _losChecking = false;
+        map.getContainer().style.cursor = '';
+        map.off('click', _onLOSClick);
+        map.off('mousemove', _onLOSMouseMove);
+        map.off('contextmenu', _onLOSRightClick);
+        document.removeEventListener('keydown', _onLOSKeyDown);
+        if (_losPreviewLine && _losGroup) {
+            _losGroup.removeLayer(_losPreviewLine);
+            _losPreviewLine = null;
+        }
+        // Results live on a non-interactive pane (losPane with pointer-events:none).
+        // They will be dismissed by click-to-dismiss handler set after results load.
+    }
+
+    function clearLOSCheck() {
+        stopLOSCheck();
+        if (_losResultDismissHandler) {
+            map.off('click', _losResultDismissHandler);
+            _losResultDismissHandler = null;
+        }
+        if (_losGroup) _losGroup.clearLayers();
+        _losPoints = [];
+    }
+
+    function _onLOSClick(e) {
+        if (!_losChecking) return;
+        _losPoints.push(e.latlng);
+
+        // Draw point marker (on losPane)
+        const color = _losPoints.length === 1 ? '#4fc3f7' : '#ffb74d';
+        const marker = L.circleMarker(e.latlng, {
+            radius: 6, color: color, fillColor: color,
+            fillOpacity: 0.9, weight: 2, interactive: false, pane: 'losPane',
+        });
+        _losGroup.addLayer(marker);
+
+        if (_losPoints.length === 2) {
+            // Have both points — run LOS check
+            const p1 = _losPoints[0];
+            const p2 = _losPoints[1];
+
+            // Draw the line immediately (pending result)
+            const pendingLine = L.polyline([p1, p2], {
+                color: '#aaa', weight: 2.5, dashArray: '6,4', opacity: 0.6,
+                interactive: false, pane: 'losPane',
+            });
+            _losGroup.addLayer(pendingLine);
+
+            // Show loading label at midpoint
+            const midLat = (p1.lat + p2.lat) / 2;
+            const midLng = (p1.lng + p2.lng) / 2;
+            const loadingLabel = L.tooltip({
+                permanent: true, direction: 'center', className: 'los-label-pending',
+                pane: 'losPane',
+            }).setLatLng([midLat, midLng]).setContent('⏳ Checking LOS…');
+            _losGroup.addLayer(loadingLabel);
+
+            // Call API
+            const sid = typeof KSessionUI !== 'undefined' ? KSessionUI.getSessionId() : null;
+            const token = typeof KSessionUI !== 'undefined' ? KSessionUI.getToken() : null;
+            if (sid && token) {
+                const url = `/api/sessions/${sid}/los-check?from_lat=${p1.lat}&from_lon=${p1.lng}&to_lat=${p2.lat}&to_lon=${p2.lng}`;
+                fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
+                    .then(r => r.json())
+                    .then(data => {
+                        // Clear pending visuals
+                        _losGroup.clearLayers();
+
+                        const hasLOS = data.has_los;
+                        const dist = data.distance_m || 0;
+                        const lineColor = hasLOS ? '#66bb6a' : '#ef5350';
+
+                        // ── Endpoint markers (larger, glowing) ──
+                        const m1 = L.circleMarker(p1, {
+                            radius: 7, color: lineColor, fillColor: '#4fc3f7',
+                            fillOpacity: 0.85, weight: 2.5, interactive: false, pane: 'losPane',
+                        });
+                        const m2 = L.circleMarker(p2, {
+                            radius: 7, color: lineColor, fillColor: '#ffb74d',
+                            fillOpacity: 0.85, weight: 2.5, interactive: false, pane: 'losPane',
+                        });
+                        _losGroup.addLayer(m1);
+                        _losGroup.addLayer(m2);
+
+                        // ── Result line (solid glow + dashed overlay) ──
+                        // Outer glow
+                        _losGroup.addLayer(L.polyline([p1, p2], {
+                            color: lineColor, weight: 6, opacity: 0.2,
+                            interactive: false, pane: 'losPane',
+                        }));
+                        // Inner solid
+                        _losGroup.addLayer(L.polyline([p1, p2], {
+                            color: lineColor, weight: 3, opacity: 0.8,
+                            dashArray: hasLOS ? null : '8,5',
+                            interactive: false, pane: 'losPane',
+                        }));
+
+                        // ── Build result text ──
+                        let text = hasLOS ? '✅ LOS Clear' : '❌ LOS Blocked';
+                        text += `  —  ${_formatDist(dist)}`;
+                        if (data.from_elevation_m != null) text += `\n↑ ${data.from_elevation_m}m`;
+                        if (data.to_elevation_m != null) text += `  →  ${data.to_elevation_m}m`;
+                        if (!hasLOS && data.blocking_terrain) {
+                            text += `\nBlocked by: ${data.blocking_terrain}`;
+                            if (data.blocking_elevation_m != null) text += ` (${data.blocking_elevation_m}m)`;
+                        }
+
+                        const resultLabel = L.tooltip({
+                            permanent: true, direction: 'center',
+                            className: hasLOS ? 'los-label-clear' : 'los-label-blocked',
+                            offset: [0, -16],
+                            pane: 'losPane',
+                        }).setLatLng([midLat, midLng]).setContent(text);
+                        _losGroup.addLayer(resultLabel);
+
+                        // ── Click anywhere to dismiss result ──
+                        _losResultDismissHandler = () => {
+                            if (_losGroup) _losGroup.clearLayers();
+                            _losPoints = [];
+                            map.off('click', _losResultDismissHandler);
+                            _losResultDismissHandler = null;
+                        };
+                        // Delay to avoid immediate dismiss from the same click
+                        setTimeout(() => {
+                            if (_losResultDismissHandler) {
+                                map.on('click', _losResultDismissHandler);
+                            }
+                        }, 300);
+                    })
+                    .catch(err => {
+                        _losGroup.clearLayers();
+                        const errLabel = L.tooltip({
+                            permanent: true, direction: 'center', className: 'los-label-blocked',
+                            pane: 'losPane',
+                        }).setLatLng([midLat, midLng]).setContent('⚠ LOS check failed');
+                        _losGroup.addLayer(errLabel);
+                        // Also dismiss on click
+                        _losResultDismissHandler = () => {
+                            if (_losGroup) _losGroup.clearLayers();
+                            _losPoints = [];
+                            map.off('click', _losResultDismissHandler);
+                            _losResultDismissHandler = null;
+                        };
+                        setTimeout(() => {
+                            if (_losResultDismissHandler) map.on('click', _losResultDismissHandler);
+                        }, 300);
+                    });
+            }
+
+            // Stop the tool (2 points collected)
+            stopLOSCheck();
+            // Clear active button state
+            document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
+        }
+    }
+
+    function _onLOSMouseMove(e) {
+        if (!_losChecking || _losPoints.length === 0) return;
+        const last = _losPoints[_losPoints.length - 1];
+        if (_losPreviewLine) {
+            _losPreviewLine.setLatLngs([last, e.latlng]);
+        } else {
+            _losPreviewLine = L.polyline([last, e.latlng], {
+                color: '#4fc3f7', weight: 1.5, dashArray: '4,4', opacity: 0.5,
+                interactive: false, pane: 'losPane',
+            });
+            _losGroup.addLayer(_losPreviewLine);
+        }
+    }
+
+    function _onLOSRightClick(e) {
+        if (!_losChecking) return;
+        L.DomEvent.stopPropagation(e);
+        L.DomEvent.preventDefault(e);
+        clearLOSCheck();
+        document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
+    }
+
+    function _onLOSKeyDown(e) {
+        if (e.key === 'Escape') {
+            clearLOSCheck();
+            document.querySelectorAll('.draw-btn').forEach(b => b.classList.remove('active'));
+        }
+    }
+
+    function isLOSChecking() { return _losChecking; }
+
     return {
         init, getMap,
         setOperationCenter, centerOnOperation,
         setGameTime,
         startMeasure, stopMeasure, clearMeasure, isMeasuring,
+        startLOSCheck, stopLOSCheck, clearLOSCheck, isLOSChecking,
     };
 })();

@@ -1586,6 +1586,54 @@ button:hover { background: #1a5276; }
 }
 .measure-final-label::before { display: none !important; }
 
+/* ── LOS Check Labels ───────────────────────── */
+.los-label-pending {
+    background: rgba(30, 36, 50, 0.92) !important;
+    border: 1px solid rgba(79, 195, 247, 0.4) !important;
+    border-radius: 6px !important;
+    padding: 5px 12px !important;
+    color: #b0bec5 !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    font-family: monospace !important;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
+    white-space: pre-line !important;
+    line-height: 1.4 !important;
+}
+.los-label-pending::before { display: none !important; }
+
+.los-label-clear {
+    background: rgba(16, 42, 16, 0.94) !important;
+    border: 1px solid rgba(102, 187, 106, 0.7) !important;
+    border-radius: 6px !important;
+    padding: 6px 14px !important;
+    color: #c8e6c9 !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    font-family: monospace !important;
+    box-shadow: 0 2px 16px rgba(76,175,80,0.25), 0 0 24px rgba(76,175,80,0.08) !important;
+    white-space: pre-line !important;
+    line-height: 1.5 !important;
+    letter-spacing: 0.3px !important;
+}
+.los-label-clear::before { display: none !important; }
+
+.los-label-blocked {
+    background: rgba(42, 16, 16, 0.94) !important;
+    border: 1px solid rgba(239, 83, 80, 0.7) !important;
+    border-radius: 6px !important;
+    padding: 6px 14px !important;
+    color: #ffcdd2 !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    font-family: monospace !important;
+    box-shadow: 0 2px 16px rgba(244,67,54,0.25), 0 0 24px rgba(244,67,54,0.08) !important;
+    white-space: pre-line !important;
+    line-height: 1.5 !important;
+    letter-spacing: 0.3px !important;
+}
+.los-label-blocked::before { display: none !important; }
+
 /* ── Start Session Button ─────────────────────── */
 #start-session-btn {
     background: #1b5e20;

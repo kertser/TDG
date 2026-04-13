@@ -264,6 +264,8 @@ const KOverlays = (() => {
         if (!map) return;
         if (_editState) _exitEditMode(true); // save and exit any active edit
         cancelDraw();
+        // Stop other tools
+        try { KMap.stopLOSCheck(); } catch(e) {}
 
         activeTool = type;
         drawPoints = [];

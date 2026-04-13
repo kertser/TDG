@@ -113,7 +113,7 @@ const KUI = (() => {
                 drawGroup.style.display = 'none';  // hidden until session active
                 drawGroup.innerHTML =
                     '<button class="topbar-icon-btn draw-btn" data-tool="arrow" title="Curved Arrow (right-click to finish)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 13C5 9 9 6 13 3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M9 2L13.5 2.5L13 7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
-                    '<button class="topbar-icon-btn draw-btn" data-tool="polyline" title="Line (right-click to finish)"><svg viewBox="0 0 16 16" width="14" height="14"><line x1="2" y1="13" x2="14" y2="3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="2" cy="13" r="1.8" fill="currentColor"/><circle cx="14" cy="3" r="1.8" fill="currentColor"/></svg></button>' +
+                    '<button class="topbar-icon-btn draw-btn" data-tool="los" title="LOS Check (click 2 points)"><svg viewBox="0 0 16 16" width="14" height="14"><line x1="2" y1="13" x2="14" y2="3" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2,2" stroke-linecap="round"/><circle cx="2" cy="13" r="2" fill="currentColor" opacity="0.7"/><circle cx="14" cy="3" r="2" fill="currentColor" opacity="0.7"/><circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="8" x2="10" y2="8" stroke="currentColor" stroke-width="1"/><line x1="8" y1="6" x2="8" y2="10" stroke="currentColor" stroke-width="1"/></svg></button>' +
                     '<button class="topbar-icon-btn draw-btn" data-tool="rectangle" title="Rectangle (dashed)"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="2" y="3.5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5,1.8" fill="none"/></svg></button>' +
                     '<button class="topbar-icon-btn draw-btn" data-tool="marker" title="Marker"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6C3.5 9.5 8 14.5 8 14.5S12.5 9.5 12.5 6C12.5 3.5 10.5 1.5 8 1.5Z" fill="currentColor" opacity="0.85"/><circle cx="8" cy="6" r="2" fill="#1a1a2e"/></svg></button>' +
                     '<button class="topbar-icon-btn draw-btn" data-tool="ellipse" title="Ellipse (dashed)"><svg viewBox="0 0 16 16" width="14" height="14"><ellipse cx="8" cy="8" rx="6.5" ry="4.5" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5,1.8" fill="none"/></svg></button>' +
@@ -160,11 +160,19 @@ const KUI = (() => {
                 const tool = btn.dataset.tool;
                 if (tool === 'measure') {
                     KOverlays.cancelDraw();
+                    KMap.stopLOSCheck();
                     _clearActive();
                     btn.classList.add('active');
                     KMap.startMeasure();
+                } else if (tool === 'los') {
+                    KOverlays.cancelDraw();
+                    KMap.stopMeasure();
+                    _clearActive();
+                    btn.classList.add('active');
+                    KMap.startLOSCheck();
                 } else {
                     KMap.stopMeasure();
+                    KMap.stopLOSCheck();
                     _clearActive();
                     btn.classList.add('active');
                     KOverlays.startDraw(tool);
