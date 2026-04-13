@@ -87,12 +87,12 @@ const KContacts = (() => {
                     typeStr += ` (~${c.estimated_size})`;
                 }
             }
-            let popupHtml = `<b>Contact</b><br>`;
-            if (typeStr) popupHtml += `Type: ${typeStr}<br>`;
-            popupHtml += `Confidence: ${(confidence * 100).toFixed(0)}%<br>`;
-            popupHtml += `Source: ${c.source || 'unknown'}<br>`;
-            if (isStale) popupHtml += `<span style="color:#ff9800">⚠ STALE</span><br>`;
-            popupHtml += `Accuracy: ~${accuracy}m`;
+            let popupHtml = `<b>${KI18n.t('contact.title')}</b><br>`;
+            if (typeStr) popupHtml += `${KI18n.t('contact.type')}: ${typeStr}<br>`;
+            popupHtml += `${KI18n.t('contact.confidence')}: ${(confidence * 100).toFixed(0)}%<br>`;
+            popupHtml += `${KI18n.t('contact.source')}: ${c.source || KI18n.t('contact.unknown')}<br>`;
+            if (isStale) popupHtml += `<span style="color:#ff9800">${KI18n.t('contact.stale')}</span><br>`;
+            popupHtml += `${KI18n.t('contact.accuracy')}: ~${accuracy}m`;
 
             marker.bindPopup(popupHtml);
 

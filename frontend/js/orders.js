@@ -544,7 +544,8 @@ const KOrders = (() => {
         const sel = document.getElementById('radio-recipient');
         if (!sel) return;
         const myId = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserId() : null;
-        sel.innerHTML = '<option value="all">📢 All Commanders</option>';
+        const allLabel = typeof KI18n !== 'undefined' ? KI18n.t('cmd.all_commanders') : '📢 All Commanders';
+        sel.innerHTML = `<option value="all">${allLabel}</option>`;
         _participants.forEach(p => {
             if (p.user_id === myId) return; // don't list self
             const sideIcon = p.side === 'red' ? '🔴' : p.side === 'blue' ? '🔵' : '⚪';
@@ -929,19 +930,19 @@ const KOrders = (() => {
             const classification = order.classification || (order.parsed_order && order.parsed_order.classification);
             const classIcon = classification ? (classIcons[classification] || '') : '';
             const classBadge = classification
-                ? `<span class="order-class-badge" title="Classification: ${classification}">${classIcon} ${classification}</span>`
+                ? `<span class="order-class-badge" title="${KI18n.t('order.classification')}: ${classification}">${classIcon} ${classification}</span>`
                 : '';
 
             // Confidence indicator
             const confidence = order.confidence || (order.parsed_order && order.parsed_order.confidence);
             const confBadge = confidence != null
-                ? `<span class="order-conf-badge" title="Confidence: ${Math.round(confidence * 100)}%">${Math.round(confidence * 100)}%</span>`
+                ? `<span class="order-conf-badge" title="${KI18n.t('order.confidence')}: ${Math.round(confidence * 100)}%">${Math.round(confidence * 100)}%</span>`
                 : '';
 
             // Processing spinner
             const isProcessing = order.processing && status === 'pending';
             const processingHtml = isProcessing
-                ? '<span class="order-processing" title="AI analyzing...">⏳ analyzing...</span>'
+                ? `<span class="order-processing" title="${KI18n.t('order.analyzing')}">⏳ analyzing...</span>`
                 : '';
 
             // Language badge
@@ -971,7 +972,8 @@ const KOrders = (() => {
         if (!container) return;
 
         if (!selectedIds || selectedIds.length === 0) {
-            container.innerHTML = '<span class="cmd-hint">Select units on the map</span>';
+            const hintText = typeof KI18n !== 'undefined' ? KI18n.t('cmd.select_units') : 'Select units on the map';
+            container.innerHTML = `<span class="cmd-hint">${hintText}</span>`;
             return;
         }
 

@@ -82,17 +82,18 @@ const KMap = (() => {
         const CoordInfoControl = L.Control.extend({
             options: { position: 'bottomleft' },
             onAdd: function () {
+                const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
                 const container = L.DomUtil.create('div', 'coord-info-control');
                 container.innerHTML =
-                    '<span id="snail-display" title="Snail address under cursor"></span>' +
+                    `<span id="snail-display" data-i18n-title="tip.snail_display" title="${_t('tip.snail_display')}"></span>` +
                     '<span class="coord-sep">│</span>' +
-                    '<span id="coord-display" title="Coordinates under cursor"></span>' +
+                    `<span id="coord-display" data-i18n-title="tip.coord_display" title="${_t('tip.coord_display')}"></span>` +
                     '<span class="coord-sep">│</span>' +
-                    '<span id="zoom-display" title="Current zoom level"></span>' +
+                    `<span id="zoom-display" data-i18n-title="tip.zoom_display" title="${_t('tip.zoom_display')}"></span>` +
                     '<span class="coord-sep terrain-sep" style="display:none">│</span>' +
-                    '<span id="terrain-display" title="Terrain type under cursor"></span>' +
+                    `<span id="terrain-display" data-i18n-title="tip.terrain_display" title="${_t('tip.terrain_display')}"></span>` +
                     '<span class="coord-sep terrain-sep" style="display:none">│</span>' +
-                    '<span id="elevation-display" title="Elevation under cursor"></span>';
+                    `<span id="elevation-display" data-i18n-title="tip.elevation_display" title="${_t('tip.elevation_display')}"></span>`;
                 L.DomEvent.disableClickPropagation(container);
                 return container;
             },
@@ -111,11 +112,12 @@ const KMap = (() => {
         const GameClockControl = L.Control.extend({
             options: { position: 'bottomright' },
             onAdd: function () {
+                const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
                 const container = L.DomUtil.create('div', 'game-clock-control');
                 container.innerHTML =
                     '<span class="game-clock-icon">🕐</span>' +
                     '<span id="game-clock-time" class="game-clock-time">--:--</span>' +
-                    '<span id="game-clock-tick" class="game-clock-tick">Turn 0</span>';
+                    `<span id="game-clock-tick" class="game-clock-tick">${_t('clock.turn')} 0</span>`;
                 L.DomEvent.disableClickPropagation(container);
                 return container;
             },
@@ -267,7 +269,8 @@ const KMap = (() => {
     function _updateClockDisplay() {
         if (!_clockEl) return;
         if (_clockEl.tick) {
-            _clockEl.tick.textContent = `Turn ${_currentTick}`;
+            const _turnLabel = typeof KI18n !== 'undefined' ? KI18n.t('clock.turn') : 'Turn';
+            _clockEl.tick.textContent = `${_turnLabel} ${_currentTick}`;
         }
         if (_clockEl.time) {
             if (_currentGameTime) {

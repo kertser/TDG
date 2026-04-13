@@ -126,7 +126,7 @@ const KReports = (() => {
 
         const allBtn = document.createElement('button');
         allBtn.className = 'reports-filter-btn' + (!filterChannel ? ' active' : '');
-        allBtn.textContent = 'All (' + allReports.length + ')';
+        allBtn.textContent = KI18n.t('reports.all') + ' (' + allReports.length + ')';
         allBtn.addEventListener('click', () => { filterChannel = null; render(); });
         bar.appendChild(allBtn);
 
@@ -135,7 +135,7 @@ const KReports = (() => {
             if (!counts[ch]) continue;
             const btn = document.createElement('button');
             btn.className = 'reports-filter-btn' + (filterChannel === ch ? ' active' : '');
-            btn.innerHTML = (CHANNEL_ICONS[ch] || '') + ' ' + (CHANNEL_LABELS[ch] || ch) + ' (' + counts[ch] + ')';
+            btn.innerHTML = (CHANNEL_ICONS[ch] || '') + ' ' + _channelLabel(ch) + ' (' + counts[ch] + ')';
             btn.style.borderBottomColor = CHANNEL_COLORS[ch] || '#888';
             btn.addEventListener('click', () => { filterChannel = ch; render(); });
             bar.appendChild(btn);
@@ -181,7 +181,7 @@ const KReports = (() => {
         div.innerHTML =
             '<div class="report-header">' +
                 '<span class="report-channel" style="color:' + color + ';">' + icon + ' ' + label + '</span>' +
-                '<span class="report-tick">Turn ' + (report.tick != null ? report.tick : '?') + '</span>' +
+                '<span class="report-tick">' + KI18n.t('clock.turn') + ' ' + (report.tick != null ? report.tick : '?') + '</span>' +
             '</div>' +
             '<div class="report-text">' + textHtml + '</div>';
 
@@ -220,11 +220,11 @@ const KReports = (() => {
         if (typeof XLSX !== 'undefined') {
             const wb = XLSX.utils.book_new();
             const rows = allReports.sort((a, b) => (a.tick || 0) - (b.tick || 0)).map(r => ({
-                'Turn': r.tick != null ? r.tick : '',
-                'Game Time': r.game_timestamp ? _fmtDT(r.game_timestamp) : (r.created_at ? _fmtDT(r.created_at) : ''),
-                'Channel': (CHANNEL_LABELS[r.channel] || r.channel || '').toUpperCase(),
-                'Side': r.to_side || '',
-                'Report Text': r.text || '',
+                [KI18n.t('reports.turn')]: r.tick != null ? r.tick : '',
+                [KI18n.t('reports.game_time')]: r.game_timestamp ? _fmtDT(r.game_timestamp) : (r.created_at ? _fmtDT(r.created_at) : ''),
+                [KI18n.t('reports.channel')]: _channelLabel(r.channel).toUpperCase(),
+                [KI18n.t('reports.side')]: r.to_side || '',
+                [KI18n.t('reports.report_text')]: r.text || '',
             }));
             const ws = XLSX.utils.json_to_sheet(rows);
             ws['!cols'] = [{ wch: 6 }, { wch: 20 }, { wch: 12 }, { wch: 8 }, { wch: 80 }];
@@ -236,10 +236,10 @@ const KReports = (() => {
 
         // Fallback: text export
         const lines = allReports.map(r => {
-            const ch = (CHANNEL_LABELS[r.channel] || r.channel || '').padEnd(10);
-            return '[Turn ' + String(r.tick).padStart(3) + '] [' + ch + '] ' + r.text;
+            const ch = _channelLabel(r.channel).padEnd(10);
+            return '[' + KI18n.t('clock.turn') + ' ' + String(r.tick).padStart(3) + '] [' + ch + '] ' + r.text;
         });
-        const header = 'TDG Reports \u2014 Exported ' + new Date().toISOString() + '\n' + '\u2550'.repeat(60) + '\n\n';
+        const header = KI18n.t('reports.export_header') + ' ' + new Date().toISOString() + '\n' + '\u2550'.repeat(60) + '\n\n';
         const blob = new Blob([header + lines.join('\n\n')], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

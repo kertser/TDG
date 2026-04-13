@@ -4,6 +4,9 @@
 (async function () {
     'use strict';
 
+    // Initialize i18n (translations) first — reads stored language preference
+    KI18n.init();
+
     // Initialize map — default center near Reims area (updated per scenario)
     const map = KMap.init('map', [49.0582, 4.49547], 13);
 

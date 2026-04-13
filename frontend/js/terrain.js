@@ -218,11 +218,11 @@ const KTerrain = (() => {
                 if (!this.getTooltip()) {
                     const mods = modifiers[c.t] || {};
                     let tip = `<b>${TERRAIN_LABELS[c.t] || c.t}</b>`;
-                    tip += `<br>Source: ${c.sr || '?'}`;
-                    if (c.e != null) tip += `<br>Elevation: ${Math.round(c.e)}m`;
-                    if (c.sl != null) tip += `<br>Slope: ${c.sl}°`;
-                    tip += `<br>Move: ${mods.movement ?? '?'} | Vis: ${mods.visibility ?? '?'}`;
-                    tip += `<br>Prot: ${mods.protection ?? '?'} | Atk: ${mods.attack ?? '?'}`;
+                    tip += `<br>${KI18n.t('terrain.source')}: ${c.sr || '?'}`;
+                    if (c.e != null) tip += `<br>${KI18n.t('terrain.elevation')}: ${Math.round(c.e)}m`;
+                    if (c.sl != null) tip += `<br>${KI18n.t('terrain.slope')}: ${c.sl}°`;
+                    tip += `<br>${KI18n.t('terrain.move')}: ${mods.movement ?? '?'} | ${KI18n.t('terrain.vis')}: ${mods.visibility ?? '?'}`;
+                    tip += `<br>${KI18n.t('terrain.prot')}: ${mods.protection ?? '?'} | ${KI18n.t('terrain.atk')}: ${mods.attack ?? '?'}`;
                     tip += `<br><span style="opacity:0.6">${c.s}</span>`;
                     this.bindTooltip(tip, { sticky: true, className: 'terrain-tooltip' });
                     this.openTooltip();
@@ -264,9 +264,9 @@ const KTerrain = (() => {
             },
             onEachFeature: (feature, layer) => {
                 const props = feature.properties || {};
-                let tip = `<b>Elevation: ${Math.round(props.elevation_m || 0)}m</b>`;
-                if (props.slope_deg != null) tip += `<br>Slope: ${props.slope_deg.toFixed(1)}°`;
-                if (props.aspect_deg != null) tip += `<br>Aspect: ${props.aspect_deg.toFixed(0)}°`;
+                let tip = `<b>${KI18n.t('terrain.elevation')}: ${Math.round(props.elevation_m || 0)}m</b>`;
+                if (props.slope_deg != null) tip += `<br>${KI18n.t('terrain.slope')}: ${props.slope_deg.toFixed(1)}°`;
+                if (props.aspect_deg != null) tip += `<br>${KI18n.t('terrain.aspect')}: ${props.aspect_deg.toFixed(0)}°`;
                 tip += `<br><span style="opacity:0.6">${props.snail_path}</span>`;
                 layer.bindTooltip(tip, { sticky: true, className: 'terrain-tooltip' });
             },

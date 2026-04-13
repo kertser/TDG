@@ -174,7 +174,8 @@ const KSessionUI = (() => {
                                 }
                                 return o.original_text ? o.original_text.slice(0, 30) : 'order';
                             });
-                            const warningText = `⚠ ${unconfirmed.length} order(s) have not received radio confirmation from units yet:\n\n${unitNames.join('\n')}\n\nProceed with turn execution anyway?`;
+                            const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
+                            const warningText = _t('turn.pending', { count: unconfirmed.length, units: unitNames.join('\n') });
                             if (typeof KDialogs !== 'undefined') {
                                 const proceed = await KDialogs.confirm(warningText, { dangerous: false });
                                 if (!proceed) return;
@@ -186,7 +187,7 @@ const KSessionUI = (() => {
                 }
 
                 turnBtn.disabled = true;
-                turnBtn.textContent = '⏳ Executing...';
+                turnBtn.textContent = typeof KI18n !== 'undefined' ? KI18n.t('turn.executing') : '⏳ Executing...';
                 try {
                     const resp = await fetch(`/api/sessions/${currentSessionId}/tick`, {
                         method: 'POST',
@@ -244,6 +245,8 @@ const KSessionUI = (() => {
         const contentEl = document.getElementById('scenario-desc-content');
         if (!modal) return;
 
+        const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
+
         if (titleEl) titleEl.textContent = `📋 ${_scenarioTitle || 'Scenario Briefing'}`;
         if (contentEl) {
             // Build rich HTML briefing
@@ -252,14 +255,14 @@ const KSessionUI = (() => {
             // Description
             const desc = _scenarioDescription || '';
             if (desc) {
-                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#4fc3f7;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Situation</div><div style="color:#ccc;font-size:13px;line-height:1.6;white-space:pre-wrap;">${_escBriefing(desc)}</div></div>`;
+                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#4fc3f7;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${_escBriefing(_t('brief.situation'))}</div><div style="color:#ccc;font-size:13px;line-height:1.6;white-space:pre-wrap;">${_escBriefing(desc)}</div></div>`;
             }
 
             // Task / Mission
             const objectives = _scenarioObjectives || {};
             const taskText = objectives.task_text || objectives.task || '';
             if (taskText) {
-                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ff9800;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Mission / Task</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;white-space:pre-wrap;background:rgba(255,152,0,0.06);border-left:3px solid #ff9800;padding:8px 12px;border-radius:0 4px 4px 0;">${_escBriefing(taskText)}</div></div>`;
+                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ff9800;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${_escBriefing(_t('brief.mission'))}</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;white-space:pre-wrap;background:rgba(255,152,0,0.06);border-left:3px solid #ff9800;padding:8px 12px;border-radius:0 4px 4px 0;">${_escBriefing(taskText)}</div></div>`;
             }
 
             // Operation Start Time
@@ -267,9 +270,10 @@ const KSessionUI = (() => {
             if (env.start_time) {
                 try {
                     const startDate = new Date(env.start_time);
-                    const dateStr = startDate.toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-                    const timeStr = startDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ce93d8;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Operation Start</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;background:rgba(206,147,216,0.08);border-left:3px solid #ce93d8;padding:8px 12px;border-radius:0 4px 4px 0;"><span style="font-size:12px;color:#b0b0b0;">📅</span> ${_escBriefing(dateStr)} &nbsp;&nbsp;<span style="font-size:12px;color:#b0b0b0;">⏰</span> ${_escBriefing(timeStr)}</div></div>`;
+                    const locale = typeof KI18n !== 'undefined' && KI18n.getLang() === 'ru' ? 'ru-RU' : 'en-US';
+                    const dateStr = startDate.toLocaleDateString(locale, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
+                    const timeStr = startDate.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+                    html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#ce93d8;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">${_escBriefing(_t('brief.op_start'))}</div><div style="color:#e0e0e0;font-size:13px;line-height:1.6;background:rgba(206,147,216,0.08);border-left:3px solid #ce93d8;padding:8px 12px;border-radius:0 4px 4px 0;"><span style="font-size:12px;color:#b0b0b0;">📅</span> ${_escBriefing(dateStr)} &nbsp;&nbsp;<span style="font-size:12px;color:#b0b0b0;">⏰</span> ${_escBriefing(timeStr)}</div></div>`;
                 } catch (e) {}
             }
 
@@ -277,7 +281,14 @@ const KSessionUI = (() => {
             const envKeys = ['weather', 'visibility', 'wind', 'precipitation', 'light_level', 'temperature'];
             const hasEnv = envKeys.some(k => env[k] != null);
             if (hasEnv) {
-                const envLabels = { weather: '☁ Weather', visibility: '👁 Visibility', wind: '💨 Wind', precipitation: '🌧 Precipitation', light_level: '🔆 Light', temperature: '🌡 Temperature' };
+                const envLabels = {
+                    weather: _t('brief.weather'),
+                    visibility: _t('brief.visibility'),
+                    wind: _t('brief.wind'),
+                    precipitation: _t('brief.precipitation'),
+                    light_level: _t('brief.light'),
+                    temperature: _t('brief.temperature')
+                };
                 let envHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;">';
                 envKeys.forEach(k => {
                     if (env[k] != null) {
@@ -287,11 +298,11 @@ const KSessionUI = (() => {
                     }
                 });
                 envHtml += '</div>';
-                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#81c784;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Environment Conditions</div><div style="background:rgba(129,199,132,0.06);border:1px solid rgba(129,199,132,0.15);border-radius:6px;padding:10px 14px;">${envHtml}</div></div>`;
+                html += `<div style="margin-bottom:14px;"><div style="font-size:10px;color:#81c784;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">${_escBriefing(_t('brief.environment'))}</div><div style="background:rgba(129,199,132,0.06);border:1px solid rgba(129,199,132,0.15);border-radius:6px;padding:10px 14px;">${envHtml}</div></div>`;
             }
 
             if (!html) {
-                html = '<div style="color:#888;font-style:italic;">No description available.</div>';
+                html = `<div style="color:#888;font-style:italic;">${_escBriefing(_t('brief.no_desc'))}</div>`;
             }
 
             contentEl.innerHTML = html;
@@ -319,9 +330,10 @@ const KSessionUI = (() => {
     async function _doRegister() {
         const name = (document.getElementById('display-name-input')?.value || '').trim();
         const password = (document.getElementById('password-input')?.value || '');
+        const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
         _clearAuthError();
-        if (!name) { _showAuthError('Callsign required'); return; }
-        if (!password || password.length < 4) { _showAuthError('Password must be at least 4 characters'); return; }
+        if (!name) { _showAuthError(_t('auth.callsign_required')); return; }
+        if (!password || password.length < 4) { _showAuthError(_t('auth.password_min')); return; }
 
         try {
             const resp = await fetch('/api/auth/register', {
@@ -337,7 +349,7 @@ const KSessionUI = (() => {
             const data = await resp.json();
             _onAuthSuccess(data);
         } catch (err) {
-            _showAuthError('Connection error');
+            _showAuthError(_t('auth.connection_error'));
             console.error('Register failed:', err);
         }
     }
@@ -345,9 +357,10 @@ const KSessionUI = (() => {
     async function _doLogin() {
         const name = (document.getElementById('display-name-input')?.value || '').trim();
         const password = (document.getElementById('password-input')?.value || '');
+        const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
         _clearAuthError();
-        if (!name) { _showAuthError('Callsign required'); return; }
-        if (!password) { _showAuthError('Password required'); return; }
+        if (!name) { _showAuthError(_t('auth.callsign_required')); return; }
+        if (!password) { _showAuthError(_t('auth.password_required')); return; }
 
         try {
             const resp = await fetch('/api/auth/login', {
@@ -363,7 +376,7 @@ const KSessionUI = (() => {
             const data = await resp.json();
             _onAuthSuccess(data);
         } catch (err) {
-            _showAuthError('Connection error');
+            _showAuthError(_t('auth.connection_error'));
             console.error('Login failed:', err);
         }
     }
@@ -491,7 +504,8 @@ const KSessionUI = (() => {
             listEl.innerHTML = '';
 
             if (sessions.length === 0) {
-                listEl.innerHTML = '<div style="color:#888;font-size:12px;padding:8px;">No sessions available. Ask admin to create one and assign you.</div>';
+                const noSessionsMsg = typeof KI18n !== 'undefined' ? KI18n.t('sidebar.no_sessions') : 'No sessions available. Ask admin to create one and assign you.';
+                listEl.innerHTML = `<div style="color:#888;font-size:12px;padding:8px;">${noSessionsMsg}</div>`;
             }
 
             sessions.forEach(s => {
@@ -611,11 +625,12 @@ const KSessionUI = (() => {
         const sessionEl = document.getElementById('user-dropdown-session');
         if (nameEl) nameEl.textContent = currentUserName || 'Unknown';
         if (sessionEl) {
+            const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
             if (currentSessionId) {
                 const roleInfo = _currentRole ? ` (${_currentRole})` : '';
-                sessionEl.textContent = `🟢 In session${roleInfo}`;
+                sessionEl.textContent = _t('user.in_session') + roleInfo;
             } else {
-                sessionEl.textContent = '⚪ No session';
+                sessionEl.textContent = _t('user.no_session');
             }
         }
     }
@@ -683,7 +698,24 @@ const KSessionUI = (() => {
                     eventSound: document.getElementById('setting-event-sound')?.checked ?? false,
                 };
                 _saveSettings(settings);
+
+                // Apply language change in real-time
+                const langSelect = document.getElementById('setting-language');
+                if (langSelect && typeof KI18n !== 'undefined') {
+                    KI18n.setLang(langSelect.value);
+                }
+
                 if (modal) modal.style.display = 'none';
+            });
+        }
+
+        // Live language switch (instant, no save needed)
+        const langSelect = document.getElementById('setting-language');
+        if (langSelect) {
+            langSelect.addEventListener('change', () => {
+                if (typeof KI18n !== 'undefined') {
+                    KI18n.setLang(langSelect.value);
+                }
             });
         }
 
@@ -703,6 +735,12 @@ const KSessionUI = (() => {
         setCb('setting-unit-tooltips', settings.unitTooltips);
         setCb('setting-hover-ranges', settings.hoverRanges);
         setCb('setting-event-sound', settings.eventSound);
+
+        // Set language selector to current language
+        const langSelect = document.getElementById('setting-language');
+        if (langSelect && typeof KI18n !== 'undefined') {
+            langSelect.value = KI18n.getLang();
+        }
 
         const modal = document.getElementById('user-settings-modal');
         if (modal) modal.style.display = 'flex';

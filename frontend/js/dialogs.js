@@ -85,10 +85,10 @@ const KDialogs = (() => {
     function confirm(message, options = {}) {
         return new Promise((resolve) => {
             _resolveFunc = (val) => resolve(val === true);
-            const title = options.title || (options.dangerous ? '⚠ Confirm' : 'Confirm');
+            const title = options.title || (options.dangerous ? KI18n.t('dlg.confirm_danger') : KI18n.t('dlg.confirm'));
             const dangerousClass = options.dangerous ? ' kdialog-dangerous' : '';
-            const confirmLabel = options.confirmLabel || (options.dangerous ? '⚠ Yes, proceed' : '✓ Confirm');
-            const cancelLabel = options.cancelLabel || 'Cancel';
+            const confirmLabel = options.confirmLabel || (options.dangerous ? KI18n.t('dlg.confirm_yes_danger') : KI18n.t('dlg.confirm_yes'));
+            const cancelLabel = options.cancelLabel || KI18n.t('dlg.cancel');
             const msgHtml = _escapeHtml(message).replace(/\n/g, '<br>');
 
             _show(`
@@ -114,7 +114,7 @@ const KDialogs = (() => {
     function alert(message, options = {}) {
         return new Promise((resolve) => {
             _resolveFunc = () => resolve();
-            const title = options.title || 'Notice';
+            const title = options.title || KI18n.t('dlg.notice');
             const dangerousClass = options.dangerous ? ' kdialog-dangerous' : '';
             const msgHtml = _escapeHtml(message).replace(/\n/g, '<br>');
 
@@ -125,7 +125,7 @@ const KDialogs = (() => {
                         <div class="kdialog-message">${msgHtml}</div>
                     </div>
                     <div class="kdialog-footer">
-                        <button class="kdialog-btn kdialog-btn-ok" data-action="ok">OK</button>
+                        <button class="kdialog-btn kdialog-btn-ok" data-action="ok">${KI18n.t('dlg.ok')}</button>
                     </div>
                 </div>
             `);
@@ -139,7 +139,7 @@ const KDialogs = (() => {
     function prompt(message, defaultValue = '', options = {}) {
         return new Promise((resolve) => {
             _resolveFunc = (val) => resolve(val);
-            const title = options.title || 'Input';
+            const title = options.title || KI18n.t('dlg.input');
             const msgHtml = _escapeHtml(message).replace(/\n/g, '<br>');
             const placeholder = options.placeholder || '';
 
@@ -151,8 +151,8 @@ const KDialogs = (() => {
                         <input type="text" class="kdialog-input" value="${_escapeHtml(defaultValue)}" placeholder="${_escapeHtml(placeholder)}" />
                     </div>
                     <div class="kdialog-footer">
-                        <button class="kdialog-btn kdialog-btn-cancel" data-action="cancel">Cancel</button>
-                        <button class="kdialog-btn kdialog-btn-confirm" data-action="confirm">✓ OK</button>
+                        <button class="kdialog-btn kdialog-btn-cancel" data-action="cancel">${KI18n.t('dlg.cancel')}</button>
+                        <button class="kdialog-btn kdialog-btn-confirm" data-action="confirm">${KI18n.t('dlg.ok')}</button>
                     </div>
                 </div>
             `);
@@ -172,7 +172,7 @@ const KDialogs = (() => {
     function select(message, choices, options = {}) {
         return new Promise((resolve) => {
             _resolveFunc = (val) => resolve(val);
-            const title = options.title || 'Select';
+            const title = options.title || KI18n.t('dlg.select');
             const dangerousClass = options.dangerous ? ' kdialog-dangerous' : '';
             const msgHtml = _escapeHtml(message).replace(/\n/g, '<br>');
 
@@ -192,8 +192,8 @@ const KDialogs = (() => {
                         <select class="kdialog-select" size="${Math.min(choices.length, 8)}">${optionsHtml}</select>
                     </div>
                     <div class="kdialog-footer">
-                        <button class="kdialog-btn kdialog-btn-cancel" data-action="cancel">Cancel</button>
-                        <button class="kdialog-btn kdialog-btn-confirm" data-action="confirm">✓ Select</button>
+                        <button class="kdialog-btn kdialog-btn-cancel" data-action="cancel">${KI18n.t('dlg.cancel')}</button>
+                        <button class="kdialog-btn kdialog-btn-confirm" data-action="confirm">${KI18n.t('dlg.select_btn')}</button>
                     </div>
                 </div>
             `);

@@ -102,7 +102,8 @@ const KUI = (() => {
                 // Toggle button (always visible)
                 const toggleBtn = L.DomUtil.create('button', 'map-ctrl-toggle-btn', wrapper);
                 toggleBtn.innerHTML = '▼';
-                toggleBtn.title = 'Hide map controls';
+                toggleBtn.title = typeof KI18n !== 'undefined' ? KI18n.t('tip.hide_controls') : 'Hide map controls';
+                toggleBtn.setAttribute('data-i18n-title', 'tip.hide_controls');
 
                 // Container for both groups
                 const groupsContainer = L.DomUtil.create('div', 'map-ctrl-groups', wrapper);
@@ -112,22 +113,22 @@ const KUI = (() => {
                 drawGroup.id = 'map-draw-group';
                 drawGroup.style.display = 'none';  // hidden until session active
                 drawGroup.innerHTML =
-                    '<button class="topbar-icon-btn draw-btn" data-tool="arrow" title="Curved Arrow (right-click to finish)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 13C5 9 9 6 13 3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M9 2L13.5 2.5L13 7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
-                    '<button class="topbar-icon-btn draw-btn" data-tool="los" title="LOS Check (click 2 points)"><svg viewBox="0 0 16 16" width="14" height="14"><line x1="2" y1="13" x2="14" y2="3" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2,2" stroke-linecap="round"/><circle cx="2" cy="13" r="2" fill="currentColor" opacity="0.7"/><circle cx="14" cy="3" r="2" fill="currentColor" opacity="0.7"/><circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="8" x2="10" y2="8" stroke="currentColor" stroke-width="1"/><line x1="8" y1="6" x2="8" y2="10" stroke="currentColor" stroke-width="1"/></svg></button>' +
-                    '<button class="topbar-icon-btn draw-btn" data-tool="rectangle" title="Rectangle (dashed)"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="2" y="3.5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5,1.8" fill="none"/></svg></button>' +
-                    '<button class="topbar-icon-btn draw-btn" data-tool="marker" title="Marker"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6C3.5 9.5 8 14.5 8 14.5S12.5 9.5 12.5 6C12.5 3.5 10.5 1.5 8 1.5Z" fill="currentColor" opacity="0.85"/><circle cx="8" cy="6" r="2" fill="#1a1a2e"/></svg></button>' +
-                    '<button class="topbar-icon-btn draw-btn" data-tool="ellipse" title="Ellipse (dashed)"><svg viewBox="0 0 16 16" width="14" height="14"><ellipse cx="8" cy="8" rx="6.5" ry="4.5" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5,1.8" fill="none"/></svg></button>' +
-                    '<button class="topbar-icon-btn draw-btn" data-tool="measure" title="Measure (right-click to finish)"><svg viewBox="0 0 16 16" width="14" height="14"><line x1="1" y1="11" x2="15" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="1.5" y1="9" x2="1.5" y2="13" stroke="currentColor" stroke-width="1.3"/><line x1="14.5" y1="9" x2="14.5" y2="13" stroke="currentColor" stroke-width="1.3"/><line x1="5.5" y1="10" x2="5.5" y2="12" stroke="currentColor" stroke-width="1"/><line x1="8" y1="9.5" x2="8" y2="12.5" stroke="currentColor" stroke-width="1"/><line x1="10.5" y1="10" x2="10.5" y2="12" stroke="currentColor" stroke-width="1"/></svg></button>';
+                    '<button class="topbar-icon-btn draw-btn" data-tool="arrow" data-i18n-title="tip.arrow" title="Curved Arrow (right-click to finish)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 13C5 9 9 6 13 3" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><path d="M9 2L13.5 2.5L13 7" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+                    '<button class="topbar-icon-btn draw-btn" data-tool="los" data-i18n-title="tip.los" title="LOS Check (click 2 points)"><svg viewBox="0 0 16 16" width="14" height="14"><line x1="2" y1="13" x2="14" y2="3" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2,2" stroke-linecap="round"/><circle cx="2" cy="13" r="2" fill="currentColor" opacity="0.7"/><circle cx="14" cy="3" r="2" fill="currentColor" opacity="0.7"/><circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="8" x2="10" y2="8" stroke="currentColor" stroke-width="1"/><line x1="8" y1="6" x2="8" y2="10" stroke="currentColor" stroke-width="1"/></svg></button>' +
+                    '<button class="topbar-icon-btn draw-btn" data-tool="rectangle" data-i18n-title="tip.rect" title="Rectangle (dashed)"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="2" y="3.5" width="12" height="9" rx="1" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5,1.8" fill="none"/></svg></button>' +
+                    '<button class="topbar-icon-btn draw-btn" data-tool="marker" data-i18n-title="tip.marker" title="Marker"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6C3.5 9.5 8 14.5 8 14.5S12.5 9.5 12.5 6C12.5 3.5 10.5 1.5 8 1.5Z" fill="currentColor" opacity="0.85"/><circle cx="8" cy="6" r="2" fill="#1a1a2e"/></svg></button>' +
+                    '<button class="topbar-icon-btn draw-btn" data-tool="ellipse" data-i18n-title="tip.ellipse" title="Ellipse (dashed)"><svg viewBox="0 0 16 16" width="14" height="14"><ellipse cx="8" cy="8" rx="6.5" ry="4.5" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.5,1.8" fill="none"/></svg></button>' +
+                    '<button class="topbar-icon-btn draw-btn" data-tool="measure" data-i18n-title="tip.measure" title="Measure (right-click to finish)"><svg viewBox="0 0 16 16" width="14" height="14"><line x1="1" y1="11" x2="15" y2="11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="1.5" y1="9" x2="1.5" y2="13" stroke="currentColor" stroke-width="1.3"/><line x1="14.5" y1="9" x2="14.5" y2="13" stroke="currentColor" stroke-width="1.3"/><line x1="5.5" y1="10" x2="5.5" y2="12" stroke="currentColor" stroke-width="1"/><line x1="8" y1="9.5" x2="8" y2="12.5" stroke="currentColor" stroke-width="1"/><line x1="10.5" y1="10" x2="10.5" y2="12" stroke="currentColor" stroke-width="1"/></svg></button>';
 
                 // ── Group 2: Map controls (3×2) ──
                 const ctrlGroup = L.DomUtil.create('div', 'map-ctrl-overlay', groupsContainer);
                 ctrlGroup.innerHTML =
-                    '<button id="center-btn" class="topbar-icon-btn" title="Center on operation area"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><line x1="8" y1="0.5" x2="8" y2="3.5" stroke="currentColor" stroke-width="1.2"/><line x1="8" y1="12.5" x2="8" y2="15.5" stroke="currentColor" stroke-width="1.2"/><line x1="0.5" y1="8" x2="3.5" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="12.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
-                    '<button id="grid-toggle-btn" class="topbar-icon-btn" title="Show/hide grid"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><line x1="5.5" y1="1" x2="5.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="10.5" y1="1" x2="10.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" stroke-width="0.8"/></svg></button>' +
-                    '<button id="units-toggle-btn" class="topbar-icon-btn" title="Show/hide units"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2C5.8 2 4 3.6 4 5.5C4 8 8 12 8 12S12 8 12 5.5C12 3.6 10.2 2 8 2Z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><line x1="4" y1="14" x2="12" y2="14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>' +
-                    '<button id="overlays-toggle-btn" class="topbar-icon-btn" title="Show/hide overlays"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2L1.5 6L8 10L14.5 6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M1.5 8.5L8 12.5L14.5 8.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" opacity="0.7"/><path d="M1.5 11L8 15L14.5 11" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.45"/></svg></button>' +
-                    '<button id="terrain-toggle-btn" class="topbar-icon-btn" title="Show/hide terrain"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 14 L5 5 L8 9 L11 4 L15 14 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="12" cy="3" r="1.5" fill="currentColor" opacity="0.5"/></svg></button>' +
-                    '<button id="objects-toggle-btn" class="topbar-icon-btn" title="Show/hide tactical objects"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 13 L8 3 L14 13 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><line x1="5" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="1" stroke-dasharray="1.5,1"/><circle cx="8" cy="10" r="1" fill="currentColor"/></svg></button>';
+                    '<button id="center-btn" class="topbar-icon-btn" data-i18n-title="tip.center" title="Center on operation area"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><line x1="8" y1="0.5" x2="8" y2="3.5" stroke="currentColor" stroke-width="1.2"/><line x1="8" y1="12.5" x2="8" y2="15.5" stroke="currentColor" stroke-width="1.2"/><line x1="0.5" y1="8" x2="3.5" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="12.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="1.2"/></svg></button>' +
+                    '<button id="grid-toggle-btn" class="topbar-icon-btn" data-i18n-title="tip.grid" title="Show/hide grid"><svg viewBox="0 0 16 16" width="14" height="14"><rect x="1" y="1" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.2" fill="none"/><line x1="5.5" y1="1" x2="5.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="10.5" y1="1" x2="10.5" y2="15" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="5.5" x2="15" y2="5.5" stroke="currentColor" stroke-width="0.8"/><line x1="1" y1="10.5" x2="15" y2="10.5" stroke="currentColor" stroke-width="0.8"/></svg></button>' +
+                    '<button id="units-toggle-btn" class="topbar-icon-btn" data-i18n-title="tip.units" title="Show/hide units"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2C5.8 2 4 3.6 4 5.5C4 8 8 12 8 12S12 8 12 5.5C12 3.6 10.2 2 8 2Z" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="8" cy="5.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><line x1="4" y1="14" x2="12" y2="14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>' +
+                    '<button id="overlays-toggle-btn" class="topbar-icon-btn" data-i18n-title="tip.overlays" title="Show/hide overlays"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2L1.5 6L8 10L14.5 6Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M1.5 8.5L8 12.5L14.5 8.5" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" opacity="0.7"/><path d="M1.5 11L8 15L14.5 11" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round" opacity="0.45"/></svg></button>' +
+                    '<button id="terrain-toggle-btn" class="topbar-icon-btn" data-i18n-title="tip.terrain" title="Show/hide terrain"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 14 L5 5 L8 9 L11 4 L15 14 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><circle cx="12" cy="3" r="1.5" fill="currentColor" opacity="0.5"/></svg></button>' +
+                    '<button id="objects-toggle-btn" class="topbar-icon-btn" data-i18n-title="tip.objects" title="Show/hide tactical objects"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 13 L8 3 L14 13 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><line x1="5" y1="8" x2="11" y2="8" stroke="currentColor" stroke-width="1" stroke-dasharray="1.5,1"/><circle cx="8" cy="10" r="1" fill="currentColor"/></svg></button>';
 
                 L.DomEvent.disableClickPropagation(wrapper);
                 L.DomEvent.disableScrollPropagation(wrapper);
@@ -151,7 +152,9 @@ const KUI = (() => {
             groupsContainer.style.display = _groupVisible ? '' : 'none';
             toggleBtn.innerHTML = _groupVisible ? '▼' : '☰';
             toggleBtn.classList.toggle('collapsed', !_groupVisible);
-            toggleBtn.title = _groupVisible ? 'Hide map controls' : 'Show map controls';
+            toggleBtn.title = _groupVisible
+                ? (typeof KI18n !== 'undefined' ? KI18n.t('tip.hide_controls') : 'Hide map controls')
+                : (typeof KI18n !== 'undefined' ? KI18n.t('tip.show_controls') : 'Show map controls');
         });
 
         // ── Bind drawing tool buttons ──
@@ -191,7 +194,7 @@ const KUI = (() => {
             gridToggleBtn.addEventListener('click', () => {
                 const visible = KGrid.toggle();
                 gridToggleBtn.classList.toggle('toggled-off', !visible);
-                gridToggleBtn.title = visible ? 'Hide grid' : 'Show grid';
+                gridToggleBtn.title = visible ? KI18n.t('toggle.hide_grid') : KI18n.t('toggle.show_grid');
             });
         }
 
@@ -200,7 +203,7 @@ const KUI = (() => {
             unitsToggleBtn.addEventListener('click', () => {
                 const visible = KUnits.toggle();
                 unitsToggleBtn.classList.toggle('toggled-off', !visible);
-                unitsToggleBtn.title = visible ? 'Hide units' : 'Show units';
+                unitsToggleBtn.title = visible ? KI18n.t('toggle.hide_units') : KI18n.t('toggle.show_units');
             });
         }
 
@@ -209,7 +212,7 @@ const KUI = (() => {
             overlaysToggleBtn.addEventListener('click', () => {
                 const visible = KOverlays.toggle();
                 overlaysToggleBtn.classList.toggle('toggled-off', !visible);
-                overlaysToggleBtn.title = visible ? 'Hide overlays' : 'Show overlays';
+                overlaysToggleBtn.title = visible ? KI18n.t('toggle.hide_overlays') : KI18n.t('toggle.show_overlays');
             });
         }
 
@@ -219,7 +222,7 @@ const KUI = (() => {
             terrainToggleBtn.addEventListener('click', () => {
                 const visible = KTerrain.toggle();
                 terrainToggleBtn.classList.toggle('toggled-off', !visible);
-                terrainToggleBtn.title = visible ? 'Hide terrain' : 'Show terrain';
+                terrainToggleBtn.title = visible ? KI18n.t('toggle.hide_terrain') : KI18n.t('toggle.show_terrain');
                 if (visible) KTerrain.showLegend();
                 else KTerrain.hideLegend();
             });
@@ -230,7 +233,7 @@ const KUI = (() => {
             objectsToggleBtn.addEventListener('click', () => {
                 const visible = KMapObjects.toggle();
                 objectsToggleBtn.classList.toggle('toggled-off', !visible);
-                objectsToggleBtn.title = visible ? 'Hide tactical objects' : 'Show tactical objects';
+                objectsToggleBtn.title = visible ? KI18n.t('toggle.hide_objects') : KI18n.t('toggle.show_objects');
             });
         }
 

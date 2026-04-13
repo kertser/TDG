@@ -45,7 +45,7 @@ const KGameLog = (() => {
      */
     async function exportLog() {
         if (entries.length === 0) {
-            try { await KDialogs.alert('No log entries to export.'); } catch(e) { alert('No log entries to export.'); }
+            try { await KDialogs.alert(KI18n.t('log.no_entries')); } catch(e) { alert(KI18n.t('log.no_entries')); }
             return;
         }
 
@@ -59,9 +59,9 @@ const KGameLog = (() => {
             : 'session';
         const dateStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
-        let text = `TDG Application Log\n`;
-        text += `Session: ${sessionName}\n`;
-        text += `Exported: ${new Date().toLocaleString()}\n`;
+        let text = `${KI18n.t('log.header')}\n`;
+        text += `${KI18n.t('log.session')}: ${sessionName}\n`;
+        text += `${KI18n.t('log.exported')}: ${new Date().toLocaleString()}\n`;
         text += '═'.repeat(60) + '\n\n';
 
         // Entries in chronological order (oldest first)

@@ -742,7 +742,7 @@ const KMapObjects = (() => {
 
         const label = obj.label || 'Chemical Cloud';
         const ticksLeft = remaining || '?';
-        poly.bindTooltip(`☣ ${label}<br>Dissipates in ~${ticksLeft} min<br>⚠ Toxic — heavy damage`, {sticky: true, opacity: 0.9});
+        poly.bindTooltip(`☣ ${label}<br>${KI18n.t('obj.dissipates')} ~${ticksLeft} ${KI18n.t('obj.min')}<br>${KI18n.t('obj.toxic')}`, {sticky: true, opacity: 0.9});
         poly.on('contextmenu', (e) => {
             L.DomEvent.stopPropagation(e);
             if (_isAdminOpen()) _showObjectContextMenu(e, obj);
@@ -1463,11 +1463,11 @@ const KMapObjects = (() => {
 
     function _bindTooltipAndContext(layer, obj) {
         const label = obj.label || obj.object_type.replace(/_/g, ' ');
-        const status = obj.is_active ? '✓ Active' : '✗ Inactive';
+        const status = obj.is_active ? KI18n.t('obj.active') : KI18n.t('obj.inactive');
         const prot = obj.definition ? obj.definition.protection_bonus : 1.0;
         const rotDeg = (_isAdminOpen() && obj.properties && obj.properties.rotation_deg) ? ` · ↻${obj.properties.rotation_deg}°` : '';
         const lenM = (_isAdminOpen() && obj.properties && obj.properties.length_m) ? ` · ${obj.properties.length_m}m` : '';
-        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · Prot ×${prot}` : ''}${rotDeg}${lenM}</span>`;
+        let tooltipHtml = `<b>${label}</b><br><span style="font-size:10px;">${obj.object_type} · ${status}${prot > 1 ? ` · ${KI18n.t('obj.prot')} ×${prot}` : ''}${rotDeg}${lenM}</span>`;
         // Show discovery status in admin mode
         if (_isAdminOpen()) {
             const bIcon = obj.discovered_by_blue ? '👁' : '🚫';
@@ -1513,12 +1513,12 @@ const KMapObjects = (() => {
         menu.innerHTML = `
             <div class="ctx-menu-header" style="font-size:11px;padding:4px 8px;color:#4fc3f7;">${label}</div>
             <div class="ctx-menu-section">
-                <div class="ctx-item" data-action="toggle">${obj.is_active ? '🔴 Deactivate' : '🟢 Activate'}</div>
+                <div class="ctx-item" data-action="toggle">${obj.is_active ? KI18n.t('obj.deactivate') : KI18n.t('obj.activate')}</div>
                 <div class="ctx-menu-divider" style="border-top:1px solid #333;margin:2px 0;"></div>
-                <div class="ctx-item" data-action="disc_blue" style="font-size:12px;">${blueIcon} Blue: ${blueDisc ? 'Revealed' : 'Hidden'} → ${blueDisc ? 'Hide' : 'Reveal'}</div>
-                <div class="ctx-item" data-action="disc_red" style="font-size:12px;">${redIcon} Red: ${redDisc ? 'Revealed' : 'Hidden'} → ${redDisc ? 'Hide' : 'Reveal'}</div>
+                <div class="ctx-item" data-action="disc_blue" style="font-size:12px;">${blueIcon} Blue: ${blueDisc ? KI18n.t('obj.revealed') : KI18n.t('obj.hidden')} → ${blueDisc ? KI18n.t('obj.hide') : KI18n.t('obj.reveal')}</div>
+                <div class="ctx-item" data-action="disc_red" style="font-size:12px;">${redIcon} Red: ${redDisc ? KI18n.t('obj.revealed') : KI18n.t('obj.hidden')} → ${redDisc ? KI18n.t('obj.hide') : KI18n.t('obj.reveal')}</div>
                 <div class="ctx-menu-divider" style="border-top:1px solid #333;margin:2px 0;"></div>
-                <div class="ctx-item ctx-item-danger" data-action="delete">🗑 Delete</div>
+                <div class="ctx-item ctx-item-danger" data-action="delete">${KI18n.t('obj.delete')}</div>
             </div>`;
 
         document.body.appendChild(menu);

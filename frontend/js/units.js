@@ -625,7 +625,7 @@ const KUnits = (() => {
             const _pathFailed = u.current_task && u.current_task.path_failed === true;
             let _pathWarnTag = '';
             if (_pathFailed) {
-                _pathWarnTag = ' <span style="color:#ff9800;font-weight:700;" title="No terrain path found — unit using direct route">⚠ no path</span>';
+                _pathWarnTag = ` <span style="color:#ff9800;font-weight:700;" title="${KI18n.t('tip.no_path')}">⚠ no path</span>`;
             }
             const tooltipEyeH = UNIT_EYE_HEIGHTS[u.unit_type] || DEFAULT_UNIT_EYE_HEIGHT;
             const tooltipEyeTag = tooltipEyeH > DEFAULT_UNIT_EYE_HEIGHT ? ` <span style="color:#a5d6a7">(${tooltipEyeH}m)</span>` : '';
@@ -1274,13 +1274,13 @@ const KUnits = (() => {
 
         if (!isEnemy || isAdmin) {
             html += `<div class="unit-info-ranges">`;
-            html += `<span title="Detection range" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
-            html += `<span title="Fire range" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
+            html += `<span title="${KI18n.t('tip.detection_range')}" style="color:#64b5f6;">👁 ${_fmtDist(detR)}</span>`;
+            html += `<span title="${KI18n.t('tip.fire_range')}" style="color:#ff9800;">🎯 ${_fmtDist(fireR)}</span>`;
             if (u.move_speed_mps) {
                 const speedOpt = taskSpeed && SPEED_OPTIONS[taskSpeed];
                 const speedIcon = speedOpt ? speedOpt.icon : '⚡';
                 const speedClr = speedOpt ? speedOpt.color : '#81c784';
-                html += `<span title="Movement speed (${taskSpeed || 'base'})" style="color:${speedClr};">${speedIcon} ${u.move_speed_mps.toFixed(1)}m/s</span>`;
+                html += `<span title="${KI18n.t('tip.move_speed')} (${taskSpeed || 'base'})" style="color:${speedClr};">${speedIcon} ${u.move_speed_mps.toFixed(1)}m/s</span>`;
             }
             html += `</div>`;
         }

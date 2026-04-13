@@ -17,21 +17,21 @@
     <div id="topbar">
         <span id="app-title">TDG</span>
 
-        <span id="session-info" class="session-info-btn" title="Click to view scenario description"></span>
+        <span id="session-info" class="session-info-btn" data-i18n-title="tip.session_info" title="Click to view scenario description"></span>
         <span id="topbar-brand">WarOnline</span>
 
         <!-- Spacer pushes right-side controls to the end -->
         <div style="flex:1;"></div>
 
         <!-- Execute Orders (advance turn) — visible only to commanders -->
-        <button id="turn-btn" class="topbar-orders-complete-btn" style="display:none;" title="Submit your orders and advance to the next turn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders</button>
+        <button id="turn-btn" class="topbar-orders-complete-btn" style="display:none;" data-i18n-title="tip.turn_btn" title="Submit your orders and advance to the next turn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px;"><path d="M12 2 L12 10"/><path d="M8 4 L12 2 L16 4"/><rect x="6" y="10" width="12" height="10" rx="2"/><path d="M10 15 L14 15"/><path d="M10 18 L13 18"/></svg>Execute Orders</button>
 
         <!-- Rules button -->
-        <button id="rules-topbar-btn" class="topbar-text-btn" title="Rules &amp; Instructions">📖 Rules</button>
+        <button id="rules-topbar-btn" class="topbar-text-btn" data-i18n-title="tip.rules" title="Rules &amp; Instructions">📖 Rules</button>
 
         <!-- Right-side controls: user menu and admin button only -->
         <div id="user-menu-wrapper" style="position:relative;display:inline-flex;align-items:center;">
-            <span id="user-info" style="cursor:pointer;" title="Click for user menu"></span>
+            <span id="user-info" style="cursor:pointer;" data-i18n-title="tip.user_menu" title="Click for user menu"></span>
             <div id="user-dropdown" class="user-dropdown" style="display:none;">
                 <div id="user-dropdown-header" class="user-dropdown-header">
                     <div class="user-dropdown-avatar" id="user-avatar-display">👤</div>
@@ -47,7 +47,7 @@
                 <div class="user-dropdown-item user-dropdown-danger" id="user-menu-logout">🚪 Logout</div>
             </div>
         </div>
-        <button id="admin-topbar-btn" class="topbar-icon-btn" style="display:none;" title="Admin Panel">⚙</button>
+        <button id="admin-topbar-btn" class="topbar-icon-btn" style="display:none;" data-i18n-title="tip.admin" title="Admin Panel">⚙</button>
     </div>
 
     <!-- ── Main Layout ─────────────────────────────── -->
@@ -56,7 +56,7 @@
         <div id="map"></div>
 
         <!-- Sidebar toggle handle -->
-        <div id="sidebar-toggle" title="Toggle sidebar">
+        <div id="sidebar-toggle" title="Toggle sidebar" data-i18n-title="tip.sidebar_toggle">
             <svg viewBox="0 0 8 14" width="8" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M6 1L1 7L6 13"/>
             </svg>
@@ -82,34 +82,34 @@
                                 <circle cx="12" cy="7" r="4"/>
                             </svg>
                         </div>
-                        <div class="auth-title">Welcome, Commander</div>
-                        <div class="auth-subtitle">Enter your callsign and password</div>
+                        <div class="auth-title" data-i18n="auth.welcome">Welcome, Commander</div>
+                        <div class="auth-subtitle" data-i18n="auth.subtitle">Enter your callsign and password</div>
                         <div class="auth-field">
                             <div class="auth-input-group">
-                                <input type="text" id="display-name-input" class="auth-input" placeholder="Callsign" title="Enter your callsign" autocomplete="off" spellcheck="false" />
+                                <input type="text" id="display-name-input" class="auth-input" data-i18n-placeholder="auth.callsign_ph" placeholder="Callsign" autocomplete="off" spellcheck="false" />
                             </div>
                         </div>
                         <div class="auth-field">
                             <div class="auth-input-group">
-                                <input type="password" id="password-input" class="auth-input" placeholder="Password" title="Enter your password" autocomplete="off" />
+                                <input type="password" id="password-input" class="auth-input" data-i18n-placeholder="auth.password_ph" placeholder="Password" autocomplete="off" />
                             </div>
                         </div>
                         <div class="auth-actions">
-                            <button id="register-btn" class="auth-btn auth-btn-secondary" title="Create a new account with this callsign and password">
+                            <button id="register-btn" class="auth-btn auth-btn-secondary" title="Create a new account with this callsign and password" data-i18n-title="tip.register">
                                 <span>Register</span>
                             </button>
-                            <button id="login-btn" class="auth-btn" title="Login with existing callsign and password">
+                            <button id="login-btn" class="auth-btn" title="Login with existing callsign and password" data-i18n-title="tip.login">
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                                 <span>Login</span>
                             </button>
                         </div>
                         <div id="auth-error" class="auth-error"></div>
-                        <div class="auth-hint">Min. 4 characters for password</div>
+                        <div class="auth-hint" data-i18n="auth.hint">Min. 4 characters for password</div>
                     </div>
                 </div>
                 <div id="session-panel" style="display:none;">
                     <h3>Sessions</h3>
-                    <button id="start-session-btn" style="display:none;" title="Start the session (creates units from scenario)">Start Session</button>
+                    <button id="start-session-btn" style="display:none;" title="Start the session (creates units from scenario)" data-i18n-title="tip.start_session">Start Session</button>
                     <div id="session-list"></div>
                 </div>
                 <div id="participants-panel"></div>
@@ -125,7 +125,7 @@
             <div id="reports-tab" class="tab-panel">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
                     <h3 style="flex:1;margin:0;">Reports</h3>
-                    <button id="export-reports-btn" class="log-export-btn" title="Export reports as Excel file">
+                    <button id="export-reports-btn" class="log-export-btn" title="Export reports as Excel file" data-i18n-title="tip.export_reports">
                         <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>
                         <span>Excel</span>
                     </button>
@@ -138,7 +138,7 @@
             <div id="log-tab" class="tab-panel">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
                     <h3 style="flex:1;margin:0;">App Log</h3>
-                    <button id="export-log-btn" class="log-export-btn" title="Export app log as text file">
+                    <button id="export-log-btn" class="log-export-btn" title="Export app log as text file" data-i18n-title="tip.export_log">
                         <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8M4 7l4 4 4-4"/><path d="M2 12v2h12v-2"/></svg>
                         <span>Export</span>
                     </button>
@@ -148,11 +148,11 @@
 
             <!-- Chain of Command panel (visible to all users) -->
             <div id="coc-tab" class="tab-panel">
-                <h3>Chain of Command</h3>
-                <div style="font-size:10px;color:#888;margin-bottom:6px;">
+                <h3 data-i18n="sidebar.coc">Chain of Command</h3>
+                <div style="font-size:10px;color:#888;margin-bottom:6px;" data-i18n="sidebar.coc_desc">
                     Unit hierarchy for the current session. Commanders can edit assignments.
                 </div>
-                <button id="coc-refresh-btn" class="admin-btn" style="margin-bottom:6px;" title="Refresh chain of command">🔄 Refresh</button>
+                <button id="coc-refresh-btn" class="admin-btn" style="margin-bottom:6px;" title="Refresh chain of command" data-i18n-title="tip.coc_refresh">🔄 Refresh</button>
                 <div id="coc-tree-public" style="max-height:500px;overflow-y:auto;"></div>
             </div>
 
@@ -167,14 +167,14 @@
     <div id="command-panel" style="display:none;">
         <div id="command-panel-header">
             <div class="cmd-tabs">
-                <button class="cmd-tab-btn active" data-cmd-tab="cmd-orders" title="Issue orders to selected units">📡 Orders</button>
-                <button class="cmd-tab-btn" data-cmd-tab="cmd-radio" title="Tactical radio — send messages to commanders">📻 Radio</button>
+                <button class="cmd-tab-btn active" data-cmd-tab="cmd-orders" data-i18n-title="tip.orders_tab" title="Issue orders to selected units">📡 Orders</button>
+                <button class="cmd-tab-btn" data-cmd-tab="cmd-radio" data-i18n-title="tip.radio_tab" title="Tactical radio — send messages to commanders">📻 Radio</button>
             </div>
             <div class="cmd-meta">
-                <span id="cmd-author" class="cmd-author-badge" title="Sender"></span>
-                <span id="cmd-datetime" class="cmd-datetime-badge" title="Game time"></span>
+                <span id="cmd-author" class="cmd-author-badge" title="Sender" data-i18n-title="tip.sender"></span>
+                <span id="cmd-datetime" class="cmd-datetime-badge" title="Game time" data-i18n-title="tip.game_time"></span>
             </div>
-            <button id="cmd-panel-toggle" class="cmd-toggle-btn" title="Pin panel open">
+            <button id="cmd-panel-toggle" class="cmd-toggle-btn" data-i18n-title="tip.pin_panel" title="Pin panel open">
                 <svg viewBox="0 0 16 16" width="10" height="10"><path d="M8 2L8 10M4 6L8 2L12 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
         </div>
@@ -183,21 +183,21 @@
         <div id="cmd-orders" class="cmd-tab-panel active">
             <div class="cmd-selected-units">
                 <div id="selected-units-display" class="cmd-unit-chips">
-                    <span class="cmd-hint">Select units on the map</span>
+                    <span class="cmd-hint" data-i18n="cmd.select_units">Select units on the map</span>
                 </div>
-                <button id="select-all-units-btn" class="cmd-chip-btn" title="Select all your units">👥 All</button>
-                <button id="clear-unit-selection-btn" class="cmd-chip-clear" title="Clear selection">✕</button>
+                <button id="select-all-units-btn" class="cmd-chip-btn" data-i18n-title="tip.select_all" title="Select all your units">👥 All</button>
+                <button id="clear-unit-selection-btn" class="cmd-chip-clear" data-i18n-title="tip.clear_sel" title="Clear selection">✕</button>
             </div>
             <div class="cmd-input-row">
-                <textarea id="order-text" class="cmd-textarea" placeholder="Type your order… (Ctrl+Enter to send)" rows="3"></textarea>
+                <textarea id="order-text" class="cmd-textarea" data-i18n-placeholder="cmd.order_ph" placeholder="Type your order… (Ctrl+Enter to send)" rows="3"></textarea>
                 <div class="cmd-input-actions">
-                    <button id="cancel-orders-btn" class="cmd-action-btn cmd-cancel-btn" title="Cancel all orders for selected units (or all units)">
+                    <button id="cancel-orders-btn" class="cmd-action-btn cmd-cancel-btn" data-i18n-title="tip.cancel_orders" title="Cancel all orders for selected units (or all units)">
                         <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.6" fill="none"/><line x1="4.5" y1="4.5" x2="11.5" y2="11.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                     </button>
-                    <button id="pick-coords-btn" class="cmd-action-btn" title="Pick coordinates from map (click map to insert grid reference)">
+                    <button id="pick-coords-btn" class="cmd-action-btn" data-i18n-title="tip.pick_coords" title="Pick coordinates from map (click map to insert grid reference)">
                         <svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="4.5" stroke="currentColor" stroke-width="1.6" fill="none"/><line x1="8" y1="0.5" x2="8" y2="4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="8" y1="11.5" x2="8" y2="15.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="0.5" y1="8" x2="4.5" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><line x1="11.5" y1="8" x2="15.5" y2="8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>
                     </button>
-                    <button id="submit-order-btn" class="cmd-send-btn" title="Issue Order (Ctrl+Enter)">
+                    <button id="submit-order-btn" class="cmd-send-btn" data-i18n-title="tip.submit_order" title="Issue Order (Ctrl+Enter)">
                         <svg viewBox="0 0 16 16" width="14" height="14"><path d="M1 8L6 14L15 2" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                 </div>
@@ -207,20 +207,20 @@
         <!-- Radio sub-panel -->
         <div id="cmd-radio" class="cmd-tab-panel">
             <div class="cmd-radio-header">
-                <select id="radio-recipient" class="cmd-radio-select" title="Select recipient">
-                    <option value="all">📢 All Commanders</option>
+                <select id="radio-recipient" class="cmd-radio-select" data-i18n-title="tip.select_recipient" title="Select recipient">
+                    <option value="all" data-i18n="cmd.all_commanders">📢 All Commanders</option>
                 </select>
                 <div class="radio-channel-toggle">
-                    <button class="radio-ch-btn active" data-radio-ch="all" title="All messages">All</button>
-                    <button class="radio-ch-btn" data-radio-ch="chat" title="Human chat only">💬 Chat</button>
-                    <button class="radio-ch-btn" data-radio-ch="operative" title="Unit radio responses">📡 Units</button>
+                    <button class="radio-ch-btn active" data-radio-ch="all" data-i18n-title="radio.all_tip" data-i18n="radio.all" title="All messages">All</button>
+                    <button class="radio-ch-btn" data-radio-ch="chat" data-i18n-title="radio.chat_tip" title="Human chat only" data-i18n="radio.chat">💬 Chat</button>
+                    <button class="radio-ch-btn" data-radio-ch="operative" data-i18n-title="radio.units_tip" title="Unit radio responses" data-i18n="radio.units">📡 Units</button>
                 </div>
-                <button id="clear-radio-btn" class="radio-clear-btn" title="Clear all chat messages">🗑</button>
+                <button id="clear-radio-btn" class="radio-clear-btn" data-i18n-title="tip.clear_radio" title="Clear all chat messages">🗑</button>
             </div>
             <div id="radio-messages" class="cmd-radio-messages"></div>
             <div class="cmd-input-row">
-                <textarea id="radio-text" class="cmd-textarea" placeholder="Type message… (Enter to send)" rows="1"></textarea>
-                <button id="radio-send-btn" class="cmd-send-btn" title="Send Message (Enter)">
+                <textarea id="radio-text" class="cmd-textarea" data-i18n-placeholder="cmd.radio_ph" placeholder="Type message… (Enter to send)" rows="1"></textarea>
+                <button id="radio-send-btn" class="cmd-send-btn" data-i18n-title="tip.send_message" title="Send Message (Enter)">
                     <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2 14L14 8L2 2L2 6.5L10 8L2 9.5Z" fill="currentColor"/></svg>
                 </button>
             </div>
@@ -231,7 +231,7 @@
     <div id="admin-window" style="display:none;">
         <div id="admin-window-header">
             <span>⚙ Administration</span>
-            <button id="admin-window-close" title="Close admin panel">✕</button>
+            <button id="admin-window-close" title="Close admin panel" data-i18n-title="tip.admin_close">✕</button>
         </div>
         <div id="admin-window-body">
 
@@ -248,8 +248,8 @@
                     <div class="admin-lock-title">Admin Access</div>
                     <div class="admin-lock-subtitle">Enter admin password to unlock</div>
                     <div class="admin-lock-input-group">
-                        <input type="password" id="admin-pw-input" class="admin-lock-input" placeholder="Password…" autocomplete="off" spellcheck="false" title="Enter the admin password configured in server settings" />
-                        <button id="admin-unlock-btn" class="admin-lock-btn" title="Verify admin password and unlock admin panel">
+                        <input type="password" id="admin-pw-input" class="admin-lock-input" placeholder="Password…" autocomplete="off" spellcheck="false" title="Enter the admin password configured in server settings" data-i18n-title="tip.admin_pw" />
+                        <button id="admin-unlock-btn" class="admin-lock-btn" title="Verify admin password and unlock admin panel" data-i18n-title="tip.admin_unlock">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                             <span>Unlock</span>
                         </button>
@@ -268,30 +268,30 @@
                     <select id="admin-session-selector" style="flex:1;padding:4px 6px;font-size:11px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;">
                         <option value="">— Select session —</option>
                     </select>
-                    <button id="admin-refresh-session-selector" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Refresh session list">🔄</button>
+                    <button id="admin-refresh-session-selector" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Refresh session list" data-i18n-title="tip.admin_refresh_sessions">🔄</button>
                 </div>
                 <div id="admin-selected-session-info" class="admin-info"></div>
             </div>
 
             <!-- Admin sub-tabs -->
             <div class="admin-subtabs">
-                <button class="admin-subtab-btn active" data-panel="admin-session-panel" title="Session controls & participants">Session</button>
-                <button class="admin-subtab-btn" data-panel="admin-monitor-panel" title="God view, unit dashboard, orders">Monitor</button>
-                <button class="admin-subtab-btn" data-panel="admin-builder-panel" title="Scenario builder & management">Builder</button>
-                <button class="admin-subtab-btn" data-panel="admin-coc-panel" title="Unit chain of command hierarchy">CoC</button>
-                <button class="admin-subtab-btn" data-panel="admin-users-panel" title="Manage registered users">Users</button>
-                <button class="admin-subtab-btn" data-panel="admin-types-panel" title="Manage unit types and icons">Types</button>
-                <button class="admin-subtab-btn" data-panel="admin-terrain-panel" title="Terrain analysis & painting">Terrain</button>
-                <button class="admin-subtab-btn" data-panel="admin-objects-panel" title="Tactical obstacles & structures">Objects</button>
-                <button class="admin-subtab-btn" data-panel="admin-redai-panel" title="Red AI commander agents">Red AI</button>
+                <button class="admin-subtab-btn active" data-panel="admin-session-panel" title="Session controls & participants" data-i18n-title="tip.admin_tab_session">Session</button>
+                <button class="admin-subtab-btn" data-panel="admin-monitor-panel" title="God view, unit dashboard, orders" data-i18n-title="tip.admin_tab_monitor">Monitor</button>
+                <button class="admin-subtab-btn" data-panel="admin-builder-panel" title="Scenario builder & management" data-i18n-title="tip.admin_tab_builder">Builder</button>
+                <button class="admin-subtab-btn" data-panel="admin-coc-panel" title="Unit chain of command hierarchy" data-i18n-title="tip.admin_tab_coc">CoC</button>
+                <button class="admin-subtab-btn" data-panel="admin-users-panel" title="Manage registered users" data-i18n-title="tip.admin_tab_users">Users</button>
+                <button class="admin-subtab-btn" data-panel="admin-types-panel" title="Manage unit types and icons" data-i18n-title="tip.admin_tab_types">Types</button>
+                <button class="admin-subtab-btn" data-panel="admin-terrain-panel" title="Terrain analysis & painting" data-i18n-title="tip.admin_tab_terrain">Terrain</button>
+                <button class="admin-subtab-btn" data-panel="admin-objects-panel" title="Tactical obstacles & structures" data-i18n-title="tip.admin_tab_objects">Objects</button>
+                <button class="admin-subtab-btn" data-panel="admin-redai-panel" title="Red AI commander agents" data-i18n-title="tip.admin_tab_redai">Red AI</button>
             </div>
 
             <!-- ═══ BUILDER SUB-TAB ═══════════════════════ -->
             <div id="admin-builder-panel" class="admin-subtab-panel" style="display:none;">
                 <div class="admin-section">
                     <h4>Scenario Builder</h4>
-                    <button id="sb-toggle-btn" class="admin-btn" title="Toggle interactive scenario builder mode">🗺 Scenario Builder</button>
-                    <button class="admin-btn" onclick="KAdmin.saveSessionToScenario()" style="margin-top:4px;background:#0d3b66;color:#90caf9;" title="Save current session state (units, grid) back to the linked scenario">💾 Save Session → Scenario</button>
+                    <button id="sb-toggle-btn" class="admin-btn" title="Toggle interactive scenario builder mode" data-i18n-title="tip.sb_toggle">🗺 Scenario Builder</button>
+                    <button class="admin-btn" onclick="KAdmin.saveSessionToScenario()" style="margin-top:4px;background:#0d3b66;color:#90caf9;" title="Save current session state (units, grid) back to the linked scenario" data-i18n-title="tip.sb_save_session">💾 Save Session → Scenario</button>
                 </div>
 
                 <!-- Builder panel (shown when builder active) -->
@@ -306,7 +306,7 @@
                         <h4>Game Rules</h4>
                         <div class="sb-grid-row">
                             <label>Turn Limit</label>
-                            <input type="number" id="sb-turn-limit" value="0" min="0" max="999" style="width:70px;" title="0 = unlimited" />
+                            <input type="number" id="sb-turn-limit" value="0" min="0" max="999" style="width:70px;" title="0 = unlimited" data-i18n-title="tip.sb_turn_limit" />
                             <span style="font-size:10px;color:#888;margin-left:4px;">(0 = unlimited)</span>
                         </div>
                         <div style="margin-top:4px;">
@@ -332,10 +332,10 @@
                         </div>
                         <div class="sb-grid-row">
                             <label>Size</label>
-                            <input type="number" id="sb-grid-cols" value="8" min="1" max="20" style="width:30%;" title="Columns (1–20)" />
+                            <input type="number" id="sb-grid-cols" value="8" min="1" max="20" style="width:30%;" title="Columns (1–20)" data-i18n-title="tip.sb_grid_cols" />
                             <span style="color:#888;">×</span>
-                            <input type="number" id="sb-grid-rows" value="8" min="1" max="20" style="width:30%;" title="Rows (1–20)" />
-                            <input type="number" id="sb-grid-size" value="1000" min="100" max="10000" style="width:30%;" title="Square size (m)" />
+                            <input type="number" id="sb-grid-rows" value="8" min="1" max="20" style="width:30%;" title="Rows (1–20)" data-i18n-title="tip.sb_grid_rows" />
+                            <input type="number" id="sb-grid-size" value="1000" min="100" max="10000" style="width:30%;" title="Square size (m)" data-i18n-title="tip.sb_grid_size" />
                         </div>
                     </div>
 
@@ -356,17 +356,17 @@
                         </div>
                         <div class="sb-form-row">
                             <label style="width:50px;">Str%</label>
-                            <input type="number" id="sb-unit-strength" value="100" min="0" max="100" step="5" style="width:60px;" title="Strength percentage (0-100%)" />
+                            <input type="number" id="sb-unit-strength" value="100" min="0" max="100" step="5" style="width:60px;" title="Strength percentage (0-100%)" data-i18n-title="tip.sb_strength" />
                             <label style="width:50px;">Ammo%</label>
-                            <input type="number" id="sb-unit-ammo" value="100" min="0" max="100" step="5" style="width:60px;" title="Ammo percentage (0-100%)" />
+                            <input type="number" id="sb-unit-ammo" value="100" min="0" max="100" step="5" style="width:60px;" title="Ammo percentage (0-100%)" data-i18n-title="tip.sb_ammo" />
                             <label style="width:40px;">Mor%</label>
-                            <input type="number" id="sb-unit-morale" value="90" min="0" max="100" step="5" style="width:60px;" title="Morale percentage (0-100%)" />
+                            <input type="number" id="sb-unit-morale" value="90" min="0" max="100" step="5" style="width:60px;" title="Morale percentage (0-100%)" data-i18n-title="tip.sb_morale" />
                         </div>
                         <div class="sb-form-row">
                             <label style="width:50px;">Det (m)</label>
-                            <input type="number" id="sb-unit-detection" value="1500" min="0" max="10000" step="100" style="width:70px;" title="Detection range in meters" />
+                            <input type="number" id="sb-unit-detection" value="1500" min="0" max="10000" step="100" style="width:70px;" title="Detection range in meters" data-i18n-title="tip.sb_detection" />
                             <label style="width:50px;">Speed</label>
-                            <input type="number" id="sb-unit-speed" value="4" min="0" max="50" step="0.5" style="width:60px;" title="Movement speed in m/s" />
+                            <input type="number" id="sb-unit-speed" value="4" min="0" max="50" step="0.5" style="width:60px;" title="Movement speed in m/s" data-i18n-title="tip.sb_speed" />
                         </div>
                         <div style="display:flex;gap:4px;margin-top:4px;">
                             <button id="sb-confirm-unit" class="admin-btn" style="flex:1;background:#1b5e20;color:#a5d6a7;">✓ Confirm</button>
@@ -386,8 +386,8 @@
                 <div class="admin-section" style="margin-top:8px;">
                     <h4>Scenarios</h4>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                        <button id="admin-list-scenarios" class="admin-btn" title="Refresh the list of saved scenarios">📋 List</button>
-                        <button id="admin-delete-all-scenarios" class="admin-btn admin-btn-danger" title="Permanently delete all saved scenarios">🗑 Delete All</button>
+                        <button id="admin-list-scenarios" class="admin-btn" title="Refresh the list of saved scenarios" data-i18n-title="tip.sb_list_scenarios">📋 List</button>
+                        <button id="admin-delete-all-scenarios" class="admin-btn admin-btn-danger" title="Permanently delete all saved scenarios" data-i18n-title="tip.sb_delete_all_scenarios">🗑 Delete All</button>
                     </div>
                     <div id="admin-scenario-list" class="admin-info"></div>
                 </div>
@@ -408,8 +408,8 @@
                 <div class="admin-section">
                     <h4>Session Management</h4>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                        <button id="admin-delete-all-sessions" class="admin-btn admin-btn-danger" title="Permanently delete all game sessions">🗑 Delete All</button>
-                        <button id="admin-refresh-sessions" class="admin-btn" title="Refresh session list and count">🔄 Refresh</button>
+                        <button id="admin-delete-all-sessions" class="admin-btn admin-btn-danger" title="Permanently delete all game sessions" data-i18n-title="tip.admin_delete_all_sessions">🗑 Delete All</button>
+                        <button id="admin-refresh-sessions" class="admin-btn" title="Refresh session list and count" data-i18n-title="tip.admin_refresh_sessions_list">🔄 Refresh</button>
                     </div>
                     <div id="admin-session-count" class="admin-info"></div>
                     <div id="admin-session-list" style="max-height:200px;overflow-y:auto;margin-top:4px;"></div>
@@ -419,32 +419,32 @@
                     <h4>Current Session</h4>
                     <div id="admin-session-status" class="admin-info">No active session</div>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                        <button id="admin-pause-session" class="admin-btn" title="Pause the running session">⏸ Pause</button>
-                        <button id="admin-reset-session" class="admin-btn admin-btn-danger" title="Reset session to turn 0 (recreates units from scenario; preserves map objects &amp; terrain)">↺ Reset</button>
+                        <button id="admin-pause-session" class="admin-btn" title="Pause the running session" data-i18n-title="tip.admin_pause">⏸ Pause</button>
+                        <button id="admin-reset-session" class="admin-btn admin-btn-danger" title="Reset session to turn 0 (recreates units from scenario; preserves map objects &amp; terrain)" data-i18n-title="tip.admin_reset">↺ Reset</button>
                     </div>
                     <div style="display:flex;gap:4px;align-items:center;margin-top:6px;">
                         <label style="font-size:11px;color:#aaa;white-space:nowrap;">Turn interval (min):</label>
-                        <input type="number" id="admin-turn-interval" value="1" min="1" style="width:60px;padding:3px;" title="Minutes of game time per turn" />
-                        <button id="admin-apply-turn-interval" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Apply new turn interval to current session">Apply</button>
+                        <input type="number" id="admin-turn-interval" value="1" min="1" style="width:60px;padding:3px;" title="Minutes of game time per turn" data-i18n-title="tip.admin_turn_interval" />
+                        <button id="admin-apply-turn-interval" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Apply new turn interval to current session" data-i18n-title="tip.admin_apply_interval">Apply</button>
                     </div>
-                    <div style="display:flex;gap:4px;align-items:center;margin-top:6px;" title="Override the in-game clock for this session">
+                    <div style="display:flex;gap:4px;align-items:center;margin-top:6px;" title="Override the in-game clock for this session" data-i18n-title="tip.admin_session_time">
                         <label style="font-size:11px;color:#aaa;white-space:nowrap;">⏰ Game time:</label>
-                        <input type="datetime-local" id="admin-session-time" style="flex:1;padding:3px 5px;font-size:11px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;" title="Override session game clock" />
-                        <button id="admin-set-session-time" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Apply game clock override">Set</button>
+                        <input type="datetime-local" id="admin-session-time" style="flex:1;padding:3px 5px;font-size:11px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;" title="Override session game clock" data-i18n-title="tip.admin_session_time" />
+                        <button id="admin-set-session-time" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Apply game clock override" data-i18n-title="tip.admin_set_time">Set</button>
                     </div>
                     <div style="display:flex;gap:4px;align-items:center;margin-top:6px;">
                         <label style="font-size:11px;color:#aaa;white-space:nowrap;">Scenario:</label>
                         <select id="admin-session-scenario" style="flex:1;padding:3px 5px;font-size:11px;background:#1a1a2e;color:#e0e0e0;border:1px solid #0f3460;border-radius:3px;">
                             <option value="">— current —</option>
                         </select>
-                        <button id="admin-apply-scenario" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Change scenario for the active session (resets units/grid)">Apply</button>
+                        <button id="admin-apply-scenario" class="admin-btn" style="padding:3px 8px;font-size:10px;" title="Change scenario for the active session (resets units/grid)" data-i18n-title="tip.admin_apply_scenario">Apply</button>
                     </div>
                     <div id="admin-scenario-change-status" class="admin-info"></div>
                 </div>
 
                 <div class="admin-section">
                     <h4>Participants</h4>
-                    <button id="admin-load-participants" class="admin-btn" style="margin-bottom:4px;" title="Load list of session participants">🔄 Load</button>
+                    <button id="admin-load-participants" class="admin-btn" style="margin-bottom:4px;" title="Load list of session participants" data-i18n-title="tip.admin_load_participants">🔄 Load</button>
                     <div id="admin-participants-list"></div>
                 </div>
 
@@ -458,7 +458,7 @@
                         <option value="intel_report">Intel Report</option>
                     </select>
                     <input type="text" id="admin-event-text" placeholder="Event description..." style="margin-bottom:4px;" />
-                    <button id="admin-inject-event" class="admin-btn" title="Inject a custom event into the session timeline">⚡ Inject Event</button>
+                    <button id="admin-inject-event" class="admin-btn" title="Inject a custom event into the session timeline" data-i18n-title="tip.admin_inject_event">⚡ Inject Event</button>
                     <div id="admin-event-status" class="admin-info"></div>
                 </div>
 
@@ -469,17 +469,17 @@
                         <label>Origin</label>
                         <input type="text" id="admin-grid-origin-lat" placeholder="Lat" style="width:38%;" />
                         <input type="text" id="admin-grid-origin-lon" placeholder="Lon" style="width:38%;" />
-                        <button id="admin-grid-from-session" class="admin-btn" style="padding:2px 6px;font-size:9px;" title="Load grid origin and settings from current session">📍 Load</button>
-                        <button id="admin-grid-pick-map" class="admin-btn" style="padding:2px 6px;font-size:9px;" title="Click on map to set grid origin">🖱 Pick</button>
+                        <button id="admin-grid-from-session" class="admin-btn" style="padding:2px 6px;font-size:9px;" title="Load grid origin and settings from current session" data-i18n-title="tip.admin_grid_from_session">📍 Load</button>
+                        <button id="admin-grid-pick-map" class="admin-btn" style="padding:2px 6px;font-size:9px;" title="Click on map to set grid origin" data-i18n-title="tip.admin_grid_pick_map">🖱 Pick</button>
                     </div>
                     <div class="sb-grid-row">
                         <label>Size</label>
-                        <input type="number" id="admin-grid-cols" value="8" min="1" max="20" style="width:30%;" title="Columns (1–20)" />
+                        <input type="number" id="admin-grid-cols" value="8" min="1" max="20" style="width:30%;" title="Columns (1–20)" data-i18n-title="tip.sb_grid_cols" />
                         <span style="color:#888;">×</span>
-                        <input type="number" id="admin-grid-rows" value="8" min="1" max="20" style="width:30%;" title="Rows (1–20)" />
-                        <input type="number" id="admin-grid-size" value="1000" min="100" max="10000" style="width:30%;" title="Square size (m)" />
+                        <input type="number" id="admin-grid-rows" value="8" min="1" max="20" style="width:30%;" title="Rows (1–20)" data-i18n-title="tip.sb_grid_rows" />
+                        <input type="number" id="admin-grid-size" value="1000" min="100" max="10000" style="width:30%;" title="Square size (m)" data-i18n-title="tip.sb_grid_size" />
                     </div>
-                    <button id="admin-apply-grid" class="admin-btn" style="margin-top:4px;" title="Apply grid settings to the selected session">📐 Apply Grid</button>
+                    <button id="admin-apply-grid" class="admin-btn" style="margin-top:4px;" title="Apply grid settings to the selected session" data-i18n-title="tip.admin_apply_grid">📐 Apply Grid</button>
                     <div id="admin-grid-status" class="admin-info"></div>
                 </div>
             </div>
@@ -488,38 +488,38 @@
             <div id="admin-monitor-panel" class="admin-subtab-panel" style="display:none;">
                 <div class="admin-section">
                     <h4>God View</h4>
-                    <button id="admin-god-view-toggle" class="admin-btn" title="Toggle god view – see all units from both sides">👁 God View OFF</button>
+                    <button id="admin-god-view-toggle" class="admin-btn" title="Toggle god view – see all units from both sides" data-i18n-title="tip.admin_god_view">👁 God View OFF</button>
                     <div id="admin-god-status" class="admin-info"></div>
                 </div>
 
                 <div class="admin-section">
                     <h4>Unit Dashboard</h4>
                     <div style="display:flex;gap:4px;margin-bottom:4px;">
-                        <button id="admin-load-dashboard" class="admin-btn" title="Load all unit status data">🔄 Load</button>
-                        <button class="admin-btn" onclick="KAdmin.addUnit()" style="background:#1b5e20;color:#a5d6a7;" title="Add a new unit to the session">➕ Add Unit</button>
-                        <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteAllUnits()" style="padding:2px 8px;font-size:10px;" title="Delete ALL units in session">🗑 Delete All</button>
+                        <button id="admin-load-dashboard" class="admin-btn" title="Load all unit status data" data-i18n-title="tip.admin_load_dashboard">🔄 Load</button>
+                        <button class="admin-btn" onclick="KAdmin.addUnit()" style="background:#1b5e20;color:#a5d6a7;" title="Add a new unit to the session" data-i18n-title="tip.admin_add_unit">➕ Add Unit</button>
+                        <button class="admin-btn admin-btn-danger" onclick="KAdmin.deleteAllUnits()" style="padding:2px 8px;font-size:10px;" title="Delete ALL units in session" data-i18n-title="tip.admin_delete_all_units">🗑 Delete All</button>
                     </div>
                     <div id="admin-unit-dashboard" style="max-height:250px;overflow-y:auto;"></div>
                 </div>
 
                 <div class="admin-section">
                     <h4>All Orders (both sides)</h4>
-                    <button id="admin-load-orders" class="admin-btn" style="margin-bottom:4px;" title="Load all orders from both sides">🔄 Load</button>
+                    <button id="admin-load-orders" class="admin-btn" style="margin-bottom:4px;" title="Load all orders from both sides" data-i18n-title="tip.admin_load_orders">🔄 Load</button>
                     <div id="admin-orders-list" style="max-height:180px;overflow-y:auto;"></div>
                 </div>
 
                 <div class="admin-section">
                     <h4>Database</h4>
-                    <button id="admin-db-stats" class="admin-btn" title="Show database table row counts">📊 DB Stats</button>
+                    <button id="admin-db-stats" class="admin-btn" title="Show database table row counts" data-i18n-title="tip.admin_db_stats">📊 DB Stats</button>
                     <div id="admin-db-info" class="admin-info"></div>
                 </div>
 
                 <div class="admin-section">
                     <h4>Debug Log</h4>
                     <div style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
-                        <button id="admin-debug-log-toggle" class="admin-btn" title="Toggle debug logging to file">📝 Debug Log OFF</button>
-                        <button id="admin-debug-log-view" class="admin-btn" title="View debug log contents" style="display:none;">📄 View Log</button>
-                        <button id="admin-debug-log-clear" class="admin-btn admin-btn-danger" title="Clear debug log file" style="display:none;padding:2px 8px;font-size:10px;">🗑 Clear</button>
+                        <button id="admin-debug-log-toggle" class="admin-btn" title="Toggle debug logging to file" data-i18n-title="tip.admin_debug_toggle">📝 Debug Log OFF</button>
+                        <button id="admin-debug-log-view" class="admin-btn" title="View debug log contents" data-i18n-title="tip.admin_debug_view" style="display:none;">📄 View Log</button>
+                        <button id="admin-debug-log-clear" class="admin-btn admin-btn-danger" title="Clear debug log file" data-i18n-title="tip.admin_debug_clear" style="display:none;padding:2px 8px;font-size:10px;">🗑 Clear</button>
                     </div>
                     <div id="admin-debug-log-status" class="admin-info" style="font-size:10px;"></div>
                     <div id="admin-debug-log-viewer" style="display:none;margin-top:4px;">
@@ -533,15 +533,15 @@
                 <div class="admin-section">
                     <h4>User Management</h4>
                     <div style="display:flex;gap:4px;margin-bottom:6px;">
-                        <input type="text" id="admin-add-user-name" placeholder="New user name…" style="flex:1;padding:4px 6px;font-size:12px;" title="Enter display name for new user" />
-                        <button id="admin-add-user-btn" class="admin-btn" style="padding:4px 10px;font-size:11px;" title="Create a new user account">+ Add</button>
+                        <input type="text" id="admin-add-user-name" placeholder="New user name…" style="flex:1;padding:4px 6px;font-size:12px;" title="Enter display name for new user" data-i18n-title="tip.admin_add_user_ph" />
+                        <button id="admin-add-user-btn" class="admin-btn" style="padding:4px 10px;font-size:11px;" title="Create a new user account" data-i18n-title="tip.admin_add_user">+ Add</button>
                     </div>
                     <div style="display:flex;gap:4px;margin-bottom:6px;align-items:center;">
-                        <button id="admin-load-users" class="admin-btn" style="font-size:11px;" title="Refresh the list of registered users">🔄 Load Users</button>
+                        <button id="admin-load-users" class="admin-btn" style="font-size:11px;" title="Refresh the list of registered users" data-i18n-title="tip.admin_load_users">🔄 Load Users</button>
                         <label style="font-size:11px;color:#aaa;margin-left:auto;cursor:pointer;display:flex;align-items:center;gap:3px;">
-                            <input type="checkbox" id="admin-users-select-all" style="cursor:pointer;" title="Select/deselect all users" /> All
+                            <input type="checkbox" id="admin-users-select-all" style="cursor:pointer;" title="Select/deselect all users" data-i18n-title="tip.admin_select_all_users" /> All
                         </label>
-                        <button id="admin-bulk-delete-users" class="admin-btn admin-btn-danger" style="padding:3px 8px;font-size:10px;" title="Delete all selected users">🗑 Delete Selected</button>
+                        <button id="admin-bulk-delete-users" class="admin-btn admin-btn-danger" style="padding:3px 8px;font-size:10px;" title="Delete all selected users" data-i18n-title="tip.admin_bulk_delete_users">🗑 Delete Selected</button>
                     </div>
                     <div id="admin-users-list" style="max-height:300px;overflow-y:auto;"></div>
                 </div>
@@ -556,8 +556,8 @@
                     </div>
                     <div id="admin-types-list" style="max-height:600px;overflow-y:auto;"></div>
                     <div style="margin-top:8px;display:flex;gap:4px;">
-                        <button id="admin-add-unit-type" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Add a new custom unit type">➕ Add Type</button>
-                        <button id="admin-reset-unit-types" class="admin-btn" style="font-size:10px;" title="Reset all types to defaults">↺ Reset Defaults</button>
+                        <button id="admin-add-unit-type" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Add a new custom unit type" data-i18n-title="tip.admin_add_type">➕ Add Type</button>
+                        <button id="admin-reset-unit-types" class="admin-btn" style="font-size:10px;" title="Reset all types to defaults" data-i18n-title="tip.admin_reset_types">↺ Reset Defaults</button>
                     </div>
                 </div>
             </div>
@@ -585,9 +585,9 @@
                         </label>
                     </div>
                     <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">
-                        <button id="terrain-analyze-btn" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Run terrain analysis (OSM + elevation)">🔍 Analyze Terrain</button>
-                        <button id="terrain-analyze-force-btn" class="admin-btn" style="font-size:10px;" title="Force re-analyze (overwrite existing)">🔄 Force Re-analyze</button>
-                        <button id="terrain-clear-btn" class="admin-btn admin-btn-danger" style="font-size:10px;" title="Clear auto-analyzed terrain (keeps manual)">🗑 Clear</button>
+                        <button id="terrain-analyze-btn" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Run terrain analysis (OSM + elevation)" data-i18n-title="tip.terrain_analyze">🔍 Analyze Terrain</button>
+                        <button id="terrain-analyze-force-btn" class="admin-btn" style="font-size:10px;" title="Force re-analyze (overwrite existing)" data-i18n-title="tip.terrain_force">🔄 Force Re-analyze</button>
+                        <button id="terrain-clear-btn" class="admin-btn admin-btn-danger" style="font-size:10px;" title="Clear auto-analyzed terrain (keeps manual)" data-i18n-title="tip.terrain_clear">🗑 Clear</button>
                     </div>
                     <!-- Progress bar -->
                     <div id="terrain-progress-container" style="display:none;margin-top:6px;">
@@ -619,8 +619,8 @@
                             <option value="mountain">⛰ Mountain</option>
                             <option value="orchard">🌳 Orchard</option>
                         </select>
-                        <button id="terrain-paint-start-btn" class="admin-btn" title="Start painting mode">🖌 Paint</button>
-                        <button id="terrain-paint-stop-btn" class="admin-btn" style="display:none;" title="Stop painting">✋ Stop</button>
+                        <button id="terrain-paint-start-btn" class="admin-btn" title="Start painting mode" data-i18n-title="tip.terrain_paint_start">🖌 Paint</button>
+                        <button id="terrain-paint-stop-btn" class="admin-btn" style="display:none;" title="Stop painting" data-i18n-title="tip.terrain_paint_stop">✋ Stop</button>
                     </div>
                 </div>
 
@@ -634,9 +634,9 @@
                 <div class="admin-section">
                     <h4>🗺 Map Overlay</h4>
                     <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                        <button id="terrain-show-btn" class="admin-btn" title="Show/hide terrain overlay on map">👁 Toggle Terrain</button>
-                        <button id="terrain-elev-btn" class="admin-btn" title="Show/hide elevation heatmap">📈 Toggle Elevation</button>
-                        <button id="terrain-legend-btn" class="admin-btn" title="Show/hide terrain legend">📋 Toggle Legend</button>
+                        <button id="terrain-show-btn" class="admin-btn" title="Show/hide terrain overlay on map" data-i18n-title="tip.terrain_show">👁 Toggle Terrain</button>
+                        <button id="terrain-elev-btn" class="admin-btn" title="Show/hide elevation heatmap" data-i18n-title="tip.terrain_elev">📈 Toggle Elevation</button>
+                        <button id="terrain-legend-btn" class="admin-btn" title="Show/hide terrain legend" data-i18n-title="tip.terrain_legend">📋 Toggle Legend</button>
                     </div>
                 </div>
             </div>
@@ -672,9 +672,9 @@
                 <div class="admin-section">
                     <h4>📋 Placed Objects</h4>
                     <div style="display:flex;gap:4px;margin-bottom:4px;">
-                        <button id="admin-objects-refresh" class="admin-btn" style="font-size:10px;" title="Refresh object list">🔄 Refresh</button>
-                        <button id="admin-objects-clear-all" class="admin-btn admin-btn-danger" style="font-size:10px;" title="Delete all map objects">🗑 Clear All</button>
-                        <button id="admin-objects-toggle-vis" class="admin-btn" style="font-size:10px;" title="Show/hide objects layer">👁 Toggle</button>
+                        <button id="admin-objects-refresh" class="admin-btn" style="font-size:10px;" title="Refresh object list" data-i18n-title="tip.objects_refresh">🔄 Refresh</button>
+                        <button id="admin-objects-clear-all" class="admin-btn admin-btn-danger" style="font-size:10px;" title="Delete all map objects" data-i18n-title="tip.objects_clear">🗑 Clear All</button>
+                        <button id="admin-objects-toggle-vis" class="admin-btn" style="font-size:10px;" title="Show/hide objects layer" data-i18n-title="tip.objects_toggle">👁 Toggle</button>
                     </div>
                     <div id="admin-objects-list" style="max-height:200px;overflow-y:auto;font-size:11px;"></div>
                     <div id="admin-objects-stats" class="admin-info" style="margin-top:4px;"></div>
@@ -702,7 +702,7 @@
                     <div style="font-size:10px;color:#888;margin-bottom:6px;">
                         Visualize and edit the unit hierarchy. Click ⬆ to assign a unit to a parent commander, ✕ to remove from chain.
                     </div>
-                    <button id="admin-load-coc" class="admin-btn" style="margin-bottom:6px;" title="Load unit hierarchy for the current session">🔄 Load Hierarchy</button>
+                    <button id="admin-load-coc" class="admin-btn" style="margin-bottom:6px;" title="Load unit hierarchy for the current session" data-i18n-title="tip.admin_load_coc">🔄 Load Hierarchy</button>
                     <div id="admin-coc-tree" style="max-height:400px;overflow-y:auto;"></div>
                 </div>
             </div>
@@ -838,12 +838,12 @@
     <div id="admin-unit-edit-modal" class="ue-float" style="display:none;">
         <div class="ue-float-header" id="admin-ue-header">
             <span id="admin-ue-title">✏ Edit Unit</span>
-            <button class="ue-float-close" id="admin-ue-close" title="Close">✕</button>
+            <button class="ue-float-close" id="admin-ue-close" title="Close" data-i18n-title="tip.ue_close">✕</button>
         </div>
         <div class="ue-float-body">
             <!-- Top row: symbol preview + unit label -->
             <div class="ue-preview-row">
-                <div id="admin-ue-symbol-preview" class="ue-symbol-box" title="Live symbol preview"></div>
+                <div id="admin-ue-symbol-preview" class="ue-symbol-box" title="Live symbol preview" data-i18n-title="tip.ue_preview"></div>
                 <div class="ue-preview-info">
                     <div id="admin-ue-label" class="ue-unit-label"></div>
                     <div id="admin-ue-id-display" class="ue-unit-id"></div>
@@ -927,9 +927,9 @@
                 <div class="ue-field ue-span2">
                     <label>Position</label>
                     <div class="ue-pos-row">
-                        <input type="text" id="admin-ue-lat" placeholder="Lat" class="ue-input ue-pos-input" title="Latitude" />
-                        <input type="text" id="admin-ue-lon" placeholder="Lon" class="ue-input ue-pos-input" title="Longitude" />
-                        <button class="ue-pick-btn" id="admin-ue-pick-map" title="Pick position on map">📍</button>
+                <input type="text" id="admin-ue-lat" placeholder="Lat" class="ue-input ue-pos-input" title="Latitude" data-i18n-title="tip.ue_lat" />
+                <input type="text" id="admin-ue-lon" placeholder="Lon" class="ue-input ue-pos-input" title="Longitude" data-i18n-title="tip.ue_lon" />
+                <button class="ue-pick-btn" id="admin-ue-pick-map" title="Pick position on map" data-i18n-title="tip.ue_pick_map">📍</button>
                     </div>
                 </div>
 
@@ -977,16 +977,16 @@
                     </div>
                     <div class="admin-modal-row">
                         <label>Turn Interval (min)</label>
-                        <input type="number" id="wizard-turn-interval" value="1" min="1" max="60" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Minutes of game time per turn" />
+                        <input type="number" id="wizard-turn-interval" value="1" min="1" max="60" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Minutes of game time per turn" data-i18n-title="tip.wizard_interval" />
                     </div>
                     <div class="admin-modal-row">
                         <label>Turn Limit</label>
-                        <input type="number" id="wizard-turn-limit" value="0" min="0" max="999" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Maximum number of turns (0 = unlimited)" />
+                        <input type="number" id="wizard-turn-limit" value="0" min="0" max="999" class="admin-modal-select" style="width:80px;padding:4px 6px;" title="Maximum number of turns (0 = unlimited)" data-i18n-title="tip.wizard_turn_limit" />
                         <span style="font-size:10px;color:#888;margin-left:4px;">(0 = unlimited)</span>
                     </div>
                     <div class="admin-modal-row">
                         <label>Operation Date &amp; Time</label>
-                        <input type="datetime-local" id="wizard-operation-datetime" class="admin-modal-select" style="padding:4px 6px;" title="In-game operation start date and time" />
+                        <input type="datetime-local" id="wizard-operation-datetime" class="admin-modal-select" style="padding:4px 6px;" title="In-game operation start date and time" data-i18n-title="tip.wizard_op_time" />
                     </div>
                     <div style="font-size:10px;color:#666;margin-top:8px;">
                         Grid and units will be copied from the scenario automatically.
@@ -1077,45 +1077,55 @@
     <div id="user-settings-modal" class="admin-modal-overlay" style="display:none;">
         <div class="admin-modal" style="max-width:380px;">
             <div class="admin-modal-header">
-                <span>⚙️ Settings</span>
+                <span data-i18n="settings.title">⚙️ Settings</span>
                 <button class="admin-modal-close" id="settings-modal-close" title="Close">✕</button>
             </div>
             <div class="admin-modal-body">
                 <div class="settings-section">
-                    <div class="settings-section-title">Map</div>
+                    <div class="settings-section-title" data-i18n="settings.section.language">Language</div>
+                    <div class="settings-lang-row">
+                        <span data-i18n="settings.language_label">Interface language</span>
+                        <select id="setting-language" class="settings-lang-select">
+                            <option value="en">English</option>
+                            <option value="ru">Русский</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-title" data-i18n="settings.section.map">Map</div>
                     <label class="settings-toggle">
-                        <span>Show coordinates in topbar</span>
+                        <span data-i18n="settings.show_coords">Show coordinates in topbar</span>
                         <input type="checkbox" id="setting-show-coords" checked />
                         <span class="settings-toggle-slider"></span>
                     </label>
                     <label class="settings-toggle">
-                        <span>Show snail address in topbar</span>
+                        <span data-i18n="settings.show_snail">Show snail address in topbar</span>
                         <input type="checkbox" id="setting-show-snail" checked />
                         <span class="settings-toggle-slider"></span>
                     </label>
                     <label class="settings-toggle">
-                        <span>Show zoom level</span>
+                        <span data-i18n="settings.show_zoom">Show zoom level</span>
                         <input type="checkbox" id="setting-show-zoom" checked />
                         <span class="settings-toggle-slider"></span>
                     </label>
                 </div>
                 <div class="settings-section">
-                    <div class="settings-section-title">Units</div>
+                    <div class="settings-section-title" data-i18n="settings.section.units">Units</div>
                     <label class="settings-toggle">
-                        <span>Show unit tooltips on hover</span>
+                        <span data-i18n="settings.unit_tooltips">Show unit tooltips on hover</span>
                         <input type="checkbox" id="setting-unit-tooltips" checked />
                         <span class="settings-toggle-slider"></span>
                     </label>
                     <label class="settings-toggle">
-                        <span>Show range circles on hover</span>
+                        <span data-i18n="settings.hover_ranges">Show range circles on hover</span>
                         <input type="checkbox" id="setting-hover-ranges" checked />
                         <span class="settings-toggle-slider"></span>
                     </label>
                 </div>
                 <div class="settings-section">
-                    <div class="settings-section-title">Notifications</div>
+                    <div class="settings-section-title" data-i18n="settings.section.notifications">Notifications</div>
                     <label class="settings-toggle">
-                        <span>Sound on new event</span>
+                        <span data-i18n="settings.event_sound">Sound on new event</span>
                         <input type="checkbox" id="setting-event-sound" />
                         <span class="settings-toggle-slider"></span>
                     </label>
@@ -1245,37 +1255,37 @@
     <div id="overlay-ctx-menu" class="ctx-menu" style="display:none;">
         <div class="ctx-menu-header" id="ctx-menu-type-label"></div>
         <div class="ctx-menu-section ctx-section-label">
-            <div class="ctx-label">Label</div>
+            <div class="ctx-label" data-i18n="ctx.label">Label</div>
             <div style="display:flex;gap:4px;">
-                <input type="text" id="ctx-label-input" class="ctx-input" placeholder="Enter text…" />
+                <input type="text" id="ctx-label-input" class="ctx-input" data-i18n-placeholder="ctx.enter_text" placeholder="Enter text…" />
                 <button id="ctx-label-apply" class="ctx-apply-btn">✓</button>
             </div>
         </div>
         <div class="ctx-menu-section ctx-section-colors">
-            <div class="ctx-label">Color</div>
+            <div class="ctx-label" data-i18n="ctx.color">Color</div>
             <div class="ctx-colors">
-                <span class="ctx-color-swatch" data-color="#2196f3" style="background:#2196f3" title="Blue"></span>
-                <span class="ctx-color-swatch" data-color="#f44336" style="background:#f44336" title="Red"></span>
-                <span class="ctx-color-swatch" data-color="#4caf50" style="background:#4caf50" title="Green"></span>
-                <span class="ctx-color-swatch" data-color="#ffeb3b" style="background:#ffeb3b" title="Yellow"></span>
-                <span class="ctx-color-swatch" data-color="#ff9800" style="background:#ff9800" title="Orange"></span>
-                <span class="ctx-color-swatch" data-color="#ffffff" style="background:#ffffff" title="White"></span>
-                <span class="ctx-color-swatch" data-color="#000000" style="background:#000000;border:1px solid #666;" title="Black"></span>
+                <span class="ctx-color-swatch" data-color="#2196f3" style="background:#2196f3" title="Blue" data-i18n-title="color.blue"></span>
+                <span class="ctx-color-swatch" data-color="#f44336" style="background:#f44336" title="Red" data-i18n-title="color.red"></span>
+                <span class="ctx-color-swatch" data-color="#4caf50" style="background:#4caf50" title="Green" data-i18n-title="color.green"></span>
+                <span class="ctx-color-swatch" data-color="#ffeb3b" style="background:#ffeb3b" title="Yellow" data-i18n-title="color.yellow"></span>
+                <span class="ctx-color-swatch" data-color="#ff9800" style="background:#ff9800" title="Orange" data-i18n-title="color.orange"></span>
+                <span class="ctx-color-swatch" data-color="#ffffff" style="background:#ffffff" title="White" data-i18n-title="color.white"></span>
+                <span class="ctx-color-swatch" data-color="#000000" style="background:#000000;border:1px solid #666;" title="Black" data-i18n-title="color.black"></span>
             </div>
         </div>
         <div class="ctx-menu-section ctx-section-widths">
-            <div class="ctx-label">Width</div>
+            <div class="ctx-label" data-i18n="ctx.width">Width</div>
             <div class="ctx-widths">
-                <button class="ctx-width-btn" data-width="1">Thin</button>
-                <button class="ctx-width-btn" data-width="3">Medium</button>
-                <button class="ctx-width-btn" data-width="5">Thick</button>
+                <button class="ctx-width-btn" data-width="1" data-i18n="ctx.thin">Thin</button>
+                <button class="ctx-width-btn" data-width="3" data-i18n="ctx.medium">Medium</button>
+                <button class="ctx-width-btn" data-width="5" data-i18n="ctx.thick">Thick</button>
             </div>
         </div>
         <div class="ctx-menu-section ctx-section-edit" style="display:none;">
-            <button class="ctx-item" data-action="edit"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:4px;"><path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit Shape</button>
+            <button class="ctx-item" data-action="edit"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:4px;"><path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="ctx.edit_shape">Edit Shape</span></button>
         </div>
         <div class="ctx-menu-section">
-            <button class="ctx-item ctx-item-danger" data-action="delete"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:4px;"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Delete</button>
+            <button class="ctx-item ctx-item-danger" data-action="delete"><svg viewBox="0 0 16 16" width="12" height="12" style="vertical-align:-1px;margin-right:4px;"><path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-i18n="ctx.delete">Delete</span></button>
         </div>
     </div>
 
@@ -1283,10 +1293,13 @@
     <div id="rules-modal" class="admin-modal-overlay" style="display:none;">
         <div class="admin-modal rules-modal-dialog">
             <div class="admin-modal-header">
-                <span>📖 Rules &amp; Instructions</span>
+                <span data-i18n="rules.title">📖 Rules &amp; Instructions</span>
                 <button class="admin-modal-close" id="rules-modal-close" title="Close">✕</button>
             </div>
             <div class="admin-modal-body rules-modal-body">
+
+                <!-- ═══ ENGLISH RULES ═══════════════════════════ -->
+                <div id="rules-content-en">
                 <div class="rules-section">
                     <div class="rules-section-title">What is TDG?</div>
                     <p>A <b>Tactical Decision Game</b> is a command/staff exercise where players assume the role of military commanders. You issue orders to your units via text, observe the battlefield through fog-of-war, and react to a developing situation in real time.</p>
@@ -1455,6 +1468,180 @@
                         <tr><td><kbd>Enter</kbd></td><td>Send radio message (in radio tab)</td></tr>
                     </table>
                 </div>
+                </div><!-- /rules-content-en -->
+
+                <!-- ═══ RUSSIAN RULES ═══════════════════════════ -->
+                <div id="rules-content-ru" style="display:none;">
+                <div class="rules-section">
+                    <div class="rules-section-title">Что такое TDG?</div>
+                    <p><b>Tactical Decision Game</b> (тактическая штабная игра) — это командно-штабное учение, в котором игроки берут на себя роль военных командиров. Вы отдаёте приказы подразделениям текстом, наблюдаете за полем боя через «туман войны» и реагируете на развивающуюся обстановку в реальном времени.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Начало работы</div>
+                    <ol>
+                        <li><b>Регистрация / Вход</b> — Введите позывной и пароль. Впервые? Нажмите <b>Register</b>. Возвращаетесь? Нажмите <b>Login</b>.</li>
+                        <li><b>Подключение к сессии</b> — Выберите сессию из списка. Сторону и роль назначает администратор.</li>
+                        <li><b>Начало</b> — Когда все игроки подключились, нажмите <b>Start Session</b> для создания подразделений из сценария.</li>
+                        <li><b>Отдача приказов</b> — Выберите юниты на карте, затем введите приказ во вкладке <b>📡 Orders</b> командной панели внизу карты.</li>
+                        <li><b>Тактическое радио</b> — Переключитесь на вкладку <b>📻 Radio</b> для связи с другими командирами и мониторинга докладов подразделений.</li>
+                        <li><b>Выполнение хода</b> — Нажмите <b>Execute Orders</b> в верхней панели для отправки приказов и продвижения симуляции на один ход.</li>
+                    </ol>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Карта</div>
+                    <ul>
+                        <li><b>Перемещение</b> — Средняя кнопка мыши (левая кнопка зарезервирована для выделения и инструментов).</li>
+                        <li><b>Масштабирование</b> — Колёсико мыши или кнопки +/−.</li>
+                        <li><b>Выбор юнитов</b> — Левый клик по маркеру. Shift+клик или выделение рамкой для множественного выбора.</li>
+                        <li><b>Наложенные юниты</b> — Alt+клик переключает между юнитами в одной точке.</li>
+                        <li><b>Контекстное меню</b> — Правый клик по юниту для действий (движение, построение, разделение, объединение и т.д.).</li>
+                        <li><b>Инструменты рисования</b> — Панель управления в правом верхнем углу: стрелки, линии, прямоугольники, маркеры, эллипсы, измерения.</li>
+                        <li><b>Переключатели карты</b> — Нижний ряд панели управления: видимость сетки, юнитов, наложений, контактов, меток и рельефа.</li>
+                    </ul>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Сетка и адресация «улиткой»</div>
+                    <p>Поле боя разделено на <b>именованную сетку</b>. Каждый квадрат рекурсивно делится на подсетку 3×3, нумерация 1–9 по спирали по часовой стрелке («улитка»):</p>
+                    <div class="rules-snail-diagram">
+                        <div class="snail-grid">
+                            <span>1</span><span>2</span><span>3</span>
+                            <span>8</span><span class="snail-center">9</span><span>4</span>
+                            <span>7</span><span>6</span><span>5</span>
+                        </div>
+                    </div>
+                    <p>Пример: <code>B4-3-7</code> означает квадрат B4 → подквадрат 3 (верхний правый) → подквадрат 7 (нижний левый). Используйте адреса «улитки» в приказах для точного указания местоположения. Текущий адрес под курсором отображается в информационной панели внизу слева.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Командная панель</div>
+                    <p>Нижняя командная панель имеет две вкладки:</p>
+                    <ul>
+                        <li><b>📡 Orders</b> — Выберите одно или несколько подразделений (или нажмите <b>👥 All</b> для выбора всех), затем введите приказ в свободной форме. Нажмите <kbd>Ctrl+Enter</kbd> для отправки. Система разбирает ваш замысел и назначает задачи выбранным подразделениям.</li>
+                        <li><b>📻 Radio</b> — Тактические сообщения другим командирам. Выберите получателя из списка или передайте всем. Три канала:
+                            <ul style="margin-top:4px;">
+                                <li><b>Все</b> — Все сообщения (чат + доклады подразделений + приказы)</li>
+                                <li><b>💬 Чат</b> — Только сообщения между командирами</li>
+                                <li><b>📡 Юниты</b> — Только радиообмен подразделений, доклады и исходящие приказы</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <p style="margin-top:6px;">Кнопка <b>📌 закрепить</b> оставляет панель открытой. Наведите курсор на панель для раскрытия; уведите курсор — панель свернётся автоматически.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Приказы</div>
+                    <p>Выберите подразделения, затем введите приказ на естественном языке. Система понимает ссылки на сетку, координаты, высоты и тактический замысел. Примеры:</p>
+                    <ul>
+                        <li><b>Движение</b> — <code>1-й взвод выдвинуться к B4-3</code> или <code>Двигаться к 48.856, 24.012</code></li>
+                        <li><b>Атака</b> — <code>Атаковать позицию противника в C6</code> или <code>Выдвинуться к F8. Уничтожить противника.</code></li>
+                        <li><b>Оборона</b> — <code>Занять оборону на текущей позиции</code></li>
+                        <li><b>Наблюдение / Готовность</b> — <code>Наблюдать сектор от D2 до E5</code> или <code>Будьте готовы к огневой поддержке по запросу</code></li>
+                        <li><b>Выход из боя</b> — <code>Разорвать контакт</code> или <code>Break contact</code> — подразделение отходит к ближайшему укрытию</li>
+                        <li><b>Огонь по площади</b> — <code>Огонь по B4-3</code> (артиллерия/миномёт, 3 залпа)</li>
+                        <li><b>Запрос огня</b> — <code>Запросить огонь по позиции противника</code> (пехота вызывает артиллерию по цепочке командования)</li>
+                        <li><b>Пополнение</b> — <code>Пополнить боекомплект</code> или <code>Resupply</code> — подразделение движется к ближайшему источнику снабжения</li>
+                        <li><b>Ссылка на высоту</b> — <code>Выдвинуться к высоте 170</code> или <code>Move toward height 170</code></li>
+                    </ul>
+                    <p style="margin-top:4px;">Также можно задать цель движения через <b>правый клик → Move (🐢 Slow / ⚡ Fast)</b> по юниту, затем клик по карте. Подразделения подтверждают приказы по радио с тактической оценкой.</p>
+                    <p style="margin-top:4px;"><b>Режимы скорости</b> влияют на прокладку маршрута: <b>🐢 Slow</b> — маршрут через скрытную местность (лес, город); <b>⚡ Fast</b> — маршрут по дорогам и открытой местности.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Туман войны и обнаружение</div>
+                    <p>Вы видите противника только в пределах <b>прямой видимости</b> (LOS) ваших подразделений. Обнаружение использует трассировку лучей: объекты местности (леса, здания, холмы) блокируют видимость. Обнаруженные контакты отображаются с ограниченной информацией — <b>тип обобщён</b> (например, «пехота» вместо точного типа), <b>численность скрыта</b> (нет индикатора размера на символе), <b>состояние приблизительно</b> (полная / сниженная / ослабленная / критическая боеспособность). Численность персонала отображается как «?» для обнаруженного противника.</p>
+                    <p>Собственные подразделения всегда полностью видимы со всей статистикой. Круги контактов появляются для обнаруженных врагов и исчезают при устаревании контакта.</p>
+                    <p><b>Замаскированные разведчики/снайперы</b> (неподвижные, не стреляющие) крайне трудно обнаружить — противник должен приблизиться на ~120–300м в зависимости от местности и погоды. Лучшая маскировка — в лесу (~120м дальность обнаружения).</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Местность и тактические объекты</div>
+                    <p>Карта содержит <b>данные о местности</b> (12 типов: дорога, открытая, лес, городская, вода, поля, болото, пустыня, кустарник, мост, горы, сад), которые влияют на скорость движения, видимость, защиту и боевую эффективность. <b>Высоты</b> (▲) отмечают вершины с числами высоты — используйте их в приказах.</p>
+                    <p><b>Тактические объекты</b> включают проволочные заграждения, минные поля, окопы, завалы на дорогах, ДОТы, мосты и другое. Некоторые объекты скрыты до обнаружения вашими подразделениями. Минные поля наносят урон и замедляют; проволока замедляет движение; окопы дают защиту.</p>
+                    <p><b>Зональные эффекты</b>: Дым (блокирует обнаружение ×0.1), Туман (снижает видимость ×0.15), Огонь (урон 3%/ход, блокирует движение), Химическое облако (тяжёлый урон 5–6%/ход пехоте). Все эффекты временные и рассеиваются за несколько ходов.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Механика симуляции</div>
+                    <p>Каждый ход продвигает игровое время (по умолчанию: 1 минута на ход). Механизм правил рассчитывает:</p>
+                    <ul>
+                        <li><b>Прокладка маршрута</b> — Подразделения перемещаются по <b>тактическому алгоритму A*</b> по ячейкам местности (~333м разрешение). Маршруты учитывают стоимость местности, уклон, обнаруженные минные поля, зоны обнаружения противника и наличие укрытий. <b>🐢 Slow</b> — максимальная скрытность (лес, город, кустарник); <b>⚡ Fast</b> — приоритет скорости (дороги). Путевые точки пересчитываются каждые 5 ходов.</li>
+                        <li><b>Движение</b> — Подразделения продвигаются по путевым точкам A*; местность, уклон, погода и подавление влияют на скорость. Дождь/грязь и снег дополнительно замедляют. Подразделения останавливаются перед обнаруженными минными полями и реками без мостов.</li>
+                        <li><b>Контакт при выдвижении</b> — Подразделения на <b>марше</b> (не на атаке), обнаружившие противника, <b>автоматически останавливаются</b> и запрашивают приказы по радио: <i>«Контакт впереди — атаковать или обойти?»</i> Через 3 хода без приказов возобновляют движение по собственной инициативе.</li>
+                        <li><b>Обнаружение</b> — Проверки прямой видимости между противостоящими подразделениями. Преимущество высоты улучшает дальность обнаружения. Ночью видимость сильно снижается (юниты с ПНВ меньше страдают). Погода снижает видимость. Цели в маскирующей местности (лес, город) труднее заметить.</li>
+                        <li><b>Маскировка разведки</b> — Неподвижные разведчики, снайперы и наблюдатели входят в <b>режим маскировки</b>, становясь практически необнаружимыми. Максимальная дальность обнаружения падает до 300м, вероятность ограничена 25%. Движение, стрельба или паника раскрывают маскировку.</li>
+                        <li><b>Координация боевых ролей</b> — Когда несколько подразделений атакуют одного противника, они автоматически координируются: <b>подавление</b> (~40% — на дальности оружия, огневое прикрытие ×1.5 подавления), <b>штурм</b> (1–2 сильнейших пехотных — сближаются), <b>фланг</b> (остальные — заход со смещением 60° через укрытую местность). Подразделения объявляют свои роли по радио.</li>
+                        <li><b>Бой</b> — Вступившие в бой подразделения обмениваются огнём. Урон снижает боеспособность; огонь вызывает подавление. Преимущество высоты повышает эффективность (+15%). <b>Опасная близость</b>: артиллерия прекращает огонь, если дружественные подразделения в пределах 50м от цели.</li>
+                        <li><b>Координация артиллерии</b> — Артиллерия автоматически поддерживает атакующих <b>и обороняющихся</b> союзников. Пехота, приближающаяся к зоне обстрела (250м), останавливается и запрашивает прекращение огня — артиллерия завершает последний залп, пехота подтверждает и возобновляет движение. <b>Явные запросы огня</b> отменяют режим ожидания.</li>
+                        <li><b>Огонь по площади</b> — Артиллерия/миномёт могут вести огонь по <b>координатам сетки</b> (не только по конкретным целям). Радиус поражения: 150м, урон убывает с расстоянием. <b>Ограниченные залпы</b>: огневые задачи ограничены 3 залпами.</li>
+                        <li><b>Зональные эффекты</b> — Временные опасные зоны на карте: <b>Дым</b> (блокирует обнаружение), <b>Туман</b> (снижает видимость), <b>Огонь</b> (урон 3%/ход, блокирует движение), <b>Химическое облако</b> (тяжёлый урон 5–6%/ход пехоте). Все эффекты рассеиваются со временем.</li>
+                        <li><b>Выход из боя</b> — Приказ <b>разорвать контакт</b>: подразделение прекращает бой, быстро перемещается к ближайшему укрытию (лес, город, кустарник в радиусе 800м), затем занимает оборону. Отходящие юниты НЕ ведут ответный огонь автоматически.</li>
+                        <li><b>Оборонительная позиция</b> — Подразделения, получившие приказ <b>оборонять</b>, постепенно окапываются (3 хода на уровень, максимум 5 уровней). Более высокие уровни дают большую защиту. Окопы и городская местность добавляют бонусы.</li>
+                        <li><b>Снабжение</b> — Склады снабжения пополняют ближайшие юниты (+10% б/к за ход). Логистические подразделения — мобильные пункты снабжения (+8% б/к за ход). Полевые госпитали восстанавливают боеспособность (+1%/ход). Приказ <code>Пополнить боекомплект</code> — автоматическое движение к ближайшему источнику снабжения.</li>
+                        <li><b>Отдых и восстановление</b> — Подразделения вне боя медленно восстанавливают боеспособность (+0.3%/ход, +0.8%/ход после 5 ходов отдыха) и мораль. Это реорганизация, а не пополнение личным составом.</li>
+                        <li><b>Дымовые завесы</b> — Артиллерия и миномёты могут ставить дымовые завесы (правый клик → 🌫 Fire Smoke). Дым резко снижает видимость в районе на ~3 минуты.</li>
+                        <li><b>Мораль</b> — Потери и подавление подрывают мораль. Близкие союзники обеспечивают взаимную поддержку. Подразделения с моралью ниже 15% ломаются и отступают. Уничтожение врагов повышает мораль ближайших подразделений. Длительные марши (>10 ходов) вызывают усталость.</li>
+                        <li><b>Связь</b> — Сильное подавление может нарушить связь, задерживая доставку приказов. Подразделения без связи продолжают последнюю задачу.</li>
+                        <li><b>Боеприпасы</b> — Стрельба расходует боеприпасы. Подразделения без боеприпасов не могут вести огонь.</li>
+                        <li><b>Ответный огонь</b> — Подразделения под атакой без приказов автоматически открывают ответный огонь по ближайшему противнику (кроме отходящих).</li>
+                        <li><b>Доклады о потерях</b> — После уничтожения вражеского подразделения все участвовавшие юниты автоматически докладывают обстановку и потери по радио.</li>
+                        <li><b>Оценка победы</b> — ИИ оценивает условия победы каждые 5 ходов. Игра также заканчивается при достижении лимита ходов.</li>
+                    </ul>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Погода и окружающая среда</div>
+                    <p>Условия сценария влияют на игровой процесс:</p>
+                    <ul>
+                        <li><b>Погода</b> — Ясно, Дождь (−30% видимость, −20% движение), Сильный дождь/шторм (−60% видимость, −40% движение), Туман (−70% видимость), Снег (−40% видимость, −30% движение).</li>
+                        <li><b>Ночь</b> — С 21:00 до 05:00 видимость снижается до 30%. Рассвет/сумерки (05:00–07:00, 19:00–21:00) — до 60%. Подразделения с ПНВ страдают вдвое меньше.</li>
+                        <li><b>Осадки</b> — Дополнительный дождь или снег суммируется с погодными эффектами, ещё больше снижая видимость и движение.</li>
+                    </ul>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Специальные команды</div>
+                    <ul>
+                        <li><b>Выход из боя / Разорвать контакт</b> — Приказ на отход к ближайшей укрытой местности (лес, город, кустарник в радиусе 800м). Подразделение движется на высокой скорости, не ведёт ответный огонь, при прибытии переходит к обороне.</li>
+                        <li><b>Готовность / Наблюдение</b> — <code>Будьте готовы к огневой поддержке по запросу</code> переводит артиллерию в режим ожидания (НЕ открывает огонь немедленно). Подразделение ожидает явных команд на открытие огня.</li>
+                        <li><b>Запрос огня</b> — Пехота может запросить артиллерийскую поддержку: <code>Запросить огонь по позиции противника</code>. Артиллерия в режиме ожидания реагирует на явные запросы огня.</li>
+                        <li><b>Пополнение</b> — <code>Пополнить боекомплект</code> или <code>Resupply</code> — автоматическое движение к ближайшему складу или логистическому подразделению, пополнение до 95% боекомплекта.</li>
+                        <li><b>Ссылка на высоту</b> — <code>Выдвинуться к высоте 170</code> или <code>Move toward height 170</code> — определяет ближайшую вершину с указанной высотой.</li>
+                        <li><b>Расформирование</b> — Правый клик → ⛔ Disband Unit. Окончательно удаляет подразделение из игры (при невосполнимых потерях).</li>
+                        <li><b>Отмена приказов</b> — Нажмите ⊘ в командной панели для отмены всех приказов выбранных подразделений (или всех, если ничего не выбрано).</li>
+                        <li><b>Поэтапные приказы</b> — Условные приказы: <i>«После захвата C6-6-8 выдвинуться к D4»</i>. Последующие этапы хранятся в очереди приказов и активируются при выполнении условий.</li>
+                        <li><b>Дымовая завеса</b> — Правый клик по артиллерии/миномёту → 🌫 Fire Smoke → клик на карте для постановки дымовой завесы.</li>
+                        <li><b>Огонь по площади</b> — Приказ артиллерии/миномёту вести огонь по координатам сетки (например, <code>Огонь по B4-3</code>). Поражает всех врагов в радиусе 150м. Ограничен 3 залпами.</li>
+                    </ul>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Цепочка командования</div>
+                    <p>Подразделения организованы в иерархию, видимую во вкладке <b>Боевой порядок</b> боковой панели. Командиры имеют полномочия над подчинёнными. Если ни одному подразделению не назначен командир, все игроки стороны могут командовать любым подразделением. Вы можете <b>перетаскивать</b> подразделения в дереве боевого порядка для реорганизации иерархии.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Описание сценария и победа</div>
+                    <p>Нажмите <b>📋 название сессии</b> в верхней панели для просмотра описания сценария: обстановка, задача, условия (погода, видимость, ветер, освещение) и время начала операции.</p>
+                    <p>Игра проверяет <b>условия победы</b> каждые 5 ходов с помощью ИИ-оценки относительно целей сценария. Игра также заканчивается при достижении <b>лимита ходов</b> (если установлен). Временны́е метки радио и игровые часы показывают внутриигровое время сценария.</p>
+                </div>
+
+                <div class="rules-section">
+                    <div class="rules-section-title">Горячие клавиши</div>
+                    <table class="rules-keys-table">
+                        <tr><td><kbd>Esc</kbd></td><td>Отменить текущее рисование / снять выделение юнитов</td></tr>
+                        <tr><td><kbd>Правый клик</kbd></td><td>Завершить рисование / открыть контекстное меню юнита</td></tr>
+                        <tr><td><kbd>Shift+Клик</kbd></td><td>Добавить/убрать юнит из выделения</td></tr>
+                        <tr><td><kbd>Alt+Клик</kbd></td><td>Переключение между наложенными юнитами</td></tr>
+                        <tr><td><kbd>Перетаскивание</kbd></td><td>Выделение рамкой нескольких юнитов</td></tr>
+                        <tr><td><kbd>Ctrl+Enter</kbd></td><td>Отправить приказ (в командной панели)</td></tr>
+                        <tr><td><kbd>Enter</kbd></td><td>Отправить радиосообщение (во вкладке радио)</td></tr>
+                    </table>
+                </div>
+                </div><!-- /rules-content-ru -->
+
             </div>
             <div class="admin-modal-footer">
                 <button id="rules-modal-ok" class="admin-btn" style="flex:1;">OK</button>
@@ -1466,6 +1653,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/milsymbol@2.2.0/dist/milsymbol.js"></script>
 
+    <script src="/js/i18n.js"></script>
     <script src="/js/dialogs.js"></script>
     <script src="/js/map.js"></script>
     <script src="/js/grid.js"></script>

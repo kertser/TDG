@@ -175,112 +175,154 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
 
 /* ── Rules Modal ─────────────────────────────── */
 .rules-modal-dialog {
-    max-width: 580px !important;
-    min-width: 380px;
+    max-width: 620px !important;
+    min-width: 400px;
 }
 .rules-modal-body {
-    max-height: 70vh;
+    max-height: 72vh;
     overflow-y: auto;
-    padding: 16px 20px !important;
+    padding: 20px 24px !important;
 }
 .rules-section {
-    margin-bottom: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.25);
 }
 .rules-section:last-child {
     margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
 }
 .rules-section-title {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 1px;
     color: #4fc3f7;
-    margin-bottom: 6px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid rgba(79, 195, 247, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.rules-section-title::before {
+    content: '▸';
+    color: #90caf9;
+    font-size: 11px;
 }
 .rules-section p {
-    font-size: 12px;
-    line-height: 1.65;
-    color: #ccc;
-    margin-bottom: 6px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #c0c0c0;
+    margin-bottom: 8px;
+    text-align: justify;
 }
 .rules-section ol,
 .rules-section ul {
-    font-size: 12px;
-    line-height: 1.65;
-    color: #ccc;
-    padding-left: 20px;
-    margin: 4px 0;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #c0c0c0;
+    padding-left: 22px;
+    margin: 6px 0;
 }
 .rules-section li {
-    margin-bottom: 3px;
+    margin-bottom: 5px;
+    padding-left: 4px;
+}
+.rules-section li::marker {
+    color: #4fc3f7;
 }
 .rules-section b {
-    color: #e0e0e0;
+    color: #e8e8e8;
+    font-weight: 600;
 }
 .rules-section code {
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 11px;
     background: rgba(15, 52, 96, 0.5);
-    border: 1px solid rgba(15, 52, 96, 0.7);
+    border: 1px solid rgba(79, 195, 247, 0.25);
     border-radius: 3px;
-    padding: 1px 5px;
+    padding: 2px 6px;
     color: #81c784;
+    white-space: nowrap;
+}
+.rules-section i {
+    color: #90caf9;
+    font-style: italic;
 }
 .rules-snail-diagram {
     display: flex;
     justify-content: center;
-    margin: 8px 0;
+    margin: 12px 0;
 }
 .snail-grid {
     display: grid;
-    grid-template-columns: repeat(3, 32px);
-    grid-template-rows: repeat(3, 28px);
-    gap: 1px;
-    background: rgba(15, 52, 96, 0.5);
-    border: 1px solid rgba(79, 195, 247, 0.3);
-    border-radius: 4px;
+    grid-template-columns: repeat(3, 36px);
+    grid-template-rows: repeat(3, 32px);
+    gap: 2px;
+    background: rgba(15, 52, 96, 0.4);
+    border: 2px solid rgba(79, 195, 247, 0.35);
+    border-radius: 6px;
     overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 .snail-grid span {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(13, 22, 40, 0.9);
+    background: rgba(13, 22, 40, 0.95);
     font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #90caf9;
+    transition: all 0.15s ease;
+}
+.snail-grid span:hover {
+    background: rgba(79, 195, 247, 0.15);
+    color: #fff;
 }
 .snail-grid .snail-center {
     color: #ff9800;
-    background: rgba(255, 152, 0, 0.08);
+    background: rgba(255, 152, 0, 0.12);
+}
+.snail-grid .snail-center:hover {
+    background: rgba(255, 152, 0, 0.25);
 }
 .rules-keys-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
-    margin-top: 4px;
+    margin-top: 8px;
+    background: rgba(15, 52, 96, 0.1);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.rules-keys-table tr:nth-child(even) {
+    background: rgba(15, 52, 96, 0.15);
 }
 .rules-keys-table td {
-    padding: 4px 8px;
-    border-bottom: 1px solid rgba(15, 52, 96, 0.3);
-    color: #ccc;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.2);
+    color: #c0c0c0;
+}
+.rules-keys-table tr:last-child td {
+    border-bottom: none;
 }
 .rules-keys-table td:first-child {
-    width: 120px;
+    width: 130px;
     white-space: nowrap;
 }
 .rules-keys-table kbd {
     display: inline-block;
-    padding: 1px 6px;
+    padding: 2px 8px;
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 11px;
-    background: rgba(15, 52, 96, 0.6);
-    border: 1px solid rgba(79, 195, 247, 0.3);
-    border-radius: 3px;
+    background: linear-gradient(180deg, rgba(30, 60, 100, 0.6) 0%, rgba(20, 40, 70, 0.8) 100%);
+    border: 1px solid rgba(79, 195, 247, 0.35);
+    border-radius: 4px;
     color: #e0e0e0;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 /* ── Session info (clickable for scenario description) ── */
@@ -383,40 +425,188 @@ html, body { height: 100%; font-family: 'Segoe UI', Tahoma, sans-serif; backgrou
     margin: 0;
 }
 
-/* ── Settings Toggle ──────────────────────── */
+/* ── Settings Modal ───────────────────────────── */
+.settings-modal-dialog {
+    max-width: 400px !important;
+    min-width: 340px;
+}
+.settings-modal-body {
+    padding: 16px 20px !important;
+}
 .settings-section {
-    margin-bottom: 14px;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(15, 52, 96, 0.25);
+}
+.settings-section:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
 }
 .settings-section-title {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #90caf9;
-    margin-bottom: 8px;
-    padding-bottom: 4px;
-    border-bottom: 1px solid rgba(15, 52, 96, 0.4);
+    letter-spacing: 1px;
+    color: #4fc3f7;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.settings-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 12px;
+    background: linear-gradient(180deg, #4fc3f7, #0d47a1);
+    border-radius: 2px;
+}
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    margin: 2px 0;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    background: rgba(15, 52, 96, 0.08);
+}
+.settings-row:hover {
+    background: rgba(15, 52, 96, 0.2);
+}
+.settings-label {
+    font-size: 12px;
+    color: #ccc;
+    flex: 1;
+    padding-right: 12px;
+}
+.settings-row:hover .settings-label {
+    color: #fff;
 }
 .settings-toggle {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 4px;
+    padding: 8px 10px;
+    margin: 2px 0;
     cursor: pointer;
-    font-size: 12px;
-    color: #ccc;
-    transition: color 0.12s;
-    border-radius: 3px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    background: rgba(15, 52, 96, 0.08);
+    gap: 12px;
 }
 .settings-toggle:hover {
-    color: #fff;
     background: rgba(15, 52, 96, 0.2);
 }
+.settings-toggle > span:first-child {
+    font-size: 12px;
+    color: #ccc;
+    flex: 1;
+}
+.settings-toggle:hover > span:first-child {
+    color: #fff;
+}
 .settings-toggle input[type="checkbox"] {
-    accent-color: #4fc3f7;
-    width: 16px;
-    height: 16px;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 38px;
+    height: 20px;
+    background: rgba(30, 50, 80, 0.6);
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    border-radius: 10px;
+    position: relative;
     cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.settings-toggle input[type="checkbox"]::before {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    top: 2px;
+    left: 3px;
+    background: #666;
+    transition: all 0.2s ease;
+}
+.settings-toggle input[type="checkbox"]:checked {
+    background: rgba(46, 125, 50, 0.5);
+    border-color: #4caf50;
+}
+.settings-toggle input[type="checkbox"]:checked::before {
+    left: 19px;
+    background: #81c784;
+    box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+}
+.settings-toggle input[type="checkbox"]:hover {
+    border-color: #4fc3f7;
+}
+.settings-toggle-slider {
+    display: none; /* Using custom checkbox styling instead */
+}
+/* ── Language selector row in settings ──────── */
+.settings-lang-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    margin: 2px 0;
+    border-radius: 4px;
+    background: rgba(15, 52, 96, 0.08);
+    gap: 12px;
+}
+.settings-lang-row > span {
+    font-size: 12px;
+    color: #ccc;
+    flex: 1;
+}
+.settings-lang-row:hover {
+    background: rgba(15, 52, 96, 0.2);
+}
+.settings-lang-row:hover > span {
+    color: #fff;
+}
+.settings-lang-select {
+    padding: 6px 10px;
+    font-size: 12px;
+    background: rgba(20, 35, 60, 0.8);
+    color: #e0e0e0;
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    border-radius: 4px;
+    cursor: pointer;
+    min-width: 110px;
+    transition: all 0.15s ease;
+}
+.settings-lang-select:hover {
+    border-color: #4fc3f7;
+    background: rgba(25, 45, 75, 0.9);
+}
+.settings-lang-select:focus {
+    outline: none;
+    border-color: #4fc3f7;
+    box-shadow: 0 0 8px rgba(79, 195, 247, 0.3);
+}
+.settings-lang-select option {
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+/* ── Settings modal buttons ──────────────────── */
+.settings-btn-save {
+    flex: 1;
+    background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 100%) !important;
+    color: #a5d6a7 !important;
+    border: 1px solid rgba(76, 175, 80, 0.4) !important;
+}
+.settings-btn-save:hover {
+    background: linear-gradient(135deg, #2e7d32 0%, #388e3c 100%) !important;
+    border-color: #4caf50 !important;
+    color: #fff !important;
+}
+.settings-btn-close {
+    flex: 1;
 }
 
 /* ── Topbar standalone icon buttons ──────────── */
