@@ -32,6 +32,9 @@ const KUnits = (() => {
     let _lastZoomBucket = null;    // track zoom bucket for marker size changes
     let _adminDragEnabled = false; // admin drag-and-drop mode
 
+    // ── Tool-mode hover fade (individual marker transparency) ──
+    let _toolFadedEl = null;       // DOM element currently faded during picking/LOS tool
+
     // ── Viewshed (LOS polygon) cache ────────────────
     let _viewshedCache = {};       // unit_id → GeoJSON Feature
     let _viewshedPending = {};     // unit_id → true (fetch in-flight)
@@ -181,6 +184,63 @@ const KUnits = (() => {
                 if (allUnitsData.length > 0) {
                     render(allUnitsData);
                 }
+            }
+        });
+
+        // ── Tool-mode hover fade: fade individual unit markers when cursor is over them ──
+        _initToolHoverFade();
+    }
+
+    /**
+     * When coordinate-picking or LOS-checking is active, detect if the cursor
+     * is directly over a unit marker (by pixel proximity) and fade just that
+     * marker to 25% opacity so the user sees the map underneath. Markers that
+     * are NOT under the cursor stay fully opaque.
+     */
+    function _initToolHoverFade() {
+        const container = _map ? _map.getContainer() : null;
+        if (!container) return;
+
+        container.addEventListener('mousemove', (e) => {
+            const isPicking = document.body.classList.contains('map-picking');
+            const isLOS = document.body.classList.contains('map-los-checking');
+            if (!isPicking && !isLOS) {
+                // Tool not active — clear any lingering fade
+                if (_toolFadedEl) {
+                    _toolFadedEl.style.opacity = '';
+                    _toolFadedEl = null;
+                }
+                return;
+            }
+
+            const rect = container.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const threshold = 30; // pixels
+
+            let closestEl = null;
+            let closestDist = Infinity;
+
+            for (const u of allUnitsData) {
+                if (!u || u.lat == null || u.lon == null || u.is_destroyed) continue;
+                const marker = unitMarkers[u.id];
+                if (!marker) continue;
+                const pt = _map.latLngToContainerPoint([u.lat, u.lon]);
+                const dx = mx - pt.x;
+                const dy = my - pt.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < threshold && dist < closestDist) {
+                    closestDist = dist;
+                    closestEl = marker.getElement ? marker.getElement() : null;
+                }
+            }
+
+            if (closestEl !== _toolFadedEl) {
+                // Restore previously faded marker
+                if (_toolFadedEl) _toolFadedEl.style.opacity = '';
+                // Fade the new one
+                if (closestEl) closestEl.style.opacity = '0.25';
+                _toolFadedEl = closestEl;
             }
         });
     }
@@ -626,6 +686,13 @@ const KUnits = (() => {
 
             // LEFT-CLICK: select/deselect — with Alt+click stack cycling for overlapping units
             marker.on('click', (e) => {
+                // ── If coordinate-picking or LOS-checking is active, let the click
+                //    propagate to the map so the tool receives it instead of selecting the unit.
+                if (document.body.classList.contains('map-picking')
+                    || (typeof KMap !== 'undefined' && KMap.isLOSChecking && KMap.isLOSChecking())) {
+                    // Do NOT stop propagation — let the map click handler receive this
+                    return;
+                }
                 L.DomEvent.stopPropagation(e);
                 _closeUnitContextMenu();
                 const shiftKey = e.originalEvent && e.originalEvent.shiftKey;

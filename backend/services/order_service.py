@@ -296,10 +296,25 @@ class OrderService:
 
         result.matched_unit_ids = [u["id"] for u in matched_units]
 
-        # If still no units, mark failed
+        # If still no units, mark failed and generate clarification response
         if not matched_units:
             order.status = OrderStatus.failed
             order.parsed_intent = {"error": "no_target_units_matched"}
+            # Generate a clarification response so the user gets feedback
+            same_side = [
+                u for u in units_context
+                if u.get("side") == issuer_side
+                and not u.get("is_destroyed")
+                and u.get("comms_status") != "offline"
+            ]
+            if same_side:
+                resp = response_generator.generate_response(
+                    parsed=parsed,
+                    unit=same_side[0],
+                    response_type=ResponseType.clarify,
+                )
+                if resp:
+                    result.responses.append(resp)
             return
 
         # Update order.target_unit_ids from matched units (override if LLM found them)

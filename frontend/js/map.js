@@ -443,6 +443,7 @@ const KMap = (() => {
             map.off('click', _losResultDismissHandler);
             _losResultDismissHandler = null;
         }
+        document.body.classList.add('map-los-checking');
         map.getContainer().style.cursor = 'crosshair';
         map.on('click', _onLOSClick);
         map.on('mousemove', _onLOSMouseMove);
@@ -452,6 +453,7 @@ const KMap = (() => {
 
     function stopLOSCheck() {
         _losChecking = false;
+        document.body.classList.remove('map-los-checking');
         map.getContainer().style.cursor = '';
         map.off('click', _onLOSClick);
         map.off('mousemove', _onLOSMouseMove);

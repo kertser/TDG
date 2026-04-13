@@ -3823,7 +3823,37 @@ button:hover { background: #1a5276; }
     50% { box-shadow: 0 0 12px rgba(79, 195, 247, 0.5); }
 }
 /* Map crosshair cursor during coordinate picking */
-.map-picking, .map-picking .leaflet-container {
+/* Force crosshair cursor on EVERYTHING when picking/LOS mode is active */
+.map-picking, .map-picking *,
+.map-los-checking, .map-los-checking * {
+    cursor: crosshair !important;
+}
+
+/* When coordinate-picking or LOS-checking is active, make all interactive
+   Leaflet layers AND their children transparent to mouse events so clicks
+   fall through to the map tile layer. Individual elements are faded via JS
+   only when the cursor is directly over them (see units.js, map_objects.js). */
+.map-picking .leaflet-marker-pane,
+.map-picking .leaflet-marker-pane *,
+.map-picking .leaflet-overlay-pane,
+.map-picking .leaflet-overlay-pane *,
+.map-picking .leaflet-shadow-pane,
+.map-picking .leaflet-shadow-pane *,
+.map-picking .leaflet-popup-pane,
+.map-picking .leaflet-popup-pane *,
+.map-picking .leaflet-tooltip-pane,
+.map-picking .leaflet-tooltip-pane *,
+.map-los-checking .leaflet-marker-pane,
+.map-los-checking .leaflet-marker-pane *,
+.map-los-checking .leaflet-overlay-pane,
+.map-los-checking .leaflet-overlay-pane *,
+.map-los-checking .leaflet-shadow-pane,
+.map-los-checking .leaflet-shadow-pane *,
+.map-los-checking .leaflet-popup-pane,
+.map-los-checking .leaflet-popup-pane *,
+.map-los-checking .leaflet-tooltip-pane,
+.map-los-checking .leaflet-tooltip-pane * {
+    pointer-events: none !important;
     cursor: crosshair !important;
 }
 

@@ -353,14 +353,28 @@ def process_combat(
             weapon_range = max(weapon_range, caps["mortar_range_m"])
 
         if dist > weapon_range:
-            # Out of range — set target location so movement engine advances unit
+            # Out of range — set/update target location so movement engine advances unit
+            # ALWAYS update to the enemy's CURRENT position (even if target_location
+            # was set before) — if the enemy moved, we must track the new position.
             if _debug:
                 dlog(f"    [combat] {attacker.name}: target {target.name} OUT OF RANGE dist={dist:.0f}m > range={weapon_range}m")
-            if not task.get("target_location"):
-                task = dict(task)  # new dict for SQLAlchemy JSONB change detection
+            task = dict(task)  # new dict for SQLAlchemy JSONB change detection
+            task["target_location"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+            attacker.current_task = task
+            continue  # Will move toward target via movement engine
+
+        # ── In range: keep target_location updated to enemy's current position ──
+        # This ensures that if the target moves out of range on a future tick,
+        # the attacker will pursue the correct (updated) position.
+        old_loc = task.get("target_location")
+        if old_loc:
+            old_lat = old_loc.get("lat", 0)
+            old_lon = old_loc.get("lon", 0)
+            # Update if the target has moved significantly (>50m) from the stored location
+            if _distance_m(old_lat, old_lon, tgt_pos[0], tgt_pos[1]) > 50:
+                task = dict(task)
                 task["target_location"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
                 attacker.current_task = task
-            continue  # Will move toward target via movement engine
 
         # ── Danger-close check: artillery/mortar ceases fire if friendly nearby ──
         if attacker.unit_type in ARTILLERY_TYPES:

@@ -23,6 +23,9 @@ const KMapObjects = (() => {
     let _sessionId = null;
     let _objectLayers = {};
 
+    // ── Tool-mode hover fade (individual object transparency) ──
+    let _toolFadedObjId = null;    // object ID currently faded during picking/LOS tool
+
     const METERS_PER_DEG = 111320;
 
     // ═══════════════════════════════════════════════════════════
@@ -211,6 +214,136 @@ const KMapObjects = (() => {
     function init(map) {
         _map = map;
         _layerGroup = L.layerGroup().addTo(map);
+        _initToolHoverFade();
+    }
+
+    /**
+     * When coordinate-picking or LOS-checking is active, detect if the cursor
+     * is over a map object (by checking bounds/proximity) and fade that object's
+     * layer so the user sees the map underneath.
+     */
+    function _initToolHoverFade() {
+        if (!_map) return;
+        const container = _map.getContainer();
+        if (!container) return;
+
+        container.addEventListener('mousemove', (e) => {
+            const isPicking = document.body.classList.contains('map-picking');
+            const isLOS = document.body.classList.contains('map-los-checking');
+            if (!isPicking && !isLOS) {
+                _clearObjToolFade();
+                return;
+            }
+
+            const rect = container.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            const threshold = 35; // pixels
+
+            let hitObjId = null;
+
+            for (const obj of _objects) {
+                if (!obj || !obj.geometry) continue;
+                const layer = _objectLayers[obj.id];
+                if (!layer) continue;
+
+                const geom = obj.geometry;
+                if (geom.type === 'Point') {
+                    // Point object: check pixel distance to the point
+                    const [lon, lat] = geom.coordinates;
+                    const pt = _map.latLngToContainerPoint([lat, lon]);
+                    const dx = mx - pt.x;
+                    const dy = my - pt.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < threshold) {
+                        hitObjId = obj.id;
+                        break;
+                    }
+                } else if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+                    // Polygon: check if cursor is inside the bounds (padded)
+                    try {
+                        const b = (layer.getBounds ? layer : layer.getLayers()[0]).getBounds();
+                        if (b) {
+                            const nw = _map.latLngToContainerPoint(b.getNorthWest());
+                            const se = _map.latLngToContainerPoint(b.getSouthEast());
+                            const pad = 8;
+                            if (mx >= nw.x - pad && mx <= se.x + pad &&
+                                my >= nw.y - pad && my <= se.y + pad) {
+                                hitObjId = obj.id;
+                                break;
+                            }
+                        }
+                    } catch (_) { /* ignore */ }
+                } else if (geom.type === 'LineString') {
+                    // Line: check pixel distance to each vertex
+                    for (const coord of geom.coordinates) {
+                        const pt = _map.latLngToContainerPoint([coord[1], coord[0]]);
+                        const dx = mx - pt.x;
+                        const dy = my - pt.y;
+                        if (Math.sqrt(dx * dx + dy * dy) < threshold) {
+                            hitObjId = obj.id;
+                            break;
+                        }
+                    }
+                    if (hitObjId) break;
+                    // Also check distance to line segments between vertices
+                    const coords = geom.coordinates;
+                    for (let i = 0; i < coords.length - 1; i++) {
+                        const a = _map.latLngToContainerPoint([coords[i][1], coords[i][0]]);
+                        const b2 = _map.latLngToContainerPoint([coords[i+1][1], coords[i+1][0]]);
+                        const dist = _pointToSegmentDist(mx, my, a.x, a.y, b2.x, b2.y);
+                        if (dist < threshold) {
+                            hitObjId = obj.id;
+                            break;
+                        }
+                    }
+                    if (hitObjId) break;
+                }
+            }
+
+            if (hitObjId !== _toolFadedObjId) {
+                _clearObjToolFade();
+                if (hitObjId) _fadeObjLayer(hitObjId);
+                _toolFadedObjId = hitObjId;
+            }
+        });
+    }
+
+    /** Pixel distance from point (px,py) to line segment (ax,ay)-(bx,by). */
+    function _pointToSegmentDist(px, py, ax, ay, bx, by) {
+        const dx = bx - ax, dy = by - ay;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.sqrt((px - ax) ** 2 + (py - ay) ** 2);
+        let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const cx = ax + t * dx, cy = ay + t * dy;
+        return Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+    }
+
+    /** Set opacity on all sub-layers of a map object. */
+    function _fadeObjLayer(objId) {
+        const layer = _objectLayers[objId];
+        if (!layer) return;
+        const fade = (l) => {
+            if (l.setStyle) l.setStyle({ opacity: 0.25, fillOpacity: 0.08 });
+            if (l.getElement) { const el = l.getElement(); if (el) el.style.opacity = '0.25'; }
+            if (l.eachLayer) l.eachLayer(fade);
+        };
+        fade(layer);
+    }
+
+    /** Restore opacity on the previously faded object. */
+    function _clearObjToolFade() {
+        if (!_toolFadedObjId) return;
+        const layer = _objectLayers[_toolFadedObjId];
+        _toolFadedObjId = null;
+        if (!layer) return;
+        // Restore original opacity on all sub-layers
+        const restore = (l) => {
+            if (l.setStyle) l.setStyle({ opacity: 1, fillOpacity: 0.15 });
+            if (l.getElement) { const el = l.getElement(); if (el) el.style.opacity = ''; }
+            if (l.eachLayer) l.eachLayer(restore);
+        };
+        restore(layer);
     }
 
     function setSession(sid) { _sessionId = sid; }
@@ -1342,6 +1475,17 @@ const KMapObjects = (() => {
             tooltipHtml += `<br><span style="font-size:10px;">Blue ${bIcon} · Red ${rIcon}</span>`;
         }
         layer.bindTooltip(tooltipHtml, { sticky: true, className: 'map-obj-tooltip' });
+
+        // When coordinate-picking or LOS-checking is active, let clicks pass through
+        // to the map instead of being consumed by the object.
+        layer.on('click', (e) => {
+            if (document.body.classList.contains('map-picking')
+                || (typeof KMap !== 'undefined' && KMap.isLOSChecking && KMap.isLOSChecking())) {
+                // Don't stop propagation — let the map receive the click
+                return;
+            }
+        });
+
         layer.on('contextmenu', (e) => {
             L.DomEvent.stopPropagation(e);
             // Only show admin actions when admin panel is open

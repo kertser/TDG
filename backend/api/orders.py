@@ -111,14 +111,24 @@ async def _run_order_pipeline(
                         issuer_name = usr_row
 
                 target_names = []
-                if order.target_unit_ids:
-                    for uid in order.target_unit_ids:
-                        u_result = await db.execute(
-                            select(Unit.name).where(Unit.id == uid)
-                        )
-                        u_name = u_result.scalar_one_or_none()
-                        if u_name:
-                            target_names.append(u_name)
+                # Prefer matched_unit_ids from pipeline (most accurate),
+                # then fall back to order.target_unit_ids
+                _resolved_ids = []
+                if parse_result.matched_unit_ids:
+                    _resolved_ids = [
+                        uid if isinstance(uid, uuid.UUID) else uuid.UUID(uid)
+                        for uid in parse_result.matched_unit_ids
+                    ]
+                elif order.target_unit_ids:
+                    _resolved_ids = list(order.target_unit_ids)
+
+                for uid in _resolved_ids:
+                    u_result = await db.execute(
+                        select(Unit.name).where(Unit.id == uid)
+                    )
+                    u_name = u_result.scalar_one_or_none()
+                    if u_name:
+                        target_names.append(u_name)
 
                 to_str = ", ".join(target_names) if target_names else "all units"
                 order_text = order.original_text or order.order_type or "—"

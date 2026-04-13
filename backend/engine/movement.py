@@ -527,6 +527,12 @@ def process_movement(
         if task_type == "fire" and unit.unit_type in INDIRECT_FIRE_UNIT_TYPES:
             continue
 
+        # Auto-return-fire units should NOT advance toward the attacker.
+        # They fire from their current position. This prevents the defending
+        # side from inadvertently charging toward the attackers.
+        if task.get("auto_return_fire"):
+            continue
+
         # ── Awaiting cease-fire: halt until artillery clears ──
         if task.get("awaiting_ceasefire"):
             continue
