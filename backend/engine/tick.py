@@ -642,7 +642,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         task = u.current_task
         if task and task.get("type") in ("attack", "engage", "fire"):
             continue  # already fighting
-        if task and task.get("type") == "disengage":
+        if task and task.get("type") in ("disengage", "withdraw"):
             continue  # actively disengaging — do NOT return fire
         if task and task.get("disengaging"):
             # Post-disengage defend — honour retreat order, but expire after cooldown
@@ -1058,7 +1058,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 # How often to recalculate paths (in ticks). Immediate recalc on new contacts.
 _PATH_RECALC_INTERVAL = 5
 
-WAYPOINT_MOVE_TASK_TYPES = {"move", "attack", "advance", "disengage", "resupply"}
+WAYPOINT_MOVE_TASK_TYPES = {"move", "attack", "advance", "disengage", "withdraw", "resupply"}
 
 # ── Session-level centroid + static graph cache ──
 # Cell centroids (snail_path → (lat,lon)) and the neighbor map are expensive
@@ -1429,8 +1429,8 @@ async def _process_orders(
                 "text_summary": f"{unit.name} halts",
                 "payload": {"order_id": str(order.id), "task": task},
             })
-        elif task_type == "disengage":
-            # Disengage: stop all combat, seek nearest covered position
+        elif task_type in ("disengage", "withdraw"):
+            # Disengage/Withdraw: stop all combat, seek nearest covered position
             # Set fast speed for withdrawal
             speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
             unit.move_speed_mps = speeds.get("fast", speeds.get("slow", 3.0))
@@ -1549,6 +1549,9 @@ def _order_to_task(order: Order) -> dict | None:
         if "halt" in text or "stop" in text:
             return {"type": "halt", "order_id": str(order.id)}
         if any(kw in text for kw in ["disengage", "break contact", "разорвать контакт", "выйти из боя"]):
+            return {"type": "disengage", "order_id": str(order.id)}
+        if any(kw in text for kw in ["withdraw", "retreat", "pull back", "fall back",
+                                      "отход", "отступ", "отойти", "назад", "уходим"]):
             return {"type": "disengage", "order_id": str(order.id)}
 
         # ── Standby / ready-for-support detection ──

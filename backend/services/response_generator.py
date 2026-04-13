@@ -139,8 +139,8 @@ class ResponseGenerator:
             # Request fire support (non-artillery unit directing CoC fire)
             if order_type == "request_fire":
                 return ResponseType.wilco_request_fire, None
-            # Disengage order → use disengage-specific response
-            if order_type == "disengage":
+            # Disengage/Withdraw order → use disengage-specific response
+            if order_type in ("disengage", "withdraw"):
                 return ResponseType.wilco_disengage, None
             # Resupply order → use resupply-specific response
             if order_type == "resupply":

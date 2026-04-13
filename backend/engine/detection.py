@@ -72,7 +72,7 @@ def _is_concealed(target) -> bool:
     if task:
         task_type = task.get("type", "")
         # Moving, attacking, or disengaging breaks concealment
-        if task_type in ("move", "advance", "attack", "engage", "fire", "disengage"):
+        if task_type in ("move", "advance", "attack", "engage", "fire", "disengage", "withdraw"):
             return False
 
     # Broken morale = can't maintain concealment
@@ -102,7 +102,7 @@ def _posture_modifier(target_task: dict | None) -> float:
     task_type = target_task.get("type", "")
     if task_type in ("move", "advance", "attack"):
         return 1.0  # moving
-    elif task_type == "disengage":
+    elif task_type in ("disengage", "withdraw"):
         return 0.5  # breaking contact — trying to stay low while moving
     elif task_type in ("defend", "dig_in"):
         return 0.3  # dug in

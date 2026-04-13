@@ -321,7 +321,7 @@ async def _assign_task_to_units_immediately(
 
         if task_type == "halt":
             unit.current_task = None
-        elif task_type == "disengage":
+        elif task_type in ("disengage", "withdraw"):
             speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
             unit.move_speed_mps = speeds.get("fast", speeds.get("slow", 3.0))
             unit.current_task = {

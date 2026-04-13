@@ -26,11 +26,16 @@ COVER_TERRAIN_TYPES = {"forest", "urban", "scrub", "orchard", "mountain"}
 # Search radius in degrees (~500m at mid-latitudes)
 COVER_SEARCH_RADIUS_DEG = 0.005
 
+# Approximate meters per degree at mid-latitudes
+METERS_PER_DEG_LAT = 111_320.0
+METERS_PER_DEG_LON_AT_48 = 74_000.0
+
 
 def _find_nearest_cover(
     cur_lat: float,
     cur_lon: float,
     terrain: TerrainService,
+    away_from: tuple[float, float] | None = None,
 ) -> tuple[float, float] | None:
     """
     Find the nearest terrain cell that provides good cover.
@@ -39,16 +44,26 @@ def _find_nearest_cover(
     for cover terrain types (forest, urban, scrub, orchard, mountain).
     Returns (lat, lon) of best cover position, or None if not found.
 
-    Optimized: uses fast_point_to_snail for nearby sampling instead of
-    iterating all cells (which calls snail_to_center with pyproj each time).
+    If away_from=(lat, lon) is given, strongly prefer cover positions
+    that are in the direction AWAY from that point (retreating from threat).
     """
     if not terrain._cells or not terrain._grid:
-        return _sample_cover_position(cur_lat, cur_lon, terrain)
+        return _sample_cover_position(cur_lat, cur_lon, terrain, away_from=away_from)
 
-    # Strategy: sample points in 8 directions at multiple radii
-    # and check terrain type at each point using the fast index.
-    # This avoids iterating ALL cells and calling snail_to_center.
-    best_dist = float("inf")
+    # Compute "away" direction vector (if retreating from a threat)
+    away_dx, away_dy = 0.0, 0.0
+    has_away = False
+    if away_from is not None:
+        threat_lat, threat_lon = away_from
+        away_dy = (cur_lat - threat_lat) * METERS_PER_DEG_LAT
+        away_dx = (cur_lon - threat_lon) * METERS_PER_DEG_LON_AT_48
+        away_len = math.sqrt(away_dx * away_dx + away_dy * away_dy)
+        if away_len > 1.0:
+            away_dx /= away_len
+            away_dy /= away_len
+            has_away = True
+
+    best_score = float("-inf")
     best_pos = None
 
     for dist_m in (100, 200, 350, 500, 700):
@@ -60,28 +75,59 @@ def _find_nearest_cover(
             sample_lon = cur_lon + dlon
             t = terrain.get_terrain_at(sample_lon, sample_lat)
             if t in COVER_TERRAIN_TYPES:
-                if dist_m < best_dist:
-                    best_dist = dist_m
+                # Score: prefer closer cover, but strongly prefer "away from enemy" direction
+                score = 1000.0 - dist_m  # base: closer is better
+                if has_away:
+                    # Dot product of (unit→sample) direction with "away" direction
+                    dir_dy = dlat * METERS_PER_DEG_LAT
+                    dir_dx = dlon * METERS_PER_DEG_LON_AT_48
+                    dir_len = math.sqrt(dir_dx * dir_dx + dir_dy * dir_dy)
+                    if dir_len > 1:
+                        cos_angle = (dir_dx * away_dx + dir_dy * away_dy) / dir_len
+                        # cos_angle: 1.0 = directly away from enemy (good)
+                        #            0.0 = perpendicular
+                        #           -1.0 = toward enemy (bad)
+                        score += cos_angle * 800  # strong direction bias
+                if score > best_score:
+                    best_score = score
                     best_pos = (sample_lat, sample_lon)
 
-        # If we found cover at this radius, don't search further
-        if best_pos is not None:
+        # If we found decent cover at this radius, don't search further
+        # (but only if it's in a reasonable direction away from enemy)
+        if best_pos is not None and (not has_away or best_score > 500):
             return best_pos
 
+    if best_pos is not None:
+        return best_pos
+
     # Fallback to sampling with protection factor
-    return _sample_cover_position(cur_lat, cur_lon, terrain)
+    return _sample_cover_position(cur_lat, cur_lon, terrain, away_from=away_from)
 
 
 def _sample_cover_position(
     cur_lat: float,
     cur_lon: float,
     terrain: TerrainService,
+    away_from: tuple[float, float] | None = None,
 ) -> tuple[float, float] | None:
     """
     Sample 8 directions around current position (at 200m, 400m) and pick
-    the one with the best protection factor.
+    the one with the best protection factor, biased away from threat.
     """
-    best_protection = 0.0
+    # Compute "away" direction vector
+    away_dx, away_dy = 0.0, 0.0
+    has_away = False
+    if away_from is not None:
+        threat_lat, threat_lon = away_from
+        away_dy = (cur_lat - threat_lat) * METERS_PER_DEG_LAT
+        away_dx = (cur_lon - threat_lon) * METERS_PER_DEG_LON_AT_48
+        away_len = math.sqrt(away_dx * away_dx + away_dy * away_dy)
+        if away_len > 1.0:
+            away_dx /= away_len
+            away_dy /= away_len
+            has_away = True
+
+    best_score = float("-inf")
     best_pos = None
 
     for dist_m in (200, 400):
@@ -92,21 +138,35 @@ def _sample_cover_position(
             sample_lat = cur_lat + dlat
             sample_lon = cur_lon + dlon
             prot = terrain.protection_factor(sample_lon, sample_lat)
-            if prot > best_protection:
-                best_protection = prot
+            score = prot
+            if has_away:
+                dir_dy = dlat * METERS_PER_DEG_LAT
+                dir_dx = dlon * METERS_PER_DEG_LON_AT_48
+                dir_len = math.sqrt(dir_dx * dir_dx + dir_dy * dir_dy)
+                if dir_len > 1:
+                    cos_angle = (dir_dx * away_dx + dir_dy * away_dy) / dir_len
+                    score += cos_angle * 1.5  # direction bias
+            if score > best_score:
+                best_score = score
                 best_pos = (sample_lat, sample_lon)
 
     # Only return if we found something significantly better than current
     cur_prot = terrain.protection_factor(cur_lon, cur_lat)
-    if best_pos and best_protection > cur_prot + 0.15:
-        return best_pos
+    if best_pos:
+        if has_away:
+            # When retreating, always pick something (even if protection isn't better)
+            return best_pos
+        elif best_score > cur_prot + 0.15:
+            return best_pos
+
+    # Last resort when retreating: just move 400m directly away from enemy
+    if has_away:
+        retreat_lat = cur_lat + away_dy * 400 / METERS_PER_DEG_LAT
+        retreat_lon = cur_lon + away_dx * 400 / METERS_PER_DEG_LON_AT_48
+        return (retreat_lat, retreat_lon)
 
     return None
 
-
-# Approximate meters per degree at mid-latitudes
-METERS_PER_DEG_LAT = 111_320.0
-METERS_PER_DEG_LON_AT_48 = 74_000.0
 
 # Unit types that fire indirectly (should NOT advance toward fire target)
 INDIRECT_FIRE_UNIT_TYPES = {
@@ -459,7 +519,7 @@ def process_movement(
             continue
 
         task_type = task.get("type", "")
-        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage", "resupply"):
+        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage", "withdraw", "resupply"):
             continue
 
         # Indirect fire units (artillery/mortar) with "fire" task should NOT move
@@ -488,8 +548,8 @@ def process_movement(
                 except Exception:
                     pass
 
-        # ── Disengage: find nearest covered position if not yet assigned ──
-        if task_type == "disengage" and not task.get("target_location"):
+        # ── Disengage/Withdraw: find nearest covered position AWAY FROM enemy ──
+        if task_type in ("disengage", "withdraw") and not task.get("target_location"):
             if unit.position is None:
                 continue
             try:
@@ -497,25 +557,75 @@ def process_movement(
                 cur_lon, cur_lat = pt.x, pt.y
             except Exception:
                 continue
-            cover_target = _find_nearest_cover(cur_lat, cur_lon, terrain)
+
+            # Find the nearest enemy unit to determine retreat direction
+            unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+            nearest_enemy_pos = None
+            nearest_enemy_dist = float("inf")
+            for other in units:
+                if other.is_destroyed or other.position is None:
+                    continue
+                other_side = other.side.value if hasattr(other.side, 'value') else str(other.side)
+                if other_side == unit_side:
+                    continue  # same side
+                try:
+                    other_pt = to_shape(other.position)
+                    d = _distance_m(cur_lat, cur_lon, other_pt.y, other_pt.x)
+                    if d < nearest_enemy_dist:
+                        nearest_enemy_dist = d
+                        nearest_enemy_pos = (other_pt.y, other_pt.x)
+                except Exception:
+                    continue
+
+            # Search for cover AWAY from the enemy
+            cover_target = _find_nearest_cover(
+                cur_lat, cur_lon, terrain,
+                away_from=nearest_enemy_pos,
+            )
             if cover_target:
-                task["target_location"] = {"lat": cover_target[0], "lon": cover_target[1]}
-                unit.current_task = task  # mark dirty
+                new_task = dict(task)  # copy for JSONB change detection
+                new_task["target_location"] = {"lat": cover_target[0], "lon": cover_target[1]}
+                unit.current_task = new_task
             else:
-                # No cover found nearby — stay put and defend, but keep disengaging flag
-                # so auto-return-fire won't override the commander's retreat order
-                unit.current_task = {
-                    "type": "defend",
-                    "order_id": task.get("order_id"),
-                    "disengaging": True,
-                }
-                events.append({
-                    "event_type": "order_completed",
-                    "actor_unit_id": unit.id,
-                    "text_summary": f"{unit.name} disengaged, no cover found — holding position",
-                    "payload": {},
-                })
-                continue
+                # No cover found nearby — if we know where the enemy is, just retreat 400m away
+                if nearest_enemy_pos is not None:
+                    away_dy = (cur_lat - nearest_enemy_pos[0]) * METERS_PER_DEG_LAT
+                    away_dx = (cur_lon - nearest_enemy_pos[1]) * METERS_PER_DEG_LON_AT_48
+                    away_len = math.sqrt(away_dx * away_dx + away_dy * away_dy)
+                    if away_len > 1.0:
+                        retreat_lat = cur_lat + (away_dy / away_len) * 400 / METERS_PER_DEG_LAT
+                        retreat_lon = cur_lon + (away_dx / away_len) * 400 / METERS_PER_DEG_LON_AT_48
+                        new_task = dict(task)
+                        new_task["target_location"] = {"lat": retreat_lat, "lon": retreat_lon}
+                        unit.current_task = new_task
+                    else:
+                        # Enemy is right on top of us — hold and defend
+                        unit.current_task = {
+                            "type": "defend",
+                            "order_id": task.get("order_id"),
+                            "disengaging": True,
+                        }
+                        events.append({
+                            "event_type": "order_completed",
+                            "actor_unit_id": unit.id,
+                            "text_summary": f"{unit.name} disengaged, no cover found — holding position",
+                            "payload": {},
+                        })
+                        continue
+                else:
+                    # No enemy detected nearby — just hold position and defend
+                    unit.current_task = {
+                        "type": "defend",
+                        "order_id": task.get("order_id"),
+                        "disengaging": True,
+                    }
+                    events.append({
+                        "event_type": "order_completed",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} disengaged, no cover found — holding position",
+                        "payload": {},
+                    })
+                    continue
 
         target = task.get("target_location")
         if not target:
@@ -756,7 +866,7 @@ def process_movement(
                     "text_summary": f"{unit.name} arrived at destination",
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
-            elif task_type == "disengage":
+            elif task_type in ("disengage", "withdraw"):
                 # Arrived at cover — switch to defend, but keep disengaging flag
                 # so auto-return-fire won't immediately override the retreat order
                 unit.current_task = {
@@ -802,8 +912,8 @@ def process_movement(
                         "text_summary": f"{unit.name} arrived at destination",
                         "payload": {"lat": new_lat, "lon": new_lon},
                     })
-                elif task_type == "disengage":
-                    unit.current_task = {"type": "defend", "order_id": task.get("order_id")}
+                elif task_type in ("disengage", "withdraw"):
+                    unit.current_task = {"type": "defend", "order_id": task.get("order_id"), "disengaging": True}
                     events.append({
                         "event_type": "order_completed",
                         "actor_unit_id": unit.id,

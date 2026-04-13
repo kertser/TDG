@@ -1,10 +1,10 @@
 """
 OrderParser – classifies radio messages and extracts structured data.
 
-Three-tier model routing for cost optimization:
-  1. Keyword fallback runs FIRST — if confidence ≥ 0.8, skip LLM entirely
-  2. If confidence ≥ 0.5 (partial match), use cheap nano model (gpt-4o-mini)
-  3. If confidence < 0.5 (ambiguous), use full model (gpt-4.1)
+LLM routing strategy:
+  - Non-commands (acks, status reports, status requests) → skip LLM (cheap)
+  - Commands / unclear → ALWAYS call LLM for proper parsing
+  - Model tier for commands: keyword confidence drives nano vs full model choice
 
 Also supports:
   - Local model fallback (Qwen/llama.cpp) via LOCAL_MODEL_URL when no API key
@@ -45,8 +45,8 @@ def _build_height_tops_context(grid_info: dict | None) -> str:
 # Max retries on LLM parse failure
 MAX_RETRIES = 1
 
-# Confidence thresholds for model routing
-CONF_SKIP_LLM = 0.80    # keyword result good enough, skip LLM entirely
+# Confidence thresholds for model routing (commands ALWAYS go to LLM)
+CONF_SKIP_LLM = 0.95    # only non-commands (acks, reports) can skip LLM
 CONF_USE_NANO = 0.50     # partial match, use cheap model
 # Below CONF_USE_NANO → use full model
 
@@ -160,10 +160,25 @@ class OrderParser:
 
         # ── Step 5: LLM-first mode (default) ──
         if parsing_mode == "llm_first":
-            # Always call LLM — use nano for simple messages, full for complex
-            # Use keyword hints to pick model tier
+            # Use keyword hints to pick model tier — or skip LLM entirely
             kw_conf = keyword_result.confidence
-            if kw_conf >= 0.70 and keyword_result.classification != MessageClassification.unclear:
+            kw_class = keyword_result.classification
+
+            # Skip LLM ONLY for non-command classifications that are clearly identified.
+            # Commands ALWAYS go to LLM regardless of keyword confidence.
+            _is_non_command = kw_class in (
+                MessageClassification.acknowledgment,
+                MessageClassification.status_report,
+                MessageClassification.status_request,
+            )
+            if _is_non_command and kw_conf >= CONF_SKIP_LLM:
+                logger.info(
+                    "OrderParser[llm_first]: non-command class=%s conf=%.2f — skipping LLM",
+                    kw_class.value, kw_conf,
+                )
+                return keyword_result
+
+            if kw_conf >= 0.70 and kw_class != MessageClassification.unclear:
                 model = settings.OPENAI_MODEL_NANO
                 tier = "nano"
             else:
@@ -210,12 +225,17 @@ class OrderParser:
             return result if result else keyword_result
 
         # ── Step 6: keyword_first mode (legacy 3-tier) ──
-        # High confidence keyword → skip LLM
-        if keyword_result.confidence >= CONF_SKIP_LLM:
+        # Skip LLM ONLY for non-command classifications (acks, reports)
+        # Commands ALWAYS go through LLM.
+        _is_non_command_kf = keyword_result.classification in (
+            MessageClassification.acknowledgment,
+            MessageClassification.status_report,
+            MessageClassification.status_request,
+        )
+        if _is_non_command_kf and keyword_result.confidence >= CONF_SKIP_LLM:
             logger.info(
-                "OrderParser[keyword_first]: keyword confidence %.2f ≥ %.2f, skipping LLM. class=%s",
-                keyword_result.confidence, CONF_SKIP_LLM,
-                keyword_result.classification.value,
+                "OrderParser[keyword_first]: non-command class=%s conf=%.2f, skipping LLM",
+                keyword_result.classification.value, keyword_result.confidence,
             )
             return keyword_result
 
@@ -585,11 +605,14 @@ class OrderParser:
             elif any(kw in text_lower for kw in ["observe", "наблюда"]):
                 order_type = "observe"
             elif any(kw in text_lower for kw in ["disengage", "break contact", "разорвать контакт",
-                                                   "разорви контакт", "выйти из боя", "выйди из боя",
-                                                   "отцепи"]):
+                                                    "разорви контакт", "выйти из боя", "выйди из боя",
+                                                    "отцепи"]):
                 order_type = "disengage"
-            elif any(kw in text_lower for kw in ["withdraw", "retreat", "отход", "отступ"]):
-                order_type = "withdraw"
+            elif any(kw in text_lower for kw in ["withdraw", "retreat", "pull back", "fall back",
+                                                    "отход", "отступ", "отойти", "отойд",
+                                                    "отвести", "отводи",
+                                                    "назад", "уходим", "уходи"]):
+                order_type = "disengage"  # treat withdraw/retreat same as disengage
             elif any(kw in text_lower for kw in ["halt", "stop", "стой", "стоп"]):
                 order_type = "halt"
             elif any(kw in text_lower for kw in [
@@ -1022,6 +1045,27 @@ class OrderParser:
             # Commands with multiple sentences are complex
             if original_text.count('.') >= 2:
                 conf -= 0.10
+
+            # ── Boost for simple, unambiguous commands ──
+            # If the command is short, has ONE verb, order_type, and a precise location,
+            # the keyword parser fully understands it — boost to skip LLM.
+            # Examples: "Move to F7-5-6", "Attack B8-3", "Defend at C4-2-1"
+            if (verb_count <= 1 and order_type and not has_coord
+                    and len(original_text) <= 50
+                    and original_text.count('.') < 2):
+                has_precise = any(
+                    lr.get("ref_type") in ("snail", "coordinate", "height")
+                    for lr in location_refs
+                )
+                # Boost if we have either a precise location or a locationless order
+                # (halt, retreat, disengage don't need locations)
+                no_loc_orders = {"halt", "disengage", "resupply", "observe"}
+                if has_precise or order_type in no_loc_orders:
+                    conf += 0.08
+
+            # Commands must NEVER skip LLM — cap at 0.85 (well below CONF_SKIP_LLM=0.95)
+            # This ensures every command goes through at least the nano model.
+            conf = min(conf, 0.85)
 
         return min(max(conf, 0.15), 0.95)
 

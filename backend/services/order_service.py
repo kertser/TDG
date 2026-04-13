@@ -1016,10 +1016,10 @@ class OrderService:
         if parsed.engagement_rules:
             task["engagement_rules"] = parsed.engagement_rules
 
-        # For commands that don't need a location (halt, regroup, report_status, disengage, resupply)
+        # For commands that don't need a location (halt, regroup, report_status, disengage, withdraw, resupply)
         # Resupply target is auto-resolved by the resupply engine to the nearest supply source
         # request_fire target is resolved from nearest enemy contact at tick time
-        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "resupply", "request_fire"):
+        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "withdraw", "resupply", "request_fire"):
             return task
 
         # Commands that need a location but don't have one — still valid for

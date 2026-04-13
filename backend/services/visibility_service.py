@@ -45,7 +45,7 @@ def _is_concealed_unit(unit: Unit) -> bool:
     task = unit.current_task
     if task:
         task_type = task.get("type", "")
-        if task_type in ("move", "advance", "attack", "engage", "fire", "disengage"):
+        if task_type in ("move", "advance", "attack", "engage", "fire", "disengage", "withdraw"):
             return False
 
     morale = unit.morale or 1.0

@@ -522,48 +522,71 @@ const KMap = (() => {
                         const hasLOS = data.has_los;
                         const dist = data.distance_m || 0;
                         const lineColor = hasLOS ? '#66bb6a' : '#ef5350';
+                        const accentColor = hasLOS ? '#a5d6a7' : '#ef9a9a';
 
-                        // ── Endpoint markers (larger, glowing) ──
-                        const m1 = L.circleMarker(p1, {
-                            radius: 7, color: lineColor, fillColor: '#4fc3f7',
-                            fillOpacity: 0.85, weight: 2.5, interactive: false, pane: 'losPane',
+                        // ── Endpoint markers (ring + dot) ──
+                        [p1, p2].forEach((pt, i) => {
+                            // Outer ring glow
+                            _losGroup.addLayer(L.circleMarker(pt, {
+                                radius: 10, color: lineColor, fillColor: 'transparent',
+                                fillOpacity: 0, weight: 1.5, opacity: 0.3,
+                                interactive: false, pane: 'losPane',
+                            }));
+                            // Inner filled dot
+                            _losGroup.addLayer(L.circleMarker(pt, {
+                                radius: 5,
+                                color: i === 0 ? '#4fc3f7' : '#ffb74d',
+                                fillColor: i === 0 ? '#4fc3f7' : '#ffb74d',
+                                fillOpacity: 0.9, weight: 2, opacity: 1,
+                                interactive: false, pane: 'losPane',
+                            }));
                         });
-                        const m2 = L.circleMarker(p2, {
-                            radius: 7, color: lineColor, fillColor: '#ffb74d',
-                            fillOpacity: 0.85, weight: 2.5, interactive: false, pane: 'losPane',
-                        });
-                        _losGroup.addLayer(m1);
-                        _losGroup.addLayer(m2);
 
-                        // ── Result line (solid glow + dashed overlay) ──
-                        // Outer glow
+                        // ── Result line (soft glow + crisp inner) ──
+                        // Wide soft glow
                         _losGroup.addLayer(L.polyline([p1, p2], {
-                            color: lineColor, weight: 6, opacity: 0.2,
+                            color: lineColor, weight: 8, opacity: 0.12,
+                            lineCap: 'round',
                             interactive: false, pane: 'losPane',
                         }));
-                        // Inner solid
+                        // Medium glow
                         _losGroup.addLayer(L.polyline([p1, p2], {
-                            color: lineColor, weight: 3, opacity: 0.8,
-                            dashArray: hasLOS ? null : '8,5',
+                            color: lineColor, weight: 4, opacity: 0.25,
+                            lineCap: 'round',
+                            interactive: false, pane: 'losPane',
+                        }));
+                        // Inner crisp line
+                        _losGroup.addLayer(L.polyline([p1, p2], {
+                            color: accentColor, weight: 2, opacity: 0.85,
+                            dashArray: hasLOS ? null : '10,6',
+                            lineCap: 'round',
                             interactive: false, pane: 'losPane',
                         }));
 
-                        // ── Build result text ──
-                        let text = hasLOS ? '✅ LOS Clear' : '❌ LOS Blocked';
-                        text += `  —  ${_formatDist(dist)}`;
-                        if (data.from_elevation_m != null) text += `\n↑ ${data.from_elevation_m}m`;
-                        if (data.to_elevation_m != null) text += `  →  ${data.to_elevation_m}m`;
+                        // ── Build result text (compact, icon-based) ──
+                        let heading = hasLOS ? '✓ Clear' : '✕ Blocked';
+                        let details = _formatDist(dist);
+                        if (data.from_elevation_m != null && data.to_elevation_m != null) {
+                            const diff = data.to_elevation_m - data.from_elevation_m;
+                            const arrow = diff > 0 ? '↗' : diff < 0 ? '↘' : '→';
+                            details += `   ${data.from_elevation_m}m ${arrow} ${data.to_elevation_m}m`;
+                        }
+                        let blockInfo = '';
                         if (!hasLOS && data.blocking_terrain) {
-                            text += `\nBlocked by: ${data.blocking_terrain}`;
-                            if (data.blocking_elevation_m != null) text += ` (${data.blocking_elevation_m}m)`;
+                            blockInfo = `${data.blocking_terrain}`;
+                            if (data.blocking_elevation_m != null) blockInfo += ` ${data.blocking_elevation_m}m`;
                         }
 
                         const resultLabel = L.tooltip({
-                            permanent: true, direction: 'center',
+                            permanent: true, direction: 'top',
                             className: hasLOS ? 'los-label-clear' : 'los-label-blocked',
-                            offset: [0, -16],
+                            offset: [0, -12],
                             pane: 'losPane',
-                        }).setLatLng([midLat, midLng]).setContent(text);
+                        }).setLatLng([midLat, midLng]).setContent(
+                            `<span class="los-heading">${heading}</span>` +
+                            `<span class="los-details">${details}</span>` +
+                            (blockInfo ? `<span class="los-block-info">${blockInfo}</span>` : '')
+                        );
                         _losGroup.addLayer(resultLabel);
 
                         // ── Click anywhere to dismiss result ──

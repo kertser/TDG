@@ -1588,51 +1588,67 @@ button:hover { background: #1a5276; }
 
 /* ── LOS Check Labels ───────────────────────── */
 .los-label-pending {
-    background: rgba(30, 36, 50, 0.92) !important;
-    border: 1px solid rgba(79, 195, 247, 0.4) !important;
-    border-radius: 6px !important;
-    padding: 5px 12px !important;
-    color: #b0bec5 !important;
+    background: rgba(20, 26, 40, 0.92) !important;
+    border: 1px solid rgba(79, 195, 247, 0.3) !important;
+    border-radius: 8px !important;
+    padding: 6px 14px !important;
+    color: #90a4ae !important;
     font-size: 12px !important;
     font-weight: 500 !important;
-    font-family: monospace !important;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-    white-space: pre-line !important;
+    font-family: 'Segoe UI', system-ui, sans-serif !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+    white-space: nowrap !important;
     line-height: 1.4 !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
 }
 .los-label-pending::before { display: none !important; }
 
-.los-label-clear {
-    background: rgba(16, 42, 16, 0.94) !important;
-    border: 1px solid rgba(102, 187, 106, 0.7) !important;
-    border-radius: 6px !important;
-    padding: 6px 14px !important;
-    color: #c8e6c9 !important;
-    font-size: 12.5px !important;
-    font-weight: 600 !important;
-    font-family: monospace !important;
-    box-shadow: 0 2px 16px rgba(76,175,80,0.25), 0 0 24px rgba(76,175,80,0.08) !important;
-    white-space: pre-line !important;
-    line-height: 1.5 !important;
-    letter-spacing: 0.3px !important;
-}
-.los-label-clear::before { display: none !important; }
-
+.los-label-clear,
 .los-label-blocked {
-    background: rgba(42, 16, 16, 0.94) !important;
-    border: 1px solid rgba(239, 83, 80, 0.7) !important;
-    border-radius: 6px !important;
-    padding: 6px 14px !important;
-    color: #ffcdd2 !important;
-    font-size: 12.5px !important;
-    font-weight: 600 !important;
-    font-family: monospace !important;
-    box-shadow: 0 2px 16px rgba(244,67,54,0.25), 0 0 24px rgba(244,67,54,0.08) !important;
-    white-space: pre-line !important;
+    background: rgba(14, 20, 30, 0.94) !important;
+    border-radius: 10px !important;
+    padding: 8px 16px !important;
+    font-family: 'Segoe UI', system-ui, sans-serif !important;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 0 1px rgba(255,255,255,0.08) !important;
+    white-space: nowrap !important;
     line-height: 1.5 !important;
-    letter-spacing: 0.3px !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 2px !important;
 }
+.los-label-clear { border: 1px solid rgba(102, 187, 106, 0.5) !important; }
+.los-label-blocked { border: 1px solid rgba(239, 83, 80, 0.5) !important; }
+.los-label-clear::before,
 .los-label-blocked::before { display: none !important; }
+
+.los-heading {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+}
+.los-label-clear .los-heading { color: #81c784 !important; }
+.los-label-blocked .los-heading { color: #ef5350 !important; }
+
+.los-details {
+    font-size: 11.5px !important;
+    font-weight: 400 !important;
+    color: #b0bec5 !important;
+    letter-spacing: 0.3px !important;
+    font-variant-numeric: tabular-nums !important;
+}
+
+.los-block-info {
+    font-size: 10.5px !important;
+    font-weight: 500 !important;
+    color: #ef9a9a !important;
+    opacity: 0.85 !important;
+    margin-top: 1px !important;
+}
 
 /* ── Start Session Button ─────────────────────── */
 #start-session-btn {
