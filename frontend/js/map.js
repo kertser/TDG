@@ -16,6 +16,7 @@ const KMap = (() => {
     let measurePoints = [];
     let measureGroup = null;
     let _previewLine = null;
+    let _measureDismissHandler = null;  // click-anywhere-to-dismiss after finalize
 
     // ── LOS check state ──────────────────────────────
     let _losChecking = false;
@@ -289,6 +290,11 @@ const KMap = (() => {
         measurePoints = [];
         measureGroup.clearLayers();
         _previewLine = null;
+        // Remove any previous dismiss handler
+        if (_measureDismissHandler) {
+            map.off('click', _measureDismissHandler);
+            _measureDismissHandler = null;
+        }
         map.getContainer().style.cursor = 'crosshair';
 
         map.on('click', _onMeasureClick);
@@ -316,9 +322,14 @@ const KMap = (() => {
         stopMeasure();
         measureGroup.clearLayers();
         measurePoints = [];
+        if (_measureDismissHandler) {
+            map.off('click', _measureDismissHandler);
+            _measureDismissHandler = null;
+        }
     }
 
-    /** Make finished measurement layers interactive for right-click deletion. */
+    /** Make finished measurement layers interactive for right-click deletion,
+     *  and register a click-anywhere-to-dismiss handler. */
     function _enableMeasureDelete() {
         if (measureGroup.getLayers().length === 0) return;
 
@@ -330,6 +341,20 @@ const KMap = (() => {
                 layer.on('contextmenu', _onMeasureLayerRightClick);
             }
         });
+
+        // Click anywhere on the map to dismiss the measurement result
+        _measureDismissHandler = () => {
+            measureGroup.clearLayers();
+            measurePoints = [];
+            map.off('click', _measureDismissHandler);
+            _measureDismissHandler = null;
+        };
+        // Delay to avoid the finalizing right-click from immediately triggering
+        setTimeout(() => {
+            if (_measureDismissHandler) {
+                map.on('click', _measureDismissHandler);
+            }
+        }, 300);
     }
 
     function _onMeasureLayerRightClick(e) {
@@ -338,6 +363,11 @@ const KMap = (() => {
         // Clear all measurements on right-click
         measureGroup.clearLayers();
         measurePoints = [];
+        // Also remove the click-to-dismiss handler
+        if (_measureDismissHandler) {
+            map.off('click', _measureDismissHandler);
+            _measureDismissHandler = null;
+        }
     }
 
     function _onMeasureClick(e) {
