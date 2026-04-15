@@ -1364,7 +1364,7 @@ Now parse this message:
 
 def build_system_prompt(tactical_doctrine: str) -> str:
     """Build the system prompt with only the doctrine relevant to this parse."""
-    return SYSTEM_PROMPT_TEMPLATE.format(tactical_doctrine=tactical_doctrine)
+    return SYSTEM_PROMPT_TEMPLATE.replace("{tactical_doctrine}", tactical_doctrine)
 
 
 def build_user_message(original_text: str) -> str:
