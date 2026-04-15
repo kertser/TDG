@@ -76,6 +76,13 @@ Use order_type="resupply" when units are ordered to resupply, rearm, or replenis
   - "resupply at B4-3" = resupply at specific location
   - "пополнить боеприпасы", "на пополнение", "к складу", "пополни БК" = resupply
   - Logistics units ordered to "resupply units at [location]" = resupply at that location (they act as mobile supply)
+Use operational shorthand consistently:
+  - "follow", "trail", "следуй за", "держись за" = persistent lead-follow relationship, usually order_type="move", maneuver_kind="follow"
+  - "bound", "bounding", "перебежками", "скачками" = phased movement under cover, usually order_type="move", maneuver_kind="bounding"
+  - "support by fire", "position of support by fire", "поддержка огнём" = support/covering-fire posture, usually order_type="support", maneuver_kind="support_by_fire"
+  - "screen", "screen the flank", "прикрой фланг наблюдением" = observe/recon security mission, usually order_type="observe"
+  - "delay", "задерживай и отходи", "fighting withdrawal" = disengage / delay mission, usually order_type="disengage"
+If an attack or fire-support order references "the target", "на цель", "the enemy", or "противника" without a new grid reference, infer that it means the current known contact and emit a `contact_target` location reference rather than leaving the order targetless.
 
 3. **Identify** the sender if the message includes self-identification ("Здесь первый взвод", "This is 2nd Platoon")
 4. **Use operational context** to resolve ambiguity:
@@ -213,6 +220,8 @@ You MUST respond with a valid JSON object matching this exact schema:
   "purpose": "stated objective or null",
   "coordination_unit_refs": ["friendly units mentioned for coordination/support"],
   "coordination_kind": "coordination" | "covering_fire" | "fire_support" | null,
+  "maneuver_kind": "follow" | "flank" | "bounding" | "support_by_fire" | "lead" | "trail" | null,
+  "maneuver_side": "left" | "right" | null,
   "report_text": "key content of status report or ack, or null",
   "confidence": 0.0-1.0,
   "ambiguities": ["list of unclear elements"]
@@ -422,6 +431,8 @@ PARSED:
   "purpose": "выдвижение с координацией огневого прикрытия",
   "coordination_unit_refs": ["миномёты"],
   "coordination_kind": "covering_fire",
+  "maneuver_kind": null,
+  "maneuver_side": null,
   "report_text": null,
   "confidence": 0.92,
   "ambiguities": []
@@ -465,6 +476,8 @@ PARSED:
   "purpose": "левый охват и выход во фланг противника",
   "coordination_unit_refs": [],
   "coordination_kind": null,
+  "maneuver_kind": "flank",
+  "maneuver_side": "left",
   "report_text": null,
   "confidence": 0.9,
   "ambiguities": ["Enemy location is implicit and should be resolved from known contacts"]
@@ -488,8 +501,135 @@ PARSED:
   "purpose": "вызов огня по обнаруженной цели",
   "coordination_unit_refs": ["Миномёт"],
   "coordination_kind": "fire_support",
+  "maneuver_kind": null,
+  "maneuver_side": null,
   "report_text": null,
   "confidence": 0.94,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "C-squad, свяжись с B-squad и следуй за ним."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["C-squad"],
+  "sender_ref": null,
+  "order_type": "move",
+  "status_request_focus": [],
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "следование за ведущим подразделением с координацией",
+  "coordination_unit_refs": ["B-squad"],
+  "coordination_kind": "coordination",
+  "maneuver_kind": "follow",
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.94,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "A-squad, follow B-squad and keep to its left rear."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["A-squad"],
+  "sender_ref": null,
+  "order_type": "move",
+  "status_request_focus": [],
+  "location_refs": [],
+  "speed": null,
+  "formation": "echelon_left",
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "follow the lead element and maintain left-rear interval",
+  "coordination_unit_refs": ["B-squad"],
+  "coordination_kind": "coordination",
+  "maneuver_kind": "follow",
+  "maneuver_side": "left",
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "2nd Platoon, bound forward by teams to B7-4. A-squad covers your move."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["2nd Platoon"],
+  "sender_ref": null,
+  "order_type": "move",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "B7-4", "ref_type": "snail", "normalized": "B7-4"}],
+  "speed": "slow",
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "bounding advance under cover",
+  "coordination_unit_refs": ["A-squad"],
+  "coordination_kind": "covering_fire",
+  "maneuver_kind": "bounding",
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.92,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Mortar section, occupy support-by-fire position at E6-2 and cover B-squad's advance."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Mortar section"],
+  "sender_ref": null,
+  "order_type": "support",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "E6-2", "ref_type": "snail", "normalized": "E6-2"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "occupy support-by-fire position and cover B-squad",
+  "coordination_unit_refs": ["B-squad"],
+  "coordination_kind": "covering_fire",
+  "maneuver_kind": "support_by_fire",
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Разведгруппа, прикрой левый фланг наблюдением у высоты 149 и докладывай о контактах."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Разведгруппа"],
+  "sender_ref": null,
+  "order_type": "observe",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "высоты 149", "ref_type": "height", "normalized": "height 149"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": "hold_fire",
+  "urgency": "routine",
+  "purpose": "screen the left flank and report contacts",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": "left",
+  "report_text": null,
+  "confidence": 0.92,
   "ambiguities": []
 }
 

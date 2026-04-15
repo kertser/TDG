@@ -17,6 +17,7 @@ Flow:
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -44,6 +45,9 @@ from backend.services.intent_interpreter import intent_interpreter
 from backend.services.response_generator import response_generator
 
 logger = logging.getLogger(__name__)
+
+_M_PER_DEG_LAT = 111_320.0
+_M_PER_DEG_LON_48 = 74_000.0
 
 # ── Language persistence per session+side ──────────────────
 # Tracks the last detected language per (session_id, side) to maintain
@@ -377,6 +381,7 @@ class OrderService:
         # ── Resolve "contact_target" refs from known enemy contacts ──
         # "на цель" / "at the target" → nearest known enemy contact
         has_contact_target = any(loc.ref_type == "contact_target" for loc in resolved)
+        best_contact_uid = None
         if has_contact_target and unit_pos:
             try:
                 from backend.models.contact import Contact
@@ -394,8 +399,6 @@ class OrderService:
                 best_dist = float('inf')
                 best_contact_lat = None
                 best_contact_lon = None
-                best_contact_uid = None
-
                 for c in nearby_contacts:
                     if c.location_estimate is None:
                         continue
@@ -478,6 +481,65 @@ class OrderService:
         # ── Build engine task ─────────────────────────────
         task = self._build_engine_task(order, parsed, resolved, intent, grid_service=grid_service)
         result.engine_task = task
+
+        coordination_units = [
+            u for u in self._match_units(
+                list(getattr(parsed, "coordination_unit_refs", []) or []),
+                units_context,
+                issuer_side,
+            )
+            if u.get("id") not in {m.get("id") for m in matched_units}
+            and not u.get("is_destroyed")
+            and u.get("comms_status") != "offline"
+        ]
+
+        if task:
+            if best_contact_uid and task.get("type") in ("attack", "engage", "fire", "request_fire"):
+                task["target_unit_id"] = best_contact_uid
+
+            if coordination_units:
+                coord_ids = [u["id"] for u in coordination_units]
+                task["coordination_unit_ids"] = coord_ids
+
+                arty_support_ids = [
+                    u["id"] for u in coordination_units
+                    if any(tok in (u.get("unit_type") or "") for tok in ("mortar", "artillery"))
+                ]
+                if arty_support_ids:
+                    task["supporting_unit_ids"] = arty_support_ids
+
+            if task.get("maneuver_kind") == "follow" and coordination_units:
+                lead = coordination_units[0]
+                task["follow_unit_id"] = lead["id"]
+                task["follow_unit_name"] = lead.get("name", "")
+                task["follow_distance_m"] = 120.0
+
+                side_hint = task.get("maneuver_side")
+                if side_hint == "left":
+                    task["follow_offset_m"] = {"rear": 120.0, "lateral": -40.0}
+                elif side_hint == "right":
+                    task["follow_offset_m"] = {"rear": 120.0, "lateral": 40.0}
+
+            if (
+                task.get("maneuver_kind") == "flank"
+                and unit_pos
+                and task.get("target_location")
+            ):
+                flank_side = task.get("maneuver_side")
+                flank_point = self._compute_flank_approach_point(
+                    unit_pos[0], unit_pos[1],
+                    task["target_location"]["lat"], task["target_location"]["lon"],
+                    side=flank_side,
+                )
+                if flank_point:
+                    final_target = dict(task["target_location"])
+                    task["flank_assault_location"] = final_target
+                    task["flank_phase"] = "approach"
+                    task["target_location"] = {"lat": flank_point[0], "lon": flank_point[1]}
+                    task.pop("waypoints", None)
+                    task["path_calc_tick"] = -999
+                    task["combat_role"] = "flank"
+                    task["combat_role_locked"] = True
 
         if task:
             order.parsed_order = {
@@ -766,6 +828,8 @@ class OrderService:
                     _static_types = ("defend", "observe", "halt", "regroup")
                     coord_refs = (task or {}).get("coordination_unit_refs") or []
                     coord_kind = (task or {}).get("coordination_kind")
+                    maneuver_kind = (task or {}).get("maneuver_kind")
+                    maneuver_side = (task or {}).get("maneuver_side")
 
                     if order_type_val == "request_fire" and task_target_snail:
                         coord_name = coord_refs[0] if coord_refs else "поддержку"
@@ -820,10 +884,45 @@ class OrderService:
                             unit_dict, lang, situation=situation,
                         )
 
+                    if maneuver_kind in {"flank", "bounding", "support_by_fire"}:
+                        if lang == "ru":
+                            if maneuver_kind == "flank":
+                                maneuver_text = (
+                                    "выхожу на левый фланг противника"
+                                    if maneuver_side == "left"
+                                    else "выхожу на правый фланг противника"
+                                    if maneuver_side == "right"
+                                    else "выхожу во фланг противника"
+                                )
+                            elif maneuver_kind == "bounding":
+                                maneuver_text = "двигаюсь перебежками под прикрытием"
+                            else:
+                                maneuver_text = "занимаю позицию поддержки огнём"
+                        else:
+                            if maneuver_kind == "flank":
+                                maneuver_text = (
+                                    "maneuvering to the enemy left flank"
+                                    if maneuver_side == "left"
+                                    else "maneuvering to the enemy right flank"
+                                    if maneuver_side == "right"
+                                    else "maneuvering to the enemy flank"
+                                )
+                            elif maneuver_kind == "bounding":
+                                maneuver_text = "advancing by bounds under cover"
+                            else:
+                                maneuver_text = "occupying a support-by-fire position"
+                        status_text = f"{status_text}. {maneuver_text}" if status_text else maneuver_text
+
                     if coord_refs:
                         coord_name = coord_refs[0]
                         if lang == "ru":
-                            if coord_kind == "covering_fire":
+                            if maneuver_kind == "follow":
+                                coord_text = f"связываюсь с {coord_name}, следую за ним"
+                            elif maneuver_kind == "bounding":
+                                coord_text = f"связываюсь с {coord_name}, согласую движение перебежками"
+                            elif maneuver_kind == "support_by_fire":
+                                coord_text = f"связываюсь с {coord_name}, обеспечу поддержку огнём"
+                            elif coord_kind == "covering_fire":
                                 coord_text = (
                                     f"связываюсь с {coord_name}, выдвигаюсь под их огневым прикрытием"
                                 )
@@ -834,7 +933,13 @@ class OrderService:
                             else:
                                 coord_text = f"связываюсь с {coord_name}, координирую действия"
                         else:
-                            if coord_kind == "covering_fire":
+                            if maneuver_kind == "follow":
+                                coord_text = f"linking up with {coord_name} and following it"
+                            elif maneuver_kind == "bounding":
+                                coord_text = f"linking up with {coord_name} for bounding movement"
+                            elif maneuver_kind == "support_by_fire":
+                                coord_text = f"linking up with {coord_name} to provide support by fire"
+                            elif coord_kind == "covering_fire":
                                 coord_text = f"linking up with {coord_name} and advancing under their covering fire"
                             elif coord_kind == "fire_support":
                                 coord_text = f"linking up with {coord_name} for fire support"
@@ -1180,6 +1285,10 @@ class OrderService:
             task["coordination_unit_refs"] = list(parsed.coordination_unit_refs)
         if getattr(parsed, "coordination_kind", None):
             task["coordination_kind"] = parsed.coordination_kind
+        if getattr(parsed, "maneuver_kind", None):
+            task["maneuver_kind"] = parsed.maneuver_kind
+        if getattr(parsed, "maneuver_side", None):
+            task["maneuver_side"] = parsed.maneuver_side
 
         # For commands that don't need a location (halt, regroup, report_status, disengage, withdraw, resupply)
         # Resupply target is auto-resolved by the resupply engine to the nearest supply source
@@ -1201,6 +1310,43 @@ class OrderService:
             return task  # Return task anyway — engine will handle as best it can
 
         return task
+
+    @staticmethod
+    def _compute_flank_approach_point(
+        start_lat: float,
+        start_lon: float,
+        target_lat: float,
+        target_lon: float,
+        *,
+        side: str | None = None,
+        offset_deg: float = 60.0,
+    ) -> tuple[float, float] | None:
+        """Compute a doctrinal flank approach point offset from the target."""
+        dy = (target_lat - start_lat) * _M_PER_DEG_LAT
+        dx = (target_lon - start_lon) * _M_PER_DEG_LON_48
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist < 25:
+            return None
+
+        bearing = math.atan2(dx, dy)
+        offset = math.radians(offset_deg)
+
+        if side == "left":
+            signs = (-1,)
+        elif side == "right":
+            signs = (1,)
+        else:
+            signs = (-1, 1)
+
+        flank_dist_m = max(220.0, min(dist * 0.65, 550.0))
+        best: tuple[float, float] | None = None
+        for sign in signs:
+            flank_bearing = bearing + sign * offset
+            cand_lat = target_lat + flank_dist_m * math.cos(flank_bearing) / _M_PER_DEG_LAT
+            cand_lon = target_lon + flank_dist_m * math.sin(flank_bearing) / _M_PER_DEG_LON_48
+            if best is None:
+                best = (cand_lat, cand_lon)
+        return best
 
     async def _append_coordination_partner_responses(
         self,

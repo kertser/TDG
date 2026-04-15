@@ -284,7 +284,7 @@ def process_combat(
                     if tid:
                         under_fire.add(tid)
                 # ── Salvo tracking: decrement and complete when done ──
-                _decrement_salvos(attacker, events)
+                _decrement_salvos(attacker, events, all_units)
                 continue  # Area fire processed, skip normal targeting
 
         target = None
@@ -519,12 +519,52 @@ def process_combat(
 
         # ── Salvo tracking for artillery targeted fire ──
         if attacker.unit_type in ARTILLERY_TYPES and attacker.current_task:
-            _decrement_salvos(attacker, events)
+            _decrement_salvos(attacker, events, all_units)
 
     return events, under_fire
 
 
-def _decrement_salvos(unit, events: list[dict]) -> None:
+def _resolve_supported_fire_target(
+    support_task: dict,
+    supported_unit,
+    units_by_id: dict[str, object],
+) -> tuple[dict | None, str | None]:
+    """Resolve the best current fire target for a sustained support relationship."""
+    if supported_unit is None or supported_unit.is_destroyed:
+        return None, None
+
+    supported_task = supported_unit.current_task or {}
+    if not supported_task or supported_task.get("awaiting_ceasefire"):
+        return None, None
+
+    target_uid = (
+        supported_task.get("request_fire_target_unit_id")
+        or supported_task.get("target_unit_id")
+        or support_task.get("target_unit_id")
+    )
+    if target_uid:
+        target = units_by_id.get(str(target_uid))
+        if target is not None and not target.is_destroyed:
+            tgt_pos = _get_position(target)
+            if tgt_pos is not None:
+                return {"lat": tgt_pos[0], "lon": tgt_pos[1]}, str(target.id)
+        return None, None
+
+    target_loc = (
+        supported_task.get("request_fire_target_location")
+        or supported_task.get("target_location")
+        or support_task.get("target_location")
+    )
+    if target_loc and target_loc.get("lat") is not None and target_loc.get("lon") is not None:
+        return {
+            "lat": float(target_loc["lat"]),
+            "lon": float(target_loc["lon"]),
+        }, None
+
+    return None, None
+
+
+def _decrement_salvos(unit, events: list[dict], all_units: list | None = None) -> None:
     """
     Track salvo count for artillery fire tasks.
 
@@ -548,6 +588,25 @@ def _decrement_salvos(unit, events: list[dict]) -> None:
     unit.current_task = dict(task)
 
     if salvos <= 0:
+        if task.get("sustained_support") and not task.get("ceasefire_requested_by") and all_units:
+            units_by_id = {str(u.id): u for u in all_units if not u.is_destroyed}
+            supported_unit = units_by_id.get(str(task.get("support_for")))
+            next_target_loc, next_target_uid = _resolve_supported_fire_target(
+                task,
+                supported_unit,
+                units_by_id,
+            )
+            if next_target_loc:
+                refreshed_task = dict(task)
+                refreshed_task["salvos_remaining"] = 1
+                refreshed_task["target_location"] = next_target_loc
+                if next_target_uid:
+                    refreshed_task["target_unit_id"] = next_target_uid
+                elif refreshed_task.get("target_unit_id"):
+                    refreshed_task.pop("target_unit_id", None)
+                unit.current_task = refreshed_task
+                return
+
         unit.current_task = None
         events.append({
             "event_type": "order_completed",
@@ -804,6 +863,7 @@ COMBAT_ROLE_REASSIGN_INTERVAL = 3
 def assign_combat_roles(
     all_units: list,
     terrain: TerrainService,
+    assignment_tick: int = 0,
 ) -> list[dict]:
     """
     Assign combat roles (suppress/assault/flank) to groups of units
@@ -847,7 +907,11 @@ def assign_combat_roles(
     for target_id, attackers in target_groups.items():
         if len(attackers) < 2:
             # Solo attacker — no coordination needed, clear any stale role
-            if attackers[0].current_task and attackers[0].current_task.get("combat_role"):
+            if (
+                attackers[0].current_task
+                and attackers[0].current_task.get("combat_role")
+                and not attackers[0].current_task.get("combat_role_locked")
+            ):
                 task = dict(attackers[0].current_task)
                 del task["combat_role"]
                 attackers[0].current_task = task
@@ -880,6 +944,7 @@ def assign_combat_roles(
 
         # Sort attackers: those with long range / heavy weapons suppress,
         # strongest infantry assaults
+        locked_units: list[tuple] = []
         attacker_info = []
         for u in attackers:
             u_pos = _get_position(u)
@@ -888,15 +953,19 @@ def assign_combat_roles(
             dist = _distance_m(u_pos[0], u_pos[1], tgt_pos[0], tgt_pos[1])
             w_range = WEAPON_RANGE.get(u.unit_type, 800)
             fp = BASE_FIREPOWER.get(u.unit_type, 5)
-            attacker_info.append({
+            info = {
                 "unit": u,
                 "dist": dist,
                 "weapon_range": w_range,
                 "firepower": fp,
                 "is_suppress_type": u.unit_type in SUPPRESSION_PREFERRED_TYPES,
-            })
+            }
+            if (u.current_task or {}).get("combat_role_locked"):
+                locked_units.append((u, dist, w_range))
+            else:
+                attacker_info.append(info)
 
-        if len(attacker_info) < 2:
+        if len(attacker_info) == 0:
             continue
 
         # Determine roles:
@@ -937,23 +1006,42 @@ def assign_combat_roles(
         assaulters = sorted_assault[:n_assault]
         flankers = sorted_assault[n_assault:]
 
+        for u, dist, weapon_range in locked_units:
+            locked_role = (u.current_task or {}).get("combat_role") or (
+                "flank" if (u.current_task or {}).get("maneuver_kind") == "flank" else None
+            )
+            if locked_role:
+                _apply_combat_role(
+                    u, locked_role, dist, weapon_range, tgt_pos, terrain,
+                    assignment_tick=assignment_tick,
+                )
         # Apply roles
         for info in suppressors:
-            _apply_combat_role(info["unit"], "suppress", info["dist"], info["weapon_range"], tgt_pos)
+            _apply_combat_role(
+                info["unit"], "suppress", info["dist"], info["weapon_range"], tgt_pos,
+                assignment_tick=assignment_tick,
+            )
         for info in assaulters:
-            _apply_combat_role(info["unit"], "assault", info["dist"], info["weapon_range"], tgt_pos)
+            _apply_combat_role(
+                info["unit"], "assault", info["dist"], info["weapon_range"], tgt_pos,
+                assignment_tick=assignment_tick,
+            )
         for info in flankers:
-            _apply_combat_role(info["unit"], "flank", info["dist"], info["weapon_range"], tgt_pos, terrain)
+            _apply_combat_role(
+                info["unit"], "flank", info["dist"], info["weapon_range"], tgt_pos, terrain,
+                assignment_tick=assignment_tick,
+            )
 
     return events
 
 
 def _apply_combat_role(unit, role: str, dist: float, weapon_range: float,
-                       tgt_pos: tuple, terrain: TerrainService | None = None):
+                       tgt_pos: tuple, terrain: TerrainService | None = None,
+                       assignment_tick: int = 0):
     """Apply a combat role to a unit's current task."""
     task = dict(unit.current_task) if unit.current_task else {"type": "engage"}
     task["combat_role"] = role
-    task["combat_role_assigned_tick"] = 0  # Will be filled with tick number by tick.py
+    task["combat_role_assigned_tick"] = assignment_tick
 
     if role == "suppress":
         # Suppressing units hold at ~80% of their weapon range
@@ -977,7 +1065,15 @@ def _apply_combat_role(unit, role: str, dist: float, weapon_range: float,
                 flank_dist_m = max(200, min(dist * 0.7, 500))
                 best_pos = None
                 best_prot = 0
-                for sign in (1, -1):
+                side_pref = task.get("maneuver_side")
+                if side_pref == "left":
+                    signs = (-1,)
+                elif side_pref == "right":
+                    signs = (1,)
+                else:
+                    signs = (1, -1)
+                chosen_sign = None
+                for sign in signs:
                     flank_bearing = bearing_rad + sign * offset_rad
                     flank_lat = tgt_pos[0] + flank_dist_m * math.cos(flank_bearing) / METERS_PER_DEG_LAT
                     flank_lon = tgt_pos[1] + flank_dist_m * math.sin(flank_bearing) / METERS_PER_DEG_LON_AT_48
@@ -987,9 +1083,14 @@ def _apply_combat_role(unit, role: str, dist: float, weapon_range: float,
                     if best_pos is None or prot > best_prot:
                         best_prot = prot
                         best_pos = (flank_lat, flank_lon)
+                        chosen_sign = sign
                 if best_pos:
                     task["target_location"] = {"lat": best_pos[0], "lon": best_pos[1]}
-                    task["flank_target"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+                    task["flank_assault_location"] = {"lat": tgt_pos[0], "lon": tgt_pos[1]}
+                    task["flank_phase"] = "approach"
+                    task["maneuver_kind"] = "flank"
+                    if not task.get("maneuver_side"):
+                        task["maneuver_side"] = "left" if chosen_sign == -1 else "right"
             except Exception:
                 pass
 
@@ -1087,6 +1188,11 @@ def check_artillery_ceasefire_coordination(
                 a for a in arty_units
                 if (a.side.value if hasattr(a.side, 'value') else str(a.side)) == u_side
             ]
+            linked_ids = {str(uid) for uid in (task.get("supporting_unit_ids") or []) if uid}
+            if linked_ids:
+                linked_same_side = [a for a in same_side_arty if str(a.id) in linked_ids]
+                if linked_same_side:
+                    same_side_arty = linked_same_side
             if not same_side_arty:
                 continue
 
@@ -1102,6 +1208,30 @@ def check_artillery_ceasefire_coordination(
                 u_pos[0], u_pos[1],
                 arty_target["lat"], arty_target["lon"]
             )
+
+            progress_stage = task.get("fire_support_progress_stage", 0)
+            if 250.0 < dist_to_bombardment <= 700.0:
+                desired_stage = 2 if dist_to_bombardment <= 400.0 else 1
+                if desired_stage > progress_stage:
+                    new_task = dict(task)
+                    new_task["fire_support_progress_stage"] = desired_stage
+                    u.current_task = new_task
+                    events.append({
+                        "event_type": "fire_support_progress",
+                        "actor_unit_id": u.id,
+                        "text_summary": (
+                            f"{u.name} updating {same_side_arty[0].name} while closing on target"
+                        ),
+                        "payload": {
+                            "unit_id": str(u.id),
+                            "artillery_id": str(same_side_arty[0].id),
+                            "distance_to_target_m": round(dist_to_bombardment, 1),
+                            "target_lat": arty_target["lat"],
+                            "target_lon": arty_target["lon"],
+                            "stage": "final_approach" if desired_stage == 2 else "closing",
+                        },
+                    })
+                    task = new_task
 
             if dist_to_bombardment <= CEASEFIRE_REQUEST_RADIUS_M:
                 # Halt the unit and request cease-fire
@@ -1186,6 +1316,43 @@ def process_artillery_support(
         if pid:
             children_by_parent.setdefault(pid, []).append(u)
 
+    # Keep linked support fire aligned with the supported unit's
+    # current target or objective until cease-fire logic stops it.
+    for arty in all_units:
+        if arty.is_destroyed or arty.unit_type not in ARTILLERY_TYPES:
+            continue
+        arty_task = arty.current_task or {}
+        if arty_task.get("type") != "fire" or not arty_task.get("sustained_support"):
+            continue
+        if arty_task.get("ceasefire_requested_by"):
+            continue
+        supported_unit = units_by_id.get(str(arty_task.get("support_for")))
+        next_target_loc, next_target_uid = _resolve_supported_fire_target(
+            arty_task,
+            supported_unit,
+            units_by_id,
+        )
+        if not next_target_loc:
+            continue
+
+        current_target = arty_task.get("target_location") or {}
+        drift = _distance_m(
+            float(current_target.get("lat", next_target_loc["lat"])),
+            float(current_target.get("lon", next_target_loc["lon"])),
+            next_target_loc["lat"],
+            next_target_loc["lon"],
+        )
+        if drift > 35.0 or (
+            next_target_uid and str(arty_task.get("target_unit_id") or "") != next_target_uid
+        ):
+            refreshed = dict(arty_task)
+            refreshed["target_location"] = next_target_loc
+            if next_target_uid:
+                refreshed["target_unit_id"] = next_target_uid
+            else:
+                refreshed.pop("target_unit_id", None)
+            arty.current_task = refreshed
+
     # Track which artillery units have already been tasked this tick
     tasked_artillery = set()
 
@@ -1195,6 +1362,8 @@ def process_artillery_support(
         req_target_loc = req.get("target_location")
         req_target_uid = req.get("target_unit_id")
         req_coord_refs = [str(ref).lower() for ref in (req.get("coordination_unit_refs") or []) if ref]
+        req_coord_ids = {str(ref) for ref in (req.get("coordination_unit_ids") or []) if ref}
+        req_support_ids = {str(ref) for ref in (req.get("supporting_unit_ids") or []) if ref}
         
         if not req_unit_id or not req_target_loc:
             continue
@@ -1206,7 +1375,7 @@ def process_artillery_support(
         unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
 
         preferred_artillery: list = []
-        if req_coord_refs:
+        if req_coord_ids or req_support_ids or req_coord_refs:
             for candidate in all_units:
                 if candidate.is_destroyed:
                     continue
@@ -1216,13 +1385,18 @@ def process_artillery_support(
                 if cand_side != unit_side:
                     continue
                 cand_name = (candidate.name or "").lower()
-                if any(
+                cand_id = str(candidate.id)
+                if (
+                    cand_id in req_coord_ids
+                    or cand_id in req_support_ids
+                    or any(
                     ref in cand_name
                     or cand_name in ref
                     or (ref == "mortar" and "мином" in cand_name)
                     or (ref == "миномёт" and "mortar" in cand_name)
                     or (ref == "миномет" and "mortar" in cand_name)
                     for ref in req_coord_refs
+                    )
                 ):
                     preferred_artillery.append(candidate)
 
@@ -1302,6 +1476,7 @@ def process_artillery_support(
                     "target_unit_id": req_target_uid,
                     "support_for": str(unit.id),
                     "support_type": "fire_request",
+                    "sustained_support": True,
                     "salvos_remaining": DEFAULT_FIRE_SALVOS,
                 }
                 tasked_artillery.add(str(sib.id))
@@ -1416,6 +1591,16 @@ def process_artillery_support(
             continue
 
         unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+        linked_support_ids = {str(uid) for uid in ((task or {}).get("supporting_unit_ids") or []) if uid}
+
+        candidate_groups: list[list] = []
+        if linked_support_ids:
+            candidate_groups.append([
+                sib for sib in all_units
+                if not sib.is_destroyed
+                and sib.unit_type in ARTILLERY_TYPES
+                and str(sib.id) in linked_support_ids
+            ])
 
         # Walk up the CoC to find artillery siblings (up to 3 levels)
         visited = set()
@@ -1428,9 +1613,11 @@ def process_artillery_support(
             if parent_id in visited:
                 break
             visited.add(parent_id)
+            candidate_groups.append(children_by_parent.get(parent_id, []))
+            current_id = parent_id
 
-            # Check all siblings (children of the same parent)
-            siblings = children_by_parent.get(parent_id, [])
+        assigned = False
+        for siblings in candidate_groups:
             for sib in siblings:
                 if str(sib.id) in tasked_artillery:
                     continue
@@ -1490,6 +1677,7 @@ def process_artillery_support(
                     "target_unit_id": actual_target_uid,
                     "support_for": str(unit.id),
                     "support_type": support_type,
+                    "sustained_support": True,
                     "salvos_remaining": DEFAULT_FIRE_SALVOS,
                 }
                 tasked_artillery.add(str(sib.id))
@@ -1508,8 +1696,9 @@ def process_artillery_support(
                         "target_lon": actual_fire_target["lon"],
                     },
                 })
+                assigned = True
                 break  # One artillery unit per requesting unit per tick
-
-            current_id = parent_id
+            if assigned:
+                break
 
     return events

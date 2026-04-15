@@ -863,6 +863,31 @@ def process_movement(
             unit.position = from_shape(Point(new_lon, new_lat), srid=4326)
             unit.heading_deg = heading
 
+            if task_type in ("attack", "engage") and task.get("maneuver_kind") == "flank" and task.get("flank_phase") == "approach":
+                next_target = task.get("flank_assault_location") or {}
+                if next_target.get("lat") is not None and next_target.get("lon") is not None:
+                    new_task = dict(task)
+                    new_task["target_location"] = {
+                        "lat": next_target["lat"],
+                        "lon": next_target["lon"],
+                    }
+                    new_task["flank_phase"] = "assault"
+                    new_task.pop("waypoints", None)
+                    new_task["path_calc_tick"] = -999
+                    unit.current_task = new_task
+                    events.append({
+                        "event_type": "movement",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} reached flank approach point and is transitioning to assault",
+                        "payload": {
+                            "lat": new_lat,
+                            "lon": new_lon,
+                            "maneuver_kind": "flank",
+                            "phase": "assault",
+                        },
+                    })
+                    continue
+
             # Complete the movement task
             if task_type == "move":
                 unit.current_task = None
@@ -909,6 +934,31 @@ def process_movement(
 
                 unit.position = from_shape(Point(new_lon, new_lat), srid=4326)
                 unit.heading_deg = heading
+
+                if task_type in ("attack", "engage") and task.get("maneuver_kind") == "flank" and task.get("flank_phase") == "approach":
+                    next_target = task.get("flank_assault_location") or {}
+                    if next_target.get("lat") is not None and next_target.get("lon") is not None:
+                        new_task = dict(task)
+                        new_task["target_location"] = {
+                            "lat": next_target["lat"],
+                            "lon": next_target["lon"],
+                        }
+                        new_task["flank_phase"] = "assault"
+                        new_task.pop("waypoints", None)
+                        new_task["path_calc_tick"] = -999
+                        unit.current_task = new_task
+                        events.append({
+                            "event_type": "movement",
+                            "actor_unit_id": unit.id,
+                            "text_summary": f"{unit.name} reached flank approach point and is transitioning to assault",
+                            "payload": {
+                                "lat": new_lat,
+                                "lon": new_lon,
+                                "maneuver_kind": "flank",
+                                "phase": "assault",
+                            },
+                        })
+                        continue
 
                 if task_type == "move":
                     unit.current_task = None

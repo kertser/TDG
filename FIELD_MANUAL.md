@@ -2084,8 +2084,17 @@ LLM-based victory evaluation runs every 5 ticks:
 - **Danger close**: Never fire within 50m of friendly troops. Cease fire if friendlies advance into the beaten zone.
 - **Proactive ceasefire**: When assault infantry approaches within 250m of the bombardment zone, they halt and request cease-fire. Artillery finishes its last salvo then stops. Infantry resumes advance only after confirming artillery has ceased. This prevents friendly fire during the critical fire-to-assault transition.
 - **Three-tier friendly fire prevention**: (1) Proactive ceasefire at 250m, (2) Danger-close auto-stop at 50m, (3) Area-fire blast zone exclusion at 150m.
+- **Sustained support link**: A fire-support request does NOT cancel the caller's primary maneuver. The supported unit keeps moving/fighting while the support unit maintains linked fires until the target is neutralized, shifted, or stopped by cease-fire logic.
+- **Approach updates**: Supported maneuver elements report approach stages while closing under fire support. Typical stages: "closing" (~700m), "final approach" (~400m), then cease-fire request (~250m).
 
-#### C.2.4 Combat Role Coordination
+#### C.2.4 Follow, Lead, Trail, and Bounds
+- **Follow / Trail**: A following element tracks a designated lead element, usually 80-150m to the rear. Use to keep command cohesion, reinforce a lead squad, or pass through a cleared lane.
+- **Lead**: The lead element is responsible for navigation, first contact, and initial deployment. Following units do not overtake unless ordered.
+- **Left/Right rear follow**: If a commander specifies left-rear/right-rear, the following unit offsets laterally while maintaining rear interval. This preserves dispersion and protects a flank.
+- **Bounding movement**: When contact is likely, one element moves while another covers. Use explicit language such as "bound", "cover my move", "двигайтесь перебежками", or "прикрывай выдвижение".
+- **Rule**: Follow/trail orders are persistent maneuver relationships, not one-time coordinate moves. The follower continuously adjusts to the lead unit's movement.
+
+#### C.2.5 Combat Role Coordination
 When **multiple units engage the same enemy**, they automatically coordinate:
 
 1. **Suppress** (~40% of attacking group): Stay at weapon range, provide covering fire. Damage reduced (×0.6) but suppression increased (×1.5). Preferred unit types: tanks, AT teams, mortars, mechanized infantry. **Do NOT advance to point-blank.**
@@ -2096,7 +2105,21 @@ When **multiple units engage the same enemy**, they automatically coordinate:
 
 Radio coordination: units announce their roles ("providing suppressive fire" / "moving to flank" / "moving to assault position") so adjacent units are aware.
 
-#### C.2.5 Combined Arms Principles
+#### C.2.6 Command Language Patterns
+The parser and tactical AI should treat the following command families as doctrinally equivalent:
+
+- **Follow / trail**: "follow B-squad", "trail A-squad", "следуй за B-squad", "держись за ведущим".
+- **Flank left / right**: "go in on the left flank", "hook right", "левый охват", "заходите справа", "уступом влево/вправо".
+- **Support by fire / covering fire**: "support by fire", "cover their move", "прикройте огнём", "огневое прикрытие".
+- **Bounding / leapfrogging**: "bound forward", "advance by bounds", "двигайтесь перебежками", "скачками вперёд".
+- **Delay / fighting withdrawal**: "delay them and fall back", "slow the enemy then withdraw", "задерживайте и отходите".
+- **Hold / defend in place**: "hold this line", "occupy and defend", "занять и удерживать", "держать рубеж".
+- **Recon / screen**: "recon forward", "screen the left flank", "вести разведку", "прикрыть фланг наблюдением".
+- **Fire request / adjust fire**: "call for fire", "direct mortars on target", "наведи миномёт на цель", "перенеси огонь глубже".
+- **Withdrawal / disengage**: "break contact", "withdraw to rally point", "разорвать контакт", "отход на запасной рубеж".
+- **Air/river/assault special tasks**: "land on objective", "cross under smoke", "desant on ridge", "форсировать реку под дымом" should preserve the same principles: reconnaissance, suppressive fires, security of flanks, and phased movement.
+
+#### C.2.7 Combined Arms Principles
 
 | Unit Type | Primary Role | Employment Principle |
 |-----------|-------------|---------------------|
@@ -2510,6 +2533,10 @@ Units respond with:
 #### Key Tactical Principles
 - **Fire and Maneuver**: One element suppresses while another moves. Never advance without covering fire. Suppressing units hold at weapon range (80%), only assault elements close in.
 - **Combat Role Coordination**: Multiple units attacking the same enemy auto-coordinate — ~40% suppress (stay at range, ×1.5 suppression), 1-2 assault (close in), rest flank (60° offset). Not everyone storms point-blank.
+- **Follow / Trail Relationships**: Orders such as "follow B-squad", "trail the lead section", or "следуй за B-squad" create a persistent lead-follow link. The follower keeps interval and adjusts continuously to the lead unit rather than moving to a single fixed point.
+- **Support Overlay, Not Replacement**: Calling fire support or directing a supporting unit does not erase the caller's maneuver task. Fire requests are layered over the ongoing maneuver until shifted or ceased.
+- **Implicit Current Target**: When commanders say "the target", "на цель", or "the enemy" without a new grid, subordinate units should use the latest valid contact or last designated target for continuity.
+- **Bounding and Screening**: Bounding movement means one element moves while another covers. Screening means observing, warning, and preserving flank security rather than closing decisively with the enemy.
 - **Combined Arms**: Infantry clears complex terrain, armor provides shock in open terrain, artillery suppresses from range, recon finds the enemy.
 - **Concentration of Force**: Attack with local superiority (3:1 minimum). Never spread forces evenly.
 - **Terrain**: Use cover (forest 1.4× protection, urban 1.5×) and concealment (forest 0.4 vis, urban 0.5 vis). Higher ground = advantage.
@@ -2519,6 +2546,7 @@ Units respond with:
 #### Order Types and Implied Tasks
 - **Move**: Maintain comms, report arrival, expect contact en route.
 - **Attack**: Suppress enemy, establish fire superiority, coordinate roles (suppress/assault/flank), consolidate after assault. Request artillery cease-fire before storming bombarded positions.
+- **Follow / Trail Move**: Maintain lead-follow interval, do not overtake lead element, inherit the lead element's route and contact tempo.
 - **Defend**: Dig in, improve positions, prepare fire plan, establish OPs.
 - **Observe**: Maintain concealment, report contacts, avoid engagement. Also used for **standby orders** (e.g., "get ready for fire support on request" → unit waits for explicit fire commands rather than firing immediately).
 - **Fire**: Compute fire solution, observe and adjust. Danger close = 50m. Cease fire when friendly infantry within 250m of target.

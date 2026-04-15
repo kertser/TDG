@@ -142,6 +142,15 @@ class ParsedOrderData(BaseModel):
         description="Type of coordination requested, e.g. 'coordination', "
                     "'covering_fire', or 'fire_support'",
     )
+    maneuver_kind: Optional[str] = Field(
+        None,
+        description="Requested maneuver method, e.g. 'follow', 'flank', "
+                    "'bounding', 'support_by_fire', 'lead', or 'trail'",
+    )
+    maneuver_side: Optional[str] = Field(
+        None,
+        description="Side bias for a maneuver when applicable: 'left' or 'right'",
+    )
     status_request_focus: list[str] = Field(
         default_factory=list,
         description="For status_request messages: requested info categories such as "

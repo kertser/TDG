@@ -200,6 +200,14 @@ class OrderParser:
                         or keyword_result.coordination_kind
                         or "fire_support"
                     ),
+                    "maneuver_kind": (
+                        llm_result.maneuver_kind
+                        or keyword_result.maneuver_kind
+                    ),
+                    "maneuver_side": (
+                        llm_result.maneuver_side
+                        or keyword_result.maneuver_side
+                    ),
                     "confidence": max(llm_result.confidence, 0.72),
                 }
             )
@@ -669,6 +677,8 @@ class OrderParser:
         status_request_focus: list[str] = []
         coordination_unit_refs: list[str] = []
         coordination_kind = None
+        maneuver_kind = None
+        maneuver_side = None
 
         def _infer_status_request_focus(raw_text: str) -> list[str]:
             inferred: list[str] = []
@@ -822,6 +832,30 @@ class OrderParser:
             _has_flank_maneuver = any(kw in text_lower for kw in [
                 "обход", "охват", "flank", "envelop", "заносите фланг",
             ])
+            _has_follow_maneuver = any(kw in text_lower for kw in [
+                "follow ", "follow-", "trail ", "keep behind", "move behind",
+                "следуй за", "следовать за", "иди за", "двигайся за",
+                "держись за", "держаться за", "за ним", "за ними",
+            ])
+            _has_bounding_maneuver = any(kw in text_lower for kw in [
+                "bound forward", "bounding", "leapfrog", "bounds by",
+                "перебежк", "перекатами", "скачками", "bound by fire",
+            ])
+            _has_support_by_fire = any(kw in text_lower for kw in [
+                "support by fire", "supporting fire position",
+                "позиция поддержки огнем", "поддержка огнём", "поддержка огнем",
+                "огневая позиция поддержки",
+            ])
+            _has_delay_mission = any(kw in text_lower for kw in [
+                "delay them", "delay the enemy", "fighting withdrawal",
+                "задерживай", "задерживайте", "сдерживай", "сдерживайте",
+            ])
+            _has_screen_mission = any(kw in text_lower for kw in [
+                "screen the flank", "screen left flank", "screen right flank",
+                "screen forward", "screen this axis",
+                "прикрой фланг наблюдением", "прикрыть фланг наблюдением",
+                "экранируй", "screen and report",
+            ])
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
@@ -842,6 +876,9 @@ class OrderParser:
                 # "Request artillery support", "Direct artillery at enemy" → request_fire
                 # This creates a fire request to CoC artillery
                 order_type = "request_fire"
+            elif _has_support_by_fire:
+                order_type = "support"
+                maneuver_kind = "support_by_fire"
             elif _is_coordination and any(kw in text_lower for kw in ["attack", "assault", "engage",
                                                                        "атак", "штурм", "наступ"]):
                 # "Lead the attack", "coordinate the attack" → attack with coordination
@@ -874,6 +911,9 @@ class OrderParser:
                 order_type = "support"
             elif _has_flank_maneuver and _has_enemy_reference:
                 order_type = "attack"
+                maneuver_kind = "flank"
+            elif _has_delay_mission:
+                order_type = "disengage"
             # Check attack/eliminate BEFORE move: "Move to X. Eliminate enemy" should be attack
             elif any(kw in text_lower for kw in ["attack", "engage", "eliminate", "destroy", "neutralize",
                                                     "атак",
@@ -884,9 +924,13 @@ class OrderParser:
             elif any(kw in text_lower for kw in ["move", "advance", "form ", "выдвигай", "двигай",
                                                      "движен", "марш", "обход", "перестрои", "построение"]):
                 order_type = "move"
+                if _has_follow_maneuver:
+                    maneuver_kind = "follow"
+                elif _has_bounding_maneuver:
+                    maneuver_kind = "bounding"
             elif any(kw in text_lower for kw in ["defend", "hold", "оборон", "удержи"]):
                 order_type = "defend"
-            elif any(kw in text_lower for kw in ["observe", "наблюда"]):
+            elif _has_screen_mission or any(kw in text_lower for kw in ["observe", "наблюда", "recon", "развед"]):
                 order_type = "observe"
             elif any(kw in text_lower for kw in ["disengage", "break contact", "разорвать контакт",
                                                     "разорви контакт", "выйти из боя", "выйди из боя",
@@ -980,6 +1024,28 @@ class OrderParser:
                     "ref_type": "map_object",
                     "normalized": obj_text.lower(),
                 })
+
+        has_resolved_location = any(
+            lr["ref_type"] in {"snail", "grid", "coordinate", "height", "map_object"}
+            for lr in location_refs
+        )
+        implied_contact_target = (
+            _has_enemy_reference
+            or any(kw in text_lower for kw in [
+                "на цель", "по цели", "цель", "at the target", "on target", "target",
+            ])
+        )
+        if (
+            classification == MessageClassification.command
+            and order_type in (OrderType.attack, OrderType.fire, OrderType.request_fire)
+            and not has_resolved_location
+            and implied_contact_target
+        ):
+            location_refs.append({
+                "source_text": "current contact",
+                "ref_type": "contact_target",
+                "normalized": "current_contact",
+            })
 
         # ── Implicit target from "на цель" / "по цели" / "at the target" ──
         # When no explicit location is given but text says "at the target" / "на цель",
@@ -1153,8 +1219,14 @@ class OrderParser:
         if not formation:
             if any(kw in text_lower for kw in ["левым охватом", "обход слева", "левый фланг"]):
                 formation = "echelon_left"
+                maneuver_side = "left"
             elif any(kw in text_lower for kw in ["правым охватом", "обход справа", "правый фланг"]):
                 formation = "echelon_right"
+                maneuver_side = "right"
+        elif formation == "echelon_left":
+            maneuver_side = maneuver_side or "left"
+        elif formation == "echelon_right":
+            maneuver_side = maneuver_side or "right"
 
         # Also look for explicit formation commands
         import re as _re
@@ -1255,6 +1327,29 @@ class OrderParser:
                     if candidate and candidate not in coordination_unit_refs:
                         coordination_unit_refs.append(candidate)
 
+            follow_patterns = [
+                r'follow\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'trail\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'keep\s+behind\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'следуй\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'следовать\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'иди\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'двигай(?:ся)?\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'держ(?:ись|аться)\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+            ]
+            for pat in follow_patterns:
+                for match in _re3.finditer(pat, text, _re3.IGNORECASE):
+                    candidate = match.group(1).strip().rstrip(".,;!")
+                    candidate = _re3.split(
+                        r'\b(?:и|and|then|keeping|maintaining|maintain|with|слева|справа|left|right)\b',
+                        candidate,
+                        maxsplit=1,
+                        flags=_re3.IGNORECASE,
+                    )[0].strip().rstrip(".,;!")
+                    if candidate and candidate not in coordination_unit_refs:
+                        coordination_unit_refs.append(candidate)
+                        maneuver_kind = maneuver_kind or "follow"
+
             # If the text refers to "the mortars"/"artillery" generically, keep that context
             if any(kw in text_lower for kw in ["миномёт", "миномет", "mortar"]):
                 if not any("мином" in ref.lower() or "mortar" in ref.lower() for ref in coordination_unit_refs):
@@ -1283,6 +1378,21 @@ class OrderParser:
             elif coordination_unit_refs:
                 coordination_kind = "coordination"
 
+        if maneuver_kind == "flank" and maneuver_side is None:
+            if any(kw in text_lower for kw in ["слева", "left flank", "left hook", "left envelopment"]):
+                maneuver_side = "left"
+            elif any(kw in text_lower for kw in ["справа", "right flank", "right hook", "right envelopment"]):
+                maneuver_side = "right"
+
+        if maneuver_kind is None and _has_follow_maneuver and coordination_unit_refs:
+            maneuver_kind = "follow"
+        if maneuver_kind is None and _has_flank_maneuver:
+            maneuver_kind = "flank"
+        if maneuver_kind is None and _has_bounding_maneuver:
+            maneuver_kind = "bounding"
+        if maneuver_kind is None and _has_support_by_fire:
+            maneuver_kind = "support_by_fire"
+
         return ParsedOrderData(
             classification=classification,
             language=lang,
@@ -1297,6 +1407,8 @@ class OrderParser:
             support_target_ref=support_target_ref,
             coordination_unit_refs=coordination_unit_refs,
             coordination_kind=coordination_kind,
+            maneuver_kind=maneuver_kind,
+            maneuver_side=maneuver_side,
             confidence=self._compute_keyword_confidence(
                 classification, order_type, location_refs,
                 target_unit_refs, speed, engagement_rules, formation,

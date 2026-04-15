@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import math
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -55,7 +56,12 @@ from backend.models.map_object import MapObject
 from backend.engine.terrain import TerrainService
 from backend.engine.movement import process_movement
 from backend.engine.detection import process_detection
-from backend.engine.combat import process_combat, process_artillery_support
+from backend.engine.combat import (
+    process_combat,
+    process_artillery_support,
+    assign_combat_roles,
+    check_artillery_ceasefire_coordination,
+)
 from backend.engine.morale import process_morale
 from backend.engine.comms import process_comms
 from backend.engine.contacts import process_contacts
@@ -67,6 +73,136 @@ from backend.engine.structures import process_structures
 from backend.engine.resupply import process_resupply
 
 logger = logging.getLogger(__name__)
+
+_M_PER_DEG_LAT = 111_320.0
+_M_PER_DEG_LON_48 = 74_000.0
+
+
+def _compute_follow_target(unit, leader, task: dict) -> dict | None:
+    if unit.position is None or leader.position is None:
+        return None
+    try:
+        u_pt = to_shape(unit.position)
+        l_pt = to_shape(leader.position)
+    except Exception:
+        return None
+
+    follow_dist = float(task.get("follow_distance_m") or 120.0)
+    offset_cfg = task.get("follow_offset_m") or {}
+    rear = float(offset_cfg.get("rear", follow_dist))
+    lateral = float(offset_cfg.get("lateral", 0.0))
+
+    heading = leader.heading_deg
+    if heading is None:
+        dy = (l_pt.y - u_pt.y) * _M_PER_DEG_LAT
+        dx = (l_pt.x - u_pt.x) * _M_PER_DEG_LON_48
+        if abs(dx) + abs(dy) < 1.0:
+            heading = 0.0
+        else:
+            heading = math.degrees(math.atan2(dx, dy)) % 360.0
+
+    heading_rad = math.radians(heading)
+    back_dx = -math.sin(heading_rad) * rear
+    back_dy = -math.cos(heading_rad) * rear
+    right_dx = math.cos(heading_rad) * lateral
+    right_dy = -math.sin(heading_rad) * lateral
+
+    return {
+        "lat": l_pt.y + (back_dy + right_dy) / _M_PER_DEG_LAT,
+        "lon": l_pt.x + (back_dx + right_dx) / _M_PER_DEG_LON_48,
+    }
+
+
+def _compute_flank_approach(
+    start_lat: float,
+    start_lon: float,
+    target_lat: float,
+    target_lon: float,
+    side: str | None,
+) -> dict | None:
+    dy = (target_lat - start_lat) * _M_PER_DEG_LAT
+    dx = (target_lon - start_lon) * _M_PER_DEG_LON_48
+    dist = (dx * dx + dy * dy) ** 0.5
+    if dist < 25:
+        return None
+
+    bearing = math.atan2(dx, dy)
+    offset = math.radians(60.0)
+    sign = -1 if side == "left" else 1
+    if side not in ("left", "right"):
+        sign = -1
+    flank_dist = max(220.0, min(dist * 0.65, 550.0))
+    flank_bearing = bearing + sign * offset
+    return {
+        "lat": target_lat + flank_dist * math.cos(flank_bearing) / _M_PER_DEG_LAT,
+        "lon": target_lon + flank_dist * math.sin(flank_bearing) / _M_PER_DEG_LON_48,
+    }
+
+
+def _refresh_dynamic_task_targets(all_units: list) -> None:
+    """Refresh dynamic targets for follow/flank tasks before pathfinding."""
+    units_by_id = {str(u.id): u for u in all_units if not u.is_destroyed}
+
+    def _drift_m(old_target: dict | None, new_target: dict | None) -> float:
+        if not old_target or not new_target:
+            return float("inf")
+        dlat = (new_target["lat"] - old_target.get("lat", 0.0)) * _M_PER_DEG_LAT
+        dlon = (new_target["lon"] - old_target.get("lon", 0.0)) * _M_PER_DEG_LON_48
+        return (dlat * dlat + dlon * dlon) ** 0.5
+
+    for unit in all_units:
+        if unit.is_destroyed or not unit.current_task:
+            continue
+        task = unit.current_task
+        new_task = dict(task)
+        changed = False
+
+        follow_unit_id = task.get("follow_unit_id")
+        if follow_unit_id:
+            leader = units_by_id.get(str(follow_unit_id))
+            if leader is None:
+                new_task.pop("follow_unit_id", None)
+                new_task.pop("follow_unit_name", None)
+                changed = True
+            else:
+                follow_target = _compute_follow_target(unit, leader, task)
+                if follow_target:
+                    if _drift_m(task.get("target_location"), follow_target) > 35.0:
+                        new_task["target_location"] = follow_target
+                        new_task.pop("waypoints", None)
+                        new_task["path_calc_tick"] = -999
+                        changed = True
+
+        if task.get("maneuver_kind") == "flank" and task.get("flank_phase") == "approach":
+            final_target = dict(task.get("flank_assault_location") or {})
+            target_unit_id = task.get("target_unit_id")
+            if target_unit_id:
+                target_unit = units_by_id.get(str(target_unit_id))
+                if target_unit is not None and target_unit.position is not None:
+                    try:
+                        tgt_pt = to_shape(target_unit.position)
+                        final_target = {"lat": tgt_pt.y, "lon": tgt_pt.x}
+                    except Exception:
+                        pass
+            if final_target.get("lat") is not None and unit.position is not None:
+                try:
+                    up = to_shape(unit.position)
+                    approach = _compute_flank_approach(
+                        up.y, up.x,
+                        final_target["lat"], final_target["lon"],
+                        task.get("maneuver_side"),
+                    )
+                    if approach and _drift_m(task.get("target_location"), approach) > 50.0:
+                        new_task["target_location"] = approach
+                        new_task["flank_assault_location"] = final_target
+                        new_task.pop("waypoints", None)
+                        new_task["path_calc_tick"] = -999
+                        changed = True
+                except Exception:
+                    pass
+
+        if changed:
+            unit.current_task = new_task
 
 
 async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
@@ -361,6 +497,11 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     # Combine weather and night modifiers for detection
     combined_visibility_mod = weather_mod * night_mod
+
+    # ── 1.45. Refresh dynamic maneuver targets / assign combat roles ─────
+    _refresh_dynamic_task_targets(all_units)
+    role_events = assign_combat_roles(all_units, terrain, assignment_tick=tick)
+    all_events.extend(role_events)
 
     # ── 1.5. Compute tactical waypoints for moving units ────────
     # Build pathfound routes for units that have move/attack tasks but no waypoints
@@ -722,18 +863,23 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                 unit.current_task = None
         # Also generate fire requests for units with attack tasks that detect enemies
         # This implements "initiative" — units calling for fire support when engaging
-        elif task.get("type") in ("attack", "engage") and task.get("request_artillery", False):
-            target_uid = task.get("target_unit_id")
-            target_loc = task.get("target_location")
-            if target_uid and target_loc:
+        elif task.get("request_artillery", False):
+            target_uid = task.get("request_fire_target_unit_id") or task.get("target_unit_id")
+            target_loc = task.get("request_fire_target_location") or task.get("target_location")
+            if target_loc:
                 fire_requests.append({
                     "unit_id": str(unit.id),
                     "target_location": target_loc,
                     "target_unit_id": target_uid,
+                    "coordination_unit_refs": list(task.get("coordination_unit_refs") or []),
+                    "coordination_unit_ids": list(task.get("coordination_unit_ids") or []),
+                    "supporting_unit_ids": list(task.get("supporting_unit_ids") or []),
                 })
                 # Clear the flag so we don't request repeatedly
                 new_task = dict(task)
                 new_task.pop("request_artillery", None)
+                new_task.pop("request_fire_target_location", None)
+                new_task.pop("request_fire_target_unit_id", None)
                 unit.current_task = new_task
 
     arty_events = process_artillery_support(
@@ -743,6 +889,9 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         fire_requests=fire_requests,
     )
     all_events.extend(arty_events)
+
+    ceasefire_events = check_artillery_ceasefire_coordination(all_units, terrain)
+    all_events.extend(ceasefire_events)
 
     # ── 5. Execute combat ────────────────────────────────────────
     _t0 = time.monotonic()
@@ -898,6 +1047,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         generate_contact_radio_messages,
         generate_combat_coordination_messages,
         generate_artillery_fire_messages,
+        generate_fire_support_progress_messages,
         generate_coordinated_attack_messages,
         generate_contact_halt_messages,
     )
@@ -927,6 +1077,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         all_units, all_events, tick,
         grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
+    fire_support_progress_msgs = generate_fire_support_progress_messages(
+        all_units, all_events, tick,
+        grid_service=grid_service, language=_lang, side_languages=_side_languages,
+    )
     coord_attack_msgs = generate_coordinated_attack_messages(
         all_units, all_events, tick,
         grid_service=grid_service, language=_lang, side_languages=_side_languages,
@@ -936,9 +1090,12 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
         grid_service=grid_service, language=_lang, side_languages=_side_languages,
     )
 
-    radio_messages = idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs + arty_fire_msgs + coord_attack_msgs + contact_halt_msgs
+    radio_messages = (
+        idle_msgs + peer_msgs + casualty_msgs + contact_msgs + combat_coord_msgs
+        + arty_fire_msgs + fire_support_progress_msgs + coord_attack_msgs + contact_halt_msgs
+    )
     if _debug:
-        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)} arty_fire={len(arty_fire_msgs)} coord_attack={len(coord_attack_msgs)} contact_halt={len(contact_halt_msgs)}")
+        dlog(f"  [10c] Radio chatter: idle={len(idle_msgs)} peer={len(peer_msgs)} casualty={len(casualty_msgs)} contact={len(contact_msgs)} combat_coord={len(combat_coord_msgs)} arty_fire={len(arty_fire_msgs)} fire_support_progress={len(fire_support_progress_msgs)} coord_attack={len(coord_attack_msgs)} contact_halt={len(contact_halt_msgs)}")
         # Log contact events for debugging detection→radio pipeline
         contact_new_evts = [e for e in all_events if e.get("event_type") in ("contact_new", "contact_refreshed")]
         dlog(f"  [10c] Contact events in all_events: {len(contact_new_evts)}")
@@ -1446,6 +1603,31 @@ async def _process_orders(
                 "text_summary": f"{unit.name} disengaging, breaking contact",
                 "payload": {"order_id": str(order.id), "task": task},
             })
+        elif task_type == "request_fire" and unit.current_task:
+            # Fire requests are coordination overlays, not a replacement for an
+            # ongoing maneuver or fight. Merge the request into the current task.
+            existing = dict(unit.current_task)
+            existing["order_id"] = str(order.id)
+            existing["request_artillery"] = True
+            if task.get("target_location"):
+                existing["request_fire_target_location"] = dict(task["target_location"])
+            if task.get("target_unit_id"):
+                existing["request_fire_target_unit_id"] = task["target_unit_id"]
+            for key in (
+                "coordination_unit_refs",
+                "coordination_unit_ids",
+                "coordination_kind",
+                "supporting_unit_ids",
+            ):
+                if task.get(key):
+                    existing[key] = task.get(key)
+            unit.current_task = existing
+            events.append({
+                "event_type": "order_issued",
+                "actor_unit_id": unit_uuid,
+                "text_summary": f"{unit.name} requested fire support while maintaining current task",
+                "payload": {"order_id": str(order.id), "task": existing},
+            })
         else:
             # Assign the task
             unit.current_task = task
@@ -1543,7 +1725,19 @@ def _order_to_task(order: Order) -> dict | None:
             "engagement_rules",
             "support_target_ref",
             "coordination_unit_refs",
+            "coordination_unit_ids",
             "coordination_kind",
+            "maneuver_kind",
+            "maneuver_side",
+            "follow_unit_id",
+            "follow_unit_name",
+            "follow_distance_m",
+            "follow_offset_m",
+            "supporting_unit_ids",
+            "flank_assault_location",
+            "flank_phase",
+            "combat_role",
+            "combat_role_locked",
             "purpose",
             "intent_action",
             "advance_to_fire",
