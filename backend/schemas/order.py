@@ -132,6 +132,12 @@ class ParsedOrderData(BaseModel):
         description="Unit name/callsign that this unit should support/relay to, "
                     "e.g. 'C-squad' in 'be ready to support C-squad's targets'",
     )
+    status_request_focus: list[str] = Field(
+        default_factory=list,
+        description="For status_request messages: requested info categories such as "
+                    "'full', 'position', 'terrain', 'nearby_friendlies', 'enemy', "
+                    "'task', 'condition', 'weather', 'objects'",
+    )
 
     # For acknowledgment / status_report messages
     report_text: Optional[str] = Field(

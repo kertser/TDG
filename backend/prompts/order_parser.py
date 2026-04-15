@@ -28,6 +28,17 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
    - `unclear` — garbled, irrelevant, meaningless, or too ambiguous to parse
 
+For `status_request`, also extract what information is being requested:
+  - `full` — general SITREP / full status
+  - `position` — where are you
+  - `terrain` — describe terrain / ground / cover
+  - `nearby_friendlies` — which friendly units are nearby
+  - `enemy` — enemy contacts / whether enemy seen
+  - `task` — current mission / what are you doing
+  - `condition` — casualties / ammo / morale / combat readiness
+  - `weather` — weather / visibility / conditions
+  - `objects` — nearby map objects / obstacles / structures
+
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
     - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
@@ -67,6 +78,9 @@ Use order_type="resupply" when units are ordered to resupply, rearm, or replenis
   - Logistics units ordered to "resupply units at [location]" = resupply at that location (they act as mobile supply)
 
 3. **Identify** the sender if the message includes self-identification ("Здесь первый взвод", "This is 2nd Platoon")
+4. **Use operational context** to resolve ambiguity:
+   - Prefer continuity with recent orders/radio traffic when wording is shorthand ("continue", "same target", "as before")
+   - Consider weather, terrain, contacts, map objects, and latest reports when inferring intent
 
 ## Grid Reference Format
 
@@ -155,6 +169,26 @@ Height tops are named terrain features visible on the map.
 
 {friendly_status_context}
 
+## Context: Weather / Environment
+
+{environment_context}
+
+## Context: Recent Orders (Own Side)
+
+{orders_context}
+
+## Context: Recent Radio / Chat Traffic
+
+{radio_context}
+
+## Context: Recent Operational Reports
+
+{reports_context}
+
+## Context: Known Map Objects / Points of Interest
+
+{map_objects_context}
+
 ## Output Format
 
 You MUST respond with a valid JSON object matching this exact schema:
@@ -164,6 +198,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "target_unit_refs": ["unit name or callsign as mentioned in text"],
   "sender_ref": "sender callsign if identifiable, or null",
   "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
+  "status_request_focus": ["full" | "position" | "terrain" | "nearby_friendlies" | "enemy" | "task" | "condition" | "weather" | "objects"],
   "location_refs": [
     {{
       "source_text": "original text fragment",
@@ -235,11 +270,54 @@ PARSED:
   "target_unit_refs": ["Второй взвод"],
   "sender_ref": null,
   "order_type": "report_status",
+  "status_request_focus": ["full"],
   "location_refs": [],
   "speed": null,
   "formation": null,
   "engagement_rules": null,
   "urgency": "priority",
+  "purpose": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "C-squad, какие подразделения рядом с тобой?"
+PARSED:
+{
+  "classification": "status_request",
+  "language": "ru",
+  "target_unit_refs": ["C-squad"],
+  "sender_ref": null,
+  "order_type": "report_status",
+  "status_request_focus": ["nearby_friendlies"],
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "C-squad, опиши местность рядом с собой"
+PARSED:
+{
+  "classification": "status_request",
+  "language": "ru",
+  "target_unit_refs": ["C-squad"],
+  "sender_ref": null,
+  "order_type": "report_status",
+  "status_request_focus": ["terrain"],
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
   "purpose": null,
   "report_text": null,
   "confidence": 0.95,
@@ -255,6 +333,7 @@ PARSED:
   "target_unit_refs": [],
   "sender_ref": "второй взвод",
   "order_type": null,
+  "status_request_focus": [],
   "location_refs": [{"source_text": "рядом с лесополосой в 600м от цели", "ref_type": "relative", "normalized": "near_treeline_600m_from_objective"}],
   "speed": null,
   "formation": null,
@@ -758,9 +837,17 @@ def build_unit_roster(units: list[dict]) -> str:
         if lat is not None and lon is not None:
             pos_str = f", pos: {lat:.4f},{lon:.4f}"
 
+        task = u.get("current_task") or {}
+        task_str = task.get("type", "idle")
+        strength = u.get("strength", 1.0)
+        ammo = u.get("ammo", 1.0)
+        morale = u.get("morale", 1.0)
+        comms = u.get("comms_status", "operational")
+
         lines.append(
             f"- {u['name']} (type: {u.get('unit_type', 'unknown')}, "
-            f"side: {u.get('side', '?')}{pos_str}{status})"
+            f"side: {u.get('side', '?')}, task: {task_str}, str/ammo/morale: "
+            f"{strength:.0%}/{ammo:.0%}/{morale:.0%}, comms: {comms}{pos_str}{status})"
         )
     return "\n".join(lines)
 

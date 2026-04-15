@@ -96,6 +96,11 @@ class OrderParser:
         contacts_context: str = "",
         objectives_context: str = "",
         friendly_status_context: str = "",
+        environment_context: str = "",
+        orders_context: str = "",
+        radio_context: str = "",
+        reports_context: str = "",
+        map_objects_context: str = "",
     ) -> ParsedOrderData:
         """
         Parse a radio message into structured data.
@@ -125,6 +130,11 @@ class OrderParser:
                     contacts_context=contacts_context,
                     objectives_context=objectives_context,
                     friendly_status_context=friendly_status_context,
+                    environment_context=environment_context,
+                    orders_context=orders_context,
+                    radio_context=radio_context,
+                    reports_context=reports_context,
+                    map_objects_context=map_objects_context,
                 )
                 return result if result else keyword_result
             # No cloud key — try local model for force_full_model too
@@ -141,6 +151,11 @@ class OrderParser:
                     contacts_context=contacts_context,
                     objectives_context=objectives_context,
                     friendly_status_context=friendly_status_context,
+                    environment_context=environment_context,
+                    orders_context=orders_context,
+                    radio_context=radio_context,
+                    reports_context=reports_context,
+                    map_objects_context=map_objects_context,
                 )
                 return result if result else keyword_result
             return keyword_result
@@ -168,6 +183,11 @@ class OrderParser:
                     contacts_context=contacts_context,
                     objectives_context=objectives_context,
                     friendly_status_context=friendly_status_context,
+                    environment_context=environment_context,
+                    orders_context=orders_context,
+                    radio_context=radio_context,
+                    reports_context=reports_context,
+                    map_objects_context=map_objects_context,
                 )
                 return result if result else keyword_result
             else:
@@ -215,6 +235,11 @@ class OrderParser:
                 contacts_context=contacts_context,
                 objectives_context=objectives_context,
                 friendly_status_context=friendly_status_context,
+                environment_context=environment_context,
+                orders_context=orders_context,
+                radio_context=radio_context,
+                reports_context=reports_context,
+                map_objects_context=map_objects_context,
             )
 
             # If nano returned unclear, escalate to full model
@@ -232,6 +257,11 @@ class OrderParser:
                     contacts_context=contacts_context,
                     objectives_context=objectives_context,
                     friendly_status_context=friendly_status_context,
+                    environment_context=environment_context,
+                    orders_context=orders_context,
+                    radio_context=radio_context,
+                    reports_context=reports_context,
+                    map_objects_context=map_objects_context,
                 )
                 if full_result and full_result.classification != MessageClassification.unclear:
                     return full_result
@@ -277,6 +307,11 @@ class OrderParser:
             contacts_context=contacts_context,
             objectives_context=objectives_context,
             friendly_status_context=friendly_status_context,
+            environment_context=environment_context,
+            orders_context=orders_context,
+            radio_context=radio_context,
+            reports_context=reports_context,
+            map_objects_context=map_objects_context,
         )
 
         # If unclear, escalate to full model
@@ -294,6 +329,11 @@ class OrderParser:
                 contacts_context=contacts_context,
                 objectives_context=objectives_context,
                 friendly_status_context=friendly_status_context,
+                environment_context=environment_context,
+                orders_context=orders_context,
+                radio_context=radio_context,
+                reports_context=reports_context,
+                map_objects_context=map_objects_context,
             )
             if full_result and full_result.classification != MessageClassification.unclear:
                 return full_result
@@ -315,6 +355,11 @@ class OrderParser:
         contacts_context: str = "",
         objectives_context: str = "",
         friendly_status_context: str = "",
+        environment_context: str = "",
+        orders_context: str = "",
+        radio_context: str = "",
+        reports_context: str = "",
+        map_objects_context: str = "",
     ) -> ParsedOrderData | None:
         """Call LLM and return parsed result, or None on failure."""
         # Filter units to issuer's side only (reduce prompt tokens)
@@ -335,6 +380,11 @@ class OrderParser:
             contacts_context=contacts_context or "No known enemy contacts.",
             objectives_context=objectives_context or "No specific objectives defined.",
             friendly_status_context=friendly_status_context or "No detailed status available.",
+            environment_context=environment_context or "No environment data available.",
+            orders_context=orders_context or "No prior own-side orders.",
+            radio_context=radio_context or "No recent radio/chat traffic.",
+            reports_context=reports_context or "No recent operational reports.",
+            map_objects_context=map_objects_context or "No known map objects.",
         )
         user_msg = build_user_message(original_text)
 
@@ -441,12 +491,56 @@ class OrderParser:
                          "вызовите огонь", "вызови огонь", "запросите огонь", "запроси огонь",
                          "артиллерию на", "миномёт на", "минометн на"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
+        status_req_focus_map = {
+            "nearby_friendlies": [
+                "кто рядом", "какие подразделения рядом", "какие части рядом",
+                "какие силы рядом", "свои рядом", "friendly nearby", "friendlies nearby",
+                "who is near you", "who's near you", "units near you", "nearby units",
+            ],
+            "terrain": [
+                "местност", "опиши местност", "terrain", "ground around you",
+                "describe terrain", "what terrain", "какая местность", "что за местность",
+                "cover around you", "укрыти", "ground nearby",
+            ],
+            "enemy": [
+                "противник", "enemy", "contact", "контакт", "кого видишь",
+                "видишь противника", "enemy seen", "any enemy", "spot anything",
+            ],
+            "position": [
+                "где ты", "где вы", "твоя позиция", "ваша позиция", "position",
+                "where are you", "your location", "your grid", "координаты",
+            ],
+            "task": [
+                "какая задача", "что делаешь", "что делаете", "чем занят",
+                "current task", "what are you doing", "mission now", "orders now",
+            ],
+            "condition": [
+                "состояни", "потери", "боеприпас", "бк", "мораль", "готовност",
+                "condition", "readiness", "casualties", "ammo", "morale", "combat ready",
+            ],
+            "weather": [
+                "погода", "видимость", "условия", "weather", "visibility", "conditions",
+            ],
+            "objects": [
+                "объект", "препятств", "загражден", "строени", "map object",
+                "obstacle", "structure", "bridge nearby",
+            ],
+        }
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
                      "находимся", "spotted", "taking fire", "casualties"]
 
         classification = MessageClassification.unclear
         order_type = None
+        status_request_focus: list[str] = []
+
+        def _infer_status_request_focus(raw_text: str) -> list[str]:
+            inferred: list[str] = []
+            raw_lower = raw_text.lower()
+            for focus_name, patterns in status_req_focus_map.items():
+                if any(pat in raw_lower for pat in patterns):
+                    inferred.append(focus_name)
+            return inferred or ["full"]
 
         # ── Question detection ──────────────────────────────
         # Questions like "Почему не наводите?" / "Why aren't you..." are NOT commands.
@@ -474,6 +568,14 @@ class OrderParser:
             if any(kw in text_lower for kw in status_req_kw):
                 classification = MessageClassification.status_request
                 order_type = "report_status"
+                status_request_focus = _infer_status_request_focus(text)
+            elif any(
+                any(pat in text_lower for pat in patterns)
+                for patterns in status_req_focus_map.values()
+            ):
+                classification = MessageClassification.status_request
+                order_type = "report_status"
+                status_request_focus = _infer_status_request_focus(text)
             else:
                 # "Почему не стреляете?" → unclear, low confidence → LLM escalation
                 classification = MessageClassification.unclear
@@ -486,6 +588,14 @@ class OrderParser:
         elif any(kw in text_lower for kw in status_req_kw):
             classification = MessageClassification.status_request
             order_type = "report_status"
+            status_request_focus = _infer_status_request_focus(text)
+        elif any(
+            any(pat in text_lower for pat in patterns)
+            for patterns in status_req_focus_map.values()
+        ):
+            classification = MessageClassification.status_request
+            order_type = "report_status"
+            status_request_focus = _infer_status_request_focus(text)
         elif is_self_report and any(kw in text_lower for kw in report_kw):
             # "Здесь [unit]. ..." is almost always a status report
             classification = MessageClassification.status_report
@@ -951,6 +1061,7 @@ class OrderParser:
             target_unit_refs=target_unit_refs,
             sender_ref=sender_ref,
             order_type=order_type,
+            status_request_focus=status_request_focus,
             location_refs=[LocationRefRaw(**lr) for lr in location_refs],
             speed=speed,
             formation=formation,

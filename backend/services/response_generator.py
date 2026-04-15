@@ -163,6 +163,7 @@ class ResponseGenerator:
         unit: dict,
         language: str = "en",
         situation: dict | None = None,
+        request_focus: list[str] | None = None,
     ) -> str:
         """Build a status text string for a unit, including rich situational awareness."""
         name = unit.get("name", "Unknown")
@@ -171,6 +172,12 @@ class ResponseGenerator:
         ammo = unit.get("ammo", 1.0)
         suppression = unit.get("suppression", 0.0)
         task = unit.get("current_task")
+        request_focus = [f for f in (request_focus or []) if f]
+
+        if request_focus and "full" not in request_focus:
+            if language == "ru":
+                return self._generate_focused_status_report_ru(unit, situation or {}, request_focus)
+            return self._generate_focused_status_report_en(unit, situation or {}, request_focus)
 
         if language == "ru":
             return self._generate_status_report_ru(
@@ -180,6 +187,288 @@ class ResponseGenerator:
             return self._generate_status_report_en(
                 unit, strength, morale, ammo, suppression, task, situation
             )
+
+    def _generate_focused_status_report_ru(
+        self,
+        unit: dict,
+        situation: dict,
+        request_focus: list[str],
+    ) -> str:
+        """Generate a focused Russian reply for specific status questions."""
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        def add(text: str):
+            if text and text not in seen:
+                seen.add(text)
+                parts.append(text)
+
+        grid_ref = situation.get("grid_ref")
+        coords = situation.get("coordinates") or {}
+        task = unit.get("current_task") or {}
+
+        for focus in request_focus:
+            if focus == "position":
+                if grid_ref:
+                    add(f"нахожусь квадрат {grid_ref}")
+                elif coords.get("lat") is not None and coords.get("lon") is not None:
+                    add(f"нахожусь координаты {coords['lat']:.4f}, {coords['lon']:.4f}")
+                else:
+                    add("точную позицию определить не могу")
+            elif focus == "nearby_friendlies":
+                friendlies = situation.get("nearby_friendlies", [])
+                if friendlies:
+                    desc = []
+                    for f in friendlies[:3]:
+                        item = f"{f['name']} ~{f['distance_m']}м"
+                        if f.get("grid_ref"):
+                            item += f" ({f['grid_ref']})"
+                        desc.append(item)
+                    add("рядом свои: " + "; ".join(desc))
+                else:
+                    add("своих подразделений в радиусе 2 км не наблюдаю")
+            elif focus == "terrain":
+                terrain_type = situation.get("terrain_type")
+                terrain_name = self.TERRAIN_NAMES_RU.get(terrain_type, terrain_type or "неизвестно")
+                terrain_bits = []
+                if terrain_name:
+                    terrain_bits.append(f"местность: {terrain_name}")
+                elevation_m = situation.get("elevation_m")
+                if elevation_m is not None:
+                    terrain_bits.append(f"высота {elevation_m:.0f}м")
+                slope_deg = (situation.get("terrain") or {}).get("slope_deg")
+                if slope_deg is not None:
+                    terrain_bits.append(f"уклон {slope_deg:.1f}°")
+                if terrain_bits:
+                    add(", ".join(terrain_bits))
+
+                surrounding = situation.get("surrounding_terrain", {})
+                if surrounding:
+                    top = sorted(surrounding.items(), key=lambda x: (-x[1], x[0]))[:3]
+                    add("вокруг: " + ", ".join(
+                        f"{self.TERRAIN_SHORT_RU.get(k, k)} x{v}" for k, v in top
+                    ))
+
+                nearby_objects = situation.get("nearby_objects", [])
+                if nearby_objects:
+                    close = []
+                    for obj in nearby_objects[:3]:
+                        name = obj.get("label") or self.OBJ_NAMES_RU.get(obj.get("type"), obj.get("type", "объект"))
+                        close.append(f"{name} ~{obj['distance_m']}м")
+                    add("рядом объекты: " + "; ".join(close))
+            elif focus == "enemy":
+                contacts = situation.get("contacts", [])
+                if contacts:
+                    desc = []
+                    for c in contacts[:3]:
+                        item = self._translate_unit_type(c.get("type", "противник"), "ru")
+                        if c.get("distance_m") is not None:
+                            item += f" ~{c['distance_m']}м"
+                        if c.get("grid_ref"):
+                            item += f" ({c['grid_ref']})"
+                        desc.append(item)
+                    add("противник: " + "; ".join(desc))
+                else:
+                    add("противника не наблюдаю")
+            elif focus == "task":
+                task_type = task.get("type")
+                if task_type:
+                    task_name = self.TASK_TYPES_RU.get(task_type, task_type)
+                    if task.get("target_snail"):
+                        add(f"текущая задача: {task_name}, район {task['target_snail']}")
+                    else:
+                        add(f"текущая задача: {task_name}")
+                else:
+                    add("текущей задачи нет")
+            elif focus == "condition":
+                condition = []
+                condition.append(self._strength_desc(unit.get("strength", 1.0), "ru"))
+                ammo_desc = self._ammo_desc(unit.get("ammo", 1.0), "ru")
+                if ammo_desc:
+                    condition.append(ammo_desc)
+                morale_desc = self._morale_desc(unit.get("morale", 1.0), "ru")
+                if morale_desc:
+                    condition.append(morale_desc)
+                combat_status = situation.get("combat_status")
+                cs_text = self.COMBAT_STATUS_RU.get(combat_status) if combat_status else None
+                if cs_text:
+                    condition.append(cs_text)
+                add("состояние: " + ", ".join([c for c in condition if c]))
+            elif focus == "weather":
+                weather = situation.get("weather", {})
+                if weather:
+                    bits = []
+                    for key in ("weather", "visibility", "wind", "precipitation", "light_level", "temperature"):
+                        val = weather.get(key)
+                        if val is not None and val != "":
+                            if isinstance(val, str):
+                                val = self._translate_weather_val(val)
+                            bits.append(f"{key}={val}")
+                    if bits:
+                        add("условия: " + ", ".join(bits))
+                else:
+                    add("данных по погоде нет")
+            elif focus == "objects":
+                nearby_objects = situation.get("nearby_objects", [])
+                if nearby_objects:
+                    desc = []
+                    for obj in nearby_objects[:4]:
+                        name = obj.get("label") or self.OBJ_NAMES_RU.get(obj.get("type"), obj.get("type", "объект"))
+                        desc.append(f"{name} ~{obj['distance_m']}м")
+                    add("объекты рядом: " + "; ".join(desc))
+                else:
+                    add("заметных объектов рядом нет")
+
+        if not parts:
+            return self._generate_status_report_ru(
+                unit,
+                unit.get("strength", 1.0),
+                unit.get("morale", 1.0),
+                unit.get("ammo", 1.0),
+                unit.get("suppression", 0.0),
+                unit.get("current_task"),
+                situation,
+            )
+
+        result = ". ".join(p[0].upper() + p[1:] if p else p for p in parts if p)
+        return result + ". Приём."
+
+    def _generate_focused_status_report_en(
+        self,
+        unit: dict,
+        situation: dict,
+        request_focus: list[str],
+    ) -> str:
+        """Generate a focused English reply for specific status questions."""
+        parts: list[str] = []
+        seen: set[str] = set()
+
+        def add(text: str):
+            if text and text not in seen:
+                seen.add(text)
+                parts.append(text)
+
+        grid_ref = situation.get("grid_ref")
+        coords = situation.get("coordinates") or {}
+        task = unit.get("current_task") or {}
+
+        for focus in request_focus:
+            if focus == "position":
+                if grid_ref:
+                    add(f"position grid {grid_ref}")
+                elif coords.get("lat") is not None and coords.get("lon") is not None:
+                    add(f"position {coords['lat']:.4f}, {coords['lon']:.4f}")
+                else:
+                    add("unable to determine precise position")
+            elif focus == "nearby_friendlies":
+                friendlies = situation.get("nearby_friendlies", [])
+                if friendlies:
+                    desc = []
+                    for f in friendlies[:3]:
+                        item = f"{f['name']} ~{f['distance_m']}m"
+                        if f.get("grid_ref"):
+                            item += f" ({f['grid_ref']})"
+                        desc.append(item)
+                    add("friendlies nearby: " + "; ".join(desc))
+                else:
+                    add("no friendly units observed within 2 km")
+            elif focus == "terrain":
+                terrain_type = situation.get("terrain_type", "unknown")
+                terrain_bits = [f"terrain: {terrain_type.replace('_', ' ')}"]
+                elevation_m = situation.get("elevation_m")
+                if elevation_m is not None:
+                    terrain_bits.append(f"elevation {elevation_m:.0f}m")
+                slope_deg = (situation.get("terrain") or {}).get("slope_deg")
+                if slope_deg is not None:
+                    terrain_bits.append(f"slope {slope_deg:.1f}°")
+                add(", ".join(terrain_bits))
+
+                surrounding = situation.get("surrounding_terrain", {})
+                if surrounding:
+                    top = sorted(surrounding.items(), key=lambda x: (-x[1], x[0]))[:3]
+                    add("surroundings: " + ", ".join(
+                        f"{k.replace('_', ' ')} x{v}" for k, v in top
+                    ))
+
+                nearby_objects = situation.get("nearby_objects", [])
+                if nearby_objects:
+                    close = []
+                    for obj in nearby_objects[:3]:
+                        name = obj.get("label") or obj.get("type", "object").replace("_", " ")
+                        close.append(f"{name} ~{obj['distance_m']}m")
+                    add("nearby objects: " + "; ".join(close))
+            elif focus == "enemy":
+                contacts = situation.get("contacts", [])
+                if contacts:
+                    desc = []
+                    for c in contacts[:3]:
+                        item = self._translate_unit_type(c.get("type", "enemy"), "en")
+                        if c.get("distance_m") is not None:
+                            item += f" ~{c['distance_m']}m"
+                        if c.get("grid_ref"):
+                            item += f" ({c['grid_ref']})"
+                        desc.append(item)
+                    add("enemy: " + "; ".join(desc))
+                else:
+                    add("no enemy observed")
+            elif focus == "task":
+                task_type = task.get("type")
+                if task_type:
+                    if task.get("target_snail"):
+                        add(f"current task: {task_type}, grid {task['target_snail']}")
+                    else:
+                        add(f"current task: {task_type}")
+                else:
+                    add("no current task")
+            elif focus == "condition":
+                condition = [self._strength_desc(unit.get("strength", 1.0), "en")]
+                ammo_desc = self._ammo_desc(unit.get("ammo", 1.0), "en")
+                if ammo_desc:
+                    condition.append(ammo_desc)
+                morale_desc = self._morale_desc(unit.get("morale", 1.0), "en")
+                if morale_desc:
+                    condition.append(morale_desc)
+                combat_status = situation.get("combat_status")
+                cs_text = self.COMBAT_STATUS_EN.get(combat_status) if combat_status else None
+                if cs_text:
+                    condition.append(cs_text)
+                add("condition: " + ", ".join([c for c in condition if c]))
+            elif focus == "weather":
+                weather = situation.get("weather", {})
+                if weather:
+                    bits = []
+                    for key in ("weather", "visibility", "wind", "precipitation", "light_level", "temperature"):
+                        val = weather.get(key)
+                        if val is not None and val != "":
+                            bits.append(f"{key}={val}")
+                    if bits:
+                        add("conditions: " + ", ".join(bits))
+                else:
+                    add("no weather data available")
+            elif focus == "objects":
+                nearby_objects = situation.get("nearby_objects", [])
+                if nearby_objects:
+                    desc = []
+                    for obj in nearby_objects[:4]:
+                        name = obj.get("label") or obj.get("type", "object").replace("_", " ")
+                        desc.append(f"{name} ~{obj['distance_m']}m")
+                    add("objects nearby: " + "; ".join(desc))
+                else:
+                    add("no significant nearby objects")
+
+        if not parts:
+            return self._generate_status_report_en(
+                unit,
+                unit.get("strength", 1.0),
+                unit.get("morale", 1.0),
+                unit.get("ammo", 1.0),
+                unit.get("suppression", 0.0),
+                unit.get("current_task"),
+                situation,
+            )
+
+        result = ". ".join(p[0].upper() + p[1:] if p else p for p in parts if p)
+        return result + ". Over."
 
     # ── Translation dictionaries ──
 

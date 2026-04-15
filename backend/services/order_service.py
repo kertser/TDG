@@ -98,7 +98,9 @@ class OrderService:
         units_context = await self._load_units_context(session_id, db)
         grid_info, grid_service = await self._load_grid(session_id, db)
         game_time = await self._get_game_time(session_id, db)
-        map_objects_context = await self._load_map_objects_context(session_id, db)
+        map_objects_context = await self._load_map_objects_context(
+            session_id, db, issuer_side=issuer_side
+        )
 
         # Load elevation peaks for height references in orders
         elevation_peaks = await self._load_elevation_peaks(session_id, db)
@@ -110,10 +112,23 @@ class OrderService:
             ]
 
         # ── 1b. Build enriched context for LLM ───────────────────
-        terrain_ctx = await self._build_terrain_context(session_id, db, units_context, issuer_side)
-        contacts_ctx = await self._build_contacts_context(session_id, db, issuer_side)
+        terrain_ctx = await self._build_terrain_context(
+            session_id, db, units_context, issuer_side
+        )
+        contacts_ctx = await self._build_contacts_context(
+            session_id, db, issuer_side, grid_service=grid_service
+        )
         objectives_ctx = await self._build_objectives_context(session_id, db)
         friendly_ctx = self._build_friendly_status_context(units_context, issuer_side)
+        environment_ctx = await self._build_environment_context(session_id, db)
+        orders_ctx = await self._build_orders_history_context(
+            session_id, db, issuer_side, units_context
+        )
+        radio_ctx = await self._build_radio_context(session_id, db, issuer_side)
+        reports_ctx = await self._build_reports_context(
+            session_id, db, issuer_side, units_context
+        )
+        map_objects_ctx = self._build_map_objects_prompt_context(map_objects_context)
 
         # ── 2. Parse via LLM ────────────────────────────────────
         parsed = await order_parser.parse(
@@ -126,6 +141,11 @@ class OrderService:
             contacts_context=contacts_ctx,
             objectives_context=objectives_ctx,
             friendly_status_context=friendly_ctx,
+            environment_context=environment_ctx,
+            orders_context=orders_ctx,
+            radio_context=radio_ctx,
+            reports_context=reports_ctx,
+            map_objects_context=map_objects_ctx,
         )
 
         # ── 2b. Language consistency: enforce last-used language ─────
@@ -218,6 +238,15 @@ class OrderService:
                         game_time=game_time,
                         issuer_side=issuer_side,
                         force_full_model=True,
+                        terrain_context=terrain_ctx,
+                        contacts_context=contacts_ctx,
+                        objectives_context=objectives_ctx,
+                        friendly_status_context=friendly_ctx,
+                        environment_context=environment_ctx,
+                        orders_context=orders_ctx,
+                        radio_context=radio_ctx,
+                        reports_context=reports_ctx,
+                        map_objects_context=map_objects_ctx,
                     )
                     if reparsed.classification != MessageClassification.unclear:
                         # Escalation succeeded — re-route
@@ -954,10 +983,17 @@ class OrderService:
         else:
             _sit_map = {}
 
+        request_focus = parsed.status_request_focus or self._infer_status_request_focus(
+            order.original_text or ""
+        )
+
         for unit_dict in matched:
             situation = _sit_map.get(unit_dict.get("id", ""), {})
             status_text = response_generator.generate_status_report(
-                unit_dict, parsed.language.value, situation=situation,
+                unit_dict,
+                parsed.language.value,
+                situation=situation,
+                request_focus=request_focus,
             )
             resp = response_generator.generate_response(
                 parsed=parsed,
@@ -970,6 +1006,52 @@ class OrderService:
 
         order.status = OrderStatus.completed
         order.completed_at = datetime.now(timezone.utc)
+
+    @staticmethod
+    def _infer_status_request_focus(original_text: str) -> list[str]:
+        """Infer the requested info type for status questions when parser output is generic."""
+        text_lower = (original_text or "").lower()
+        focus_patterns = {
+            "nearby_friendlies": [
+                "кто рядом", "какие подразделения рядом", "какие части рядом",
+                "какие силы рядом", "свои рядом", "friendly nearby", "friendlies nearby",
+                "who is near you", "who's near you", "units near you", "nearby units",
+            ],
+            "terrain": [
+                "местност", "опиши местност", "terrain", "ground around you",
+                "describe terrain", "what terrain", "какая местность", "что за местность",
+                "cover around you", "укрыти", "ground nearby",
+            ],
+            "enemy": [
+                "противник", "enemy", "contact", "контакт", "кого видишь",
+                "видишь противника", "enemy seen", "any enemy", "spot anything",
+            ],
+            "position": [
+                "где ты", "где вы", "твоя позиция", "ваша позиция", "position",
+                "where are you", "your location", "your grid", "координаты",
+            ],
+            "task": [
+                "какая задача", "что делаешь", "что делаете", "чем занят",
+                "current task", "what are you doing", "mission now", "orders now",
+            ],
+            "condition": [
+                "состояни", "потери", "боеприпас", "бк", "мораль", "готовност",
+                "condition", "readiness", "casualties", "ammo", "morale", "combat ready",
+            ],
+            "weather": [
+                "погода", "видимость", "условия", "weather", "visibility", "conditions",
+            ],
+            "objects": [
+                "объект", "препятств", "загражден", "строени", "map object",
+                "obstacle", "structure", "bridge nearby",
+            ],
+        }
+
+        focus = [
+            name for name, patterns in focus_patterns.items()
+            if any(pattern in text_lower for pattern in patterns)
+        ]
+        return focus or ["full"]
 
     def _build_engine_task(
         self,
@@ -1422,18 +1504,34 @@ class OrderService:
         self,
         session_id: uuid.UUID,
         db: AsyncSession,
+        issuer_side: str | None = None,
     ) -> list[dict]:
         """Load map objects with geometry for named location resolution (e.g. 'Airfield')."""
         try:
-            from backend.models.map_object import MapObject
+            from backend.models.map_object import MapObject, ObjectSide
             from geoalchemy2.shape import to_shape
 
-            result = await db.execute(
-                select(MapObject).where(
-                    MapObject.session_id == session_id,
-                    MapObject.is_active == True,
-                )
+            query = select(MapObject).where(
+                MapObject.session_id == session_id,
+                MapObject.is_active == True,
             )
+            # Respect fog-of-war for object discovery when side is known.
+            # Friendly + neutral objects are visible; enemy objects require discovery.
+            if issuer_side in ("blue", "red"):
+                discovered_filter = (
+                    MapObject.discovered_by_blue == True
+                    if issuer_side == "blue"
+                    else MapObject.discovered_by_red == True
+                )
+                query = query.where(
+                    or_(
+                        MapObject.side == ObjectSide.neutral,
+                        MapObject.side == ObjectSide(issuer_side),
+                        discovered_filter,
+                    )
+                )
+
+            result = await db.execute(query)
             objects = result.scalars().all()
             context = []
             for obj in objects:
@@ -1449,8 +1547,16 @@ class OrderService:
                 if obj.properties:
                     name = obj.properties.get("name", "") or obj.properties.get("label", "")
                 context.append({
+                    "id": str(obj.id),
                     "object_type": obj.object_type,
+                    "object_category": (
+                        obj.object_category.value
+                        if hasattr(obj.object_category, "value")
+                        else str(obj.object_category)
+                    ),
+                    "side": obj.side.value if hasattr(obj.side, "value") else str(obj.side),
                     "name": name,
+                    "label": obj.label,
                     "lat": lat,
                     "lon": lon,
                 })
@@ -2218,8 +2324,8 @@ class OrderService:
 
             result = await db.execute(
                 select(TerrainCell.snail_path, TerrainCell.terrain_type,
-                       TerrainCell.elevation_m, TerrainCell.centroid_lat,
-                       TerrainCell.centroid_lon)
+                       TerrainCell.elevation_m, TerrainCell.slope_deg,
+                       TerrainCell.centroid_lat, TerrainCell.centroid_lon)
                 .where(TerrainCell.session_id == session_id)
                 .limit(500)
             )
@@ -2236,26 +2342,44 @@ class OrderService:
             for ttype, count in sorted(type_counts.items(), key=lambda x: -x[1]):
                 lines.append(f"  - {ttype}: {count} cells")
 
+            elevations = [c[2] for c in cells if c[2] is not None]
+            slopes = [c[3] for c in cells if c[3] is not None]
+            if elevations:
+                lines.append(
+                    "Elevation profile: min {:.0f}m, avg {:.0f}m, max {:.0f}m".format(
+                        min(elevations), sum(elevations) / len(elevations), max(elevations)
+                    )
+                )
+            if slopes:
+                steep = sum(1 for s in slopes if s >= 20)
+                lines.append(
+                    f"Slope profile: avg {sum(slopes) / len(slopes):.1f}°, steep-cells(>=20°)={steep}"
+                )
+
             # Find terrain near friendly units (within ~500m)
             friendly_units = [u for u in units_context
                               if u.get("side") == issuer_side
                               and not u.get("is_destroyed")
-                              and u.get("lat")]
+                              and u.get("lat") is not None
+                              and u.get("lon") is not None]
             if friendly_units and cells:
                 lines.append("Terrain near friendly units:")
                 for u in friendly_units[:6]:
                     u_lat, u_lon = u["lat"], u["lon"]
                     nearest = None
                     nearest_dist = float('inf')
-                    for sp, tt, elev, clat, clon in cells:
-                        if clat and clon:
+                    for sp, tt, elev, slope_deg, clat, clon in cells:
+                        if clat is not None and clon is not None:
                             d = ((clat - u_lat) * 111320) ** 2 + ((clon - u_lon) * 74000) ** 2
                             if d < nearest_dist:
                                 nearest_dist = d
-                                nearest = (sp, tt, elev)
+                                nearest = (sp, tt, elev, slope_deg)
                     if nearest:
-                        elev_str = f", elev {nearest[2]:.0f}m" if nearest[2] else ""
-                        lines.append(f"  - {u['name']}: {nearest[1]} ({nearest[0]}{elev_str})")
+                        elev_str = f", elev {nearest[2]:.0f}m" if nearest[2] is not None else ""
+                        slope_str = f", slope {nearest[3]:.1f}°" if nearest[3] is not None else ""
+                        lines.append(
+                            f"  - {u['name']}: {nearest[1]} ({nearest[0]}{elev_str}{slope_str})"
+                        )
 
             return "\n".join(lines)
         except Exception:
@@ -2266,6 +2390,7 @@ class OrderService:
         session_id: uuid.UUID,
         db: AsyncSession,
         issuer_side: str,
+        grid_service: Any = None,
     ) -> str:
         """Build known enemy contacts description for LLM context."""
         try:
@@ -2291,11 +2416,40 @@ class OrderService:
                         c_lat, c_lon = pt.y, pt.x
                     except Exception:
                         pass
-                pos_str = f" at ({c_lat:.4f}, {c_lon:.4f})" if c_lat else ""
-                conf_str = f"conf={c.confidence:.0%}" if c.confidence else ""
+                pos_str = (
+                    f" at ({c_lat:.4f}, {c_lon:.4f})"
+                    if c_lat is not None and c_lon is not None
+                    else ""
+                )
+                grid_str = ""
+                if (
+                    grid_service is not None
+                    and c_lat is not None
+                    and c_lon is not None
+                ):
+                    try:
+                        grid_str = f", grid {grid_service.point_to_snail(c_lat, c_lon, depth=2)}"
+                    except Exception:
+                        pass
+
+                conf_str = (
+                    f"conf={c.confidence:.0%}"
+                    if c.confidence is not None
+                    else "conf=?"
+                )
+                acc_str = (
+                    f", ±{c.location_accuracy_m:.0f}m"
+                    if c.location_accuracy_m is not None
+                    else ""
+                )
+                seen_tick = f", tick={c.last_seen_tick}" if c.last_seen_tick is not None else ""
                 etype = c.estimated_type or "unknown"
                 esize = c.estimated_size or ""
-                lines.append(f"  - {etype} {esize}{pos_str} [{conf_str}, {c.source or '?'}]")
+                source = c.source or "unknown"
+                lines.append(
+                    f"  - {etype} {esize}{pos_str}{grid_str} "
+                    f"[{conf_str}{acc_str}{seen_tick}, src={source}]"
+                )
 
             return "\n".join(lines)
         except Exception:
@@ -2353,6 +2507,280 @@ class OrderService:
         except Exception:
             return "No objectives defined."
 
+    async def _build_environment_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> str:
+        """Build weather/conditions/time context for the parser prompt."""
+        try:
+            from backend.models.session import Session as Sess
+            from backend.models.scenario import Scenario
+
+            sess_result = await db.execute(
+                select(Sess).where(Sess.id == session_id)
+            )
+            session_obj = sess_result.scalar_one_or_none()
+            if not session_obj:
+                return "No environment data available."
+
+            lines = []
+            if session_obj.current_time:
+                lines.append(
+                    "Current simulation time: {} (tick={}, tick_interval={}s)".format(
+                        session_obj.current_time.isoformat(),
+                        session_obj.tick,
+                        session_obj.tick_interval,
+                    )
+                )
+            else:
+                lines.append(
+                    f"Current simulation tick: {session_obj.tick} (tick_interval={session_obj.tick_interval}s)"
+                )
+
+            if session_obj.settings:
+                speed = session_obj.settings.get("speed")
+                if speed is not None:
+                    lines.append(f"Session speed setting: {speed}")
+
+            scen_result = await db.execute(
+                select(Scenario).where(Scenario.id == session_obj.scenario_id)
+            )
+            scenario = scen_result.scalar_one_or_none()
+            if scenario and scenario.environment:
+                env = scenario.environment
+                weather_parts = []
+                for key in (
+                    "weather",
+                    "time_of_day",
+                    "visibility",
+                    "light_level",
+                    "wind",
+                    "temperature",
+                    "precipitation",
+                    "clouds",
+                ):
+                    val = env.get(key)
+                    if val is not None and val != "":
+                        weather_parts.append(f"{key}={val}")
+                if weather_parts:
+                    lines.append("Environment: " + ", ".join(weather_parts))
+                elif env:
+                    lines.append(f"Environment raw: {str(env)[:400]}")
+
+            return "\n".join(lines)
+        except Exception:
+            return "No environment data available."
+
+    async def _build_orders_history_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+        units_context: list[dict],
+    ) -> str:
+        """Build side-visible order history so parser can preserve continuity."""
+        try:
+            unit_name_by_id = {
+                u["id"]: u.get("name", u["id"])
+                for u in units_context
+                if u.get("id")
+            }
+            friendly_ids = {
+                u["id"]
+                for u in units_context
+                if u.get("side") == issuer_side and not u.get("is_destroyed")
+            }
+
+            result = await db.execute(
+                select(Order).where(
+                    Order.session_id == session_id,
+                    Order.issued_by_side == issuer_side,
+                ).order_by(desc(Order.issued_at)).limit(40)
+            )
+            orders = result.scalars().all()
+            if not orders:
+                return "No prior own-side orders."
+
+            lines = [f"Recent own-side orders ({len(orders)}):"]
+            latest_by_unit: dict[str, Order] = {}
+
+            for o in orders:
+                target_ids = [str(uid) for uid in (o.target_unit_ids or [])]
+                target_names = [unit_name_by_id.get(uid, uid[:8]) for uid in target_ids]
+                for uid in target_ids:
+                    if uid in friendly_ids and uid not in latest_by_unit:
+                        latest_by_unit[uid] = o
+
+                order_type = (
+                    o.order_type
+                    or (o.parsed_order or {}).get("type")
+                    or "unknown"
+                )
+                target_str = ", ".join(target_names[:4]) if target_names else "unspecified units"
+                if len(target_names) > 4:
+                    target_str += f" +{len(target_names) - 4}"
+
+                issued = o.issued_at.isoformat() if o.issued_at else "unknown_time"
+                text = (o.original_text or "").replace("\n", " ").strip()
+                if len(text) > 130:
+                    text = text[:127] + "..."
+                intent_action = (o.parsed_intent or {}).get("action")
+                intent_str = f", intent={intent_action}" if intent_action else ""
+                lines.append(
+                    f"  - {issued}: {order_type}{intent_str} -> {target_str} [{o.status.value}] | \"{text}\""
+                )
+
+            if latest_by_unit:
+                lines.append("Latest order per friendly unit:")
+                ordered_ids = sorted(
+                    friendly_ids,
+                    key=lambda uid: unit_name_by_id.get(uid, uid),
+                )
+                for uid in ordered_ids[:20]:
+                    latest = latest_by_unit.get(uid)
+                    if latest is None:
+                        continue
+                    order_type = (
+                        latest.order_type
+                        or (latest.parsed_order or {}).get("type")
+                        or "unknown"
+                    )
+                    issued = latest.issued_at.isoformat() if latest.issued_at else "unknown_time"
+                    lines.append(
+                        f"  - {unit_name_by_id.get(uid, uid[:8])}: {order_type} [{latest.status.value}] at {issued}"
+                    )
+
+            return "\n".join(lines)
+        except Exception:
+            return "No prior own-side orders."
+
+    async def _build_radio_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+    ) -> str:
+        """Build recent radio/chat traffic context for parser disambiguation."""
+        try:
+            from backend.models.chat_message import ChatMessage
+
+            query = select(ChatMessage).where(ChatMessage.session_id == session_id)
+            if issuer_side in ("blue", "red"):
+                query = query.where(
+                    or_(
+                        ChatMessage.side == issuer_side,
+                        ChatMessage.side == "all",
+                    )
+                )
+
+            result = await db.execute(
+                query.order_by(desc(ChatMessage.created_at)).limit(40)
+            )
+            messages = list(result.scalars().all())
+            if not messages:
+                return "No recent radio/chat traffic."
+
+            # Chronological (oldest -> newest) improves continuity interpretation.
+            messages.reverse()
+            lines = [f"Recent radio/chat traffic ({len(messages)} msgs):"]
+            for m in messages:
+                text = (m.text or "").replace("\n", " ").strip()
+                if len(text) > 170:
+                    text = text[:167] + "..."
+                ts = (
+                    m.game_time.isoformat()
+                    if m.game_time
+                    else (m.created_at.isoformat() if m.created_at else "unknown_time")
+                )
+                if (m.sender_name or "").startswith("📋"):
+                    msg_type = "ORDER_NET"
+                elif (m.sender_name or "").startswith("📻"):
+                    msg_type = "UNIT_RADIO"
+                else:
+                    msg_type = "CHAT"
+                lines.append(
+                    f"  - {ts} [{msg_type}] {m.sender_name} -> {m.recipient}: {text}"
+                )
+            return "\n".join(lines)
+        except Exception:
+            return "No recent radio/chat traffic."
+
+    async def _build_reports_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+        units_context: list[dict],
+    ) -> str:
+        """Build recent SITREP/SPOTREP/etc. for better command interpretation."""
+        try:
+            from backend.models.report import Report, ReportSide
+
+            unit_name_by_id = {
+                u["id"]: u.get("name", u["id"])
+                for u in units_context
+                if u.get("id")
+            }
+            try:
+                to_side = ReportSide(issuer_side)
+            except Exception:
+                to_side = ReportSide.blue
+
+            result = await db.execute(
+                select(Report).where(
+                    Report.session_id == session_id,
+                    Report.to_side == to_side,
+                ).order_by(desc(Report.created_at)).limit(20)
+            )
+            reports = result.scalars().all()
+            if not reports:
+                return "No recent operational reports."
+
+            lines = [f"Recent operational reports ({len(reports)}):"]
+            for rep in reports:
+                ts = (
+                    rep.game_timestamp.isoformat()
+                    if rep.game_timestamp
+                    else (rep.created_at.isoformat() if rep.created_at else "unknown_time")
+                )
+                from_name = (
+                    unit_name_by_id.get(str(rep.from_unit_id), str(rep.from_unit_id)[:8])
+                    if rep.from_unit_id
+                    else "HQ/unknown"
+                )
+                text = (rep.text or "").replace("\n", " ").strip()
+                if len(text) > 180:
+                    text = text[:177] + "..."
+                lines.append(
+                    f"  - {ts} [{rep.channel}] from {from_name}: {text}"
+                )
+            return "\n".join(lines)
+        except Exception:
+            return "No recent operational reports."
+
+    @staticmethod
+    def _build_map_objects_prompt_context(map_objects_context: list[dict]) -> str:
+        """Format known map objects as compact prompt context."""
+        if not map_objects_context:
+            return "No known map objects."
+
+        lines = [f"Known map objects / points of interest ({len(map_objects_context)}):"]
+        for obj in map_objects_context[:25]:
+            name = obj.get("name") or obj.get("label") or obj.get("object_type", "object")
+            object_type = obj.get("object_type", "object")
+            obj_side = obj.get("side", "neutral")
+            obj_cat = obj.get("object_category", "unknown")
+            lat = obj.get("lat")
+            lon = obj.get("lon")
+            coord = ""
+            if lat is not None and lon is not None:
+                coord = f" at ({lat:.4f}, {lon:.4f})"
+            lines.append(
+                f"  - {name} ({object_type}, category={obj_cat}, side={obj_side}){coord}"
+            )
+        return "\n".join(lines)
+
     @staticmethod
     def _build_friendly_status_context(
         units_context: list[dict],
@@ -2373,20 +2801,33 @@ class OrderService:
         lines = [f"Friendly forces ({total} units): avg strength={avg_strength:.0%}, ammo={avg_ammo:.0%}, morale={avg_morale:.0%}"]
 
         # Per-unit status (brief)
-        for u in friendlies[:10]:
+        for u in friendlies[:15]:
             task = u.get("current_task", {})
             task_str = task.get("type", "idle") if task else "idle"
             strength = u.get("strength", 1.0)
             ammo = u.get("ammo", 1.0)
+            morale = u.get("morale", 1.0)
+            comms = u.get("comms_status", "operational")
             status_flags = []
             if strength < 0.5:
                 status_flags.append("WEAK")
             if ammo < 0.3:
                 status_flags.append("LOW AMMO")
+            if morale < 0.4:
+                status_flags.append("LOW MORALE")
             if u.get("suppression", 0) > 0.5:
                 status_flags.append("SUPPRESSED")
+            if comms != "operational":
+                status_flags.append(f"COMMS={comms}")
             flag_str = f" [{', '.join(status_flags)}]" if status_flags else ""
-            lines.append(f"  - {u['name']} ({u.get('unit_type', '?')}): {task_str}, str={strength:.0%}{flag_str}")
+
+            pos_str = ""
+            if u.get("lat") is not None and u.get("lon") is not None:
+                pos_str = f", pos={u['lat']:.4f},{u['lon']:.4f}"
+            lines.append(
+                f"  - {u['name']} ({u.get('unit_type', '?')}): {task_str}, "
+                f"str={strength:.0%}, ammo={ammo:.0%}, morale={morale:.0%}{pos_str}{flag_str}"
+            )
 
         return "\n".join(lines)
 
