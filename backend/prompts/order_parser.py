@@ -22,7 +22,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 ## Your Tasks
 
 1. **Classify** the message into one of these categories:
-   - `command` — an actionable order (move, attack, fire, defend, observe, support, withdraw, disengage, halt, regroup, resupply, report_status)
+   - `command` — an actionable order (move, attack, fire, defend, observe, support, breach, lay_mines, construct, deploy_bridge, withdraw, disengage, halt, regroup, resupply, report_status)
    - `status_request` — asking a unit for their status ("доложите обстановку", "report status", "what's happening")
    - `acknowledgment` — confirming receipt of an order ("так точно", "roger", "wilco", "выполняем")
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
@@ -41,7 +41,7 @@ For `status_request`, also extract what information is being requested:
 
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
-    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
+    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, breach, lay_mines, construct, deploy_bridge, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
    - **Speed preference**: "slow" = cautious/tactical/stealthy movement; "fast" = rapid/urgent movement
      - Slow indicators (EN): slow, careful, cautious, stealth, tactical, sneak, quietly, covertly, low profile
@@ -76,6 +76,12 @@ Use order_type="resupply" when units are ordered to resupply, rearm, or replenis
   - "resupply at B4-3" = resupply at specific location
   - "пополнить боеприпасы", "на пополнение", "к складу", "пополни БК" = resupply
   - Logistics units ordered to "resupply units at [location]" = resupply at that location (they act as mobile supply)
+Use engineering order types when the task is clearly about engineer action rather than generic movement:
+  - `breach` = clear or open a lane through wire, mines, roadblocks, ditches, or other obstacles
+  - `lay_mines` = emplace minefields / lay mines in an area
+  - `construct` = build entrenchments, roadblocks, towers, command posts, supply caches, field hospitals, and similar structures/obstacles
+  - `deploy_bridge` = lay or deploy a bridge / AVLB bridge at a crossing point
+When possible, also extract `map_object_type` such as `minefield`, `at_minefield`, `entrenchment`, `roadblock`, `barbed_wire`, `bridge_structure`, `observation_tower`, `field_hospital`, `command_post_structure`, `supply_cache`, or `smoke`.
 Use operational shorthand consistently:
   - "follow", "trail", "следуй за", "держись за" = persistent lead-follow relationship, usually order_type="move", maneuver_kind="follow"
   - "bound", "bounding", "перебежками", "скачками" = phased movement under cover, usually order_type="move", maneuver_kind="bounding"
@@ -204,7 +210,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "language": "en" | "ru",
   "target_unit_refs": ["unit name or callsign as mentioned in text"],
   "sender_ref": "sender callsign if identifiable, or null",
-  "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
+  "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "breach" | "lay_mines" | "construct" | "deploy_bridge" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
   "status_request_focus": ["full" | "position" | "terrain" | "nearby_friendlies" | "enemy" | "task" | "condition" | "weather" | "objects" | "road_distance"],
   "location_refs": [
     {{
@@ -218,6 +224,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "engagement_rules": "fire_at_will" | "hold_fire" | "return_fire_only" | null,
   "urgency": "routine" | "priority" | "immediate" | "flash" | null,
   "purpose": "stated objective or null",
+  "map_object_type": "minefield" | "at_minefield" | "barbed_wire" | "concertina_wire" | "roadblock" | "anti_tank_ditch" | "dragons_teeth" | "entrenchment" | "pillbox" | "observation_tower" | "field_hospital" | "command_post_structure" | "supply_cache" | "bridge_structure" | "smoke" | null,
   "coordination_unit_refs": ["friendly units mentioned for coordination/support"],
   "coordination_kind": "coordination" | "covering_fire" | "fire_support" | null,
   "maneuver_kind": "follow" | "flank" | "bounding" | "support_by_fire" | "lead" | "trail" | null,
@@ -628,6 +635,136 @@ PARSED:
   "coordination_kind": null,
   "maneuver_kind": null,
   "maneuver_side": "left",
+  "report_text": null,
+  "confidence": 0.92,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Combat engineers, breach the roadblock at E6-3 and open a lane for B-squad."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Combat engineers"],
+  "sender_ref": null,
+  "order_type": "breach",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "E6-3", "ref_type": "snail", "normalized": "E6-3"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "breach the obstacle and open a lane for B-squad",
+  "map_object_type": "roadblock",
+  "coordination_unit_refs": ["B-squad"],
+  "coordination_kind": "coordination",
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Минно-заградительная секция, установите минное поле в квадрате F7-2."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Минно-заградительная секция"],
+  "sender_ref": null,
+  "order_type": "lay_mines",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "F7-2", "ref_type": "snail", "normalized": "F7-2"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "создать минное заграждение",
+  "map_object_type": "minefield",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Construction engineers, build an entrenchment on height 149."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Construction engineers"],
+  "sender_ref": null,
+  "order_type": "construct",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "height 149", "ref_type": "height", "normalized": "height 149"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "build a prepared fighting position",
+  "map_object_type": "entrenchment",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.92,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "AVLB section, deploy bridge at the crossing near B5."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["AVLB section"],
+  "sender_ref": null,
+  "order_type": "deploy_bridge",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "B5", "ref_type": "grid", "normalized": "B5"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "establish a crossing point",
+  "map_object_type": "bridge_structure",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.92,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Logistics unit, resupply B-squad and stay with them."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Logistics unit"],
+  "sender_ref": null,
+  "order_type": "resupply",
+  "status_request_focus": [],
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "move to B-squad and replenish them",
+  "map_object_type": null,
+  "coordination_unit_refs": ["B-squad"],
+  "coordination_kind": "coordination",
+  "maneuver_kind": "follow",
+  "maneuver_side": null,
   "report_text": null,
   "confidence": 0.92,
   "ambiguities": []
@@ -1051,6 +1188,84 @@ PARSED:
   "report_text": null,
   "confidence": 0.90,
   "ambiguities": ["secondary task: observe and report from position"]
+}
+
+---
+MESSAGE: "Engineer platoon, clear a lane through the minefield at F7-2-1 and mark the breach."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Engineer platoon"],
+  "sender_ref": null,
+  "order_type": "breach",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "F7-2-1", "ref_type": "snail", "normalized": "F7-2-1"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": null,
+  "purpose": "open a marked lane through the obstacle",
+  "map_object_type": "minefield",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "Сапёры, оборудуйте окопы и разверните КП в квадрате C4-2."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["Сапёры"],
+  "sender_ref": null,
+  "order_type": "construct",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "C4-2", "ref_type": "snail", "normalized": "C4-2"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": null,
+  "purpose": "укрепить позицию и подготовить пункт управления",
+  "map_object_type": "entrenchment",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.92,
+  "ambiguities": ["secondary structure mentioned: command_post_structure"]
+}
+
+---
+MESSAGE: "Logistics section, resupply B-squad and stay behind them as they advance to Hill 149."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Logistics section"],
+  "sender_ref": null,
+  "order_type": "resupply",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "Hill 149", "ref_type": "height", "normalized": "height 149"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": null,
+  "purpose": "mobile sustainment in support of B-squad",
+  "map_object_type": null,
+  "coordination_unit_refs": ["B-squad"],
+  "coordination_kind": "coordination",
+  "maneuver_kind": "follow",
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
 }
 
 ---

@@ -38,6 +38,10 @@ class OrderType(str, enum.Enum):
     defend = "defend"
     observe = "observe"
     support = "support"
+    breach = "breach"
+    lay_mines = "lay_mines"
+    construct = "construct"
+    deploy_bridge = "deploy_bridge"
     withdraw = "withdraw"
     disengage = "disengage"
     halt = "halt"
@@ -131,6 +135,11 @@ class ParsedOrderData(BaseModel):
         None,
         description="Unit name/callsign that this unit should support/relay to, "
                     "e.g. 'C-squad' in 'be ready to support C-squad's targets'",
+    )
+    map_object_type: Optional[str] = Field(
+        None,
+        description="Obstacle/structure/effect type referenced in the order, e.g. "
+                    "'minefield', 'entrenchment', 'roadblock', 'bridge_structure', or 'smoke'",
     )
     coordination_unit_refs: list[str] = Field(
         default_factory=list,

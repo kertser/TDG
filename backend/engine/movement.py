@@ -519,7 +519,8 @@ def process_movement(
             continue
 
         task_type = task.get("type", "")
-        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage", "withdraw", "resupply"):
+        if task_type not in ("move", "attack", "advance", "engage", "fire", "disengage", "withdraw", "resupply",
+                             "breach", "lay_mines", "construct", "deploy_bridge"):
             continue
 
         # Indirect fire units (artillery/mortar) with "fire" task should NOT move
@@ -535,6 +536,9 @@ def process_movement(
 
         # ── Awaiting cease-fire: halt until artillery clears ──
         if task.get("awaiting_ceasefire"):
+            continue
+
+        if task.get("at_worksite"):
             continue
 
         # ── Suppress role: hold position at weapon range, don't advance ──
@@ -924,6 +928,17 @@ def process_movement(
                     "text_summary": f"{unit.name} arrived at resupply point",
                     "payload": {"lat": new_lat, "lon": new_lon},
                 })
+            elif task_type in ("breach", "lay_mines", "construct", "deploy_bridge"):
+                new_task = dict(task)
+                new_task["at_worksite"] = True
+                new_task.pop("waypoints", None)
+                unit.current_task = new_task
+                events.append({
+                    "event_type": "movement",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} arrived at engineering worksite",
+                    "payload": {"lat": new_lat, "lon": new_lon, "task_type": task_type},
+                })
         elif not using_waypoints:
             # No waypoints — use original straight-line movement
             if remaining_to_final <= distance_this_tick:
@@ -985,6 +1000,16 @@ def process_movement(
                         "actor_unit_id": unit.id,
                         "text_summary": f"{unit.name} arrived at resupply point",
                         "payload": {"lat": new_lat, "lon": new_lon},
+                    })
+                elif task_type in ("breach", "lay_mines", "construct", "deploy_bridge"):
+                    new_task = dict(task)
+                    new_task["at_worksite"] = True
+                    unit.current_task = new_task
+                    events.append({
+                        "event_type": "movement",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} arrived at engineering worksite",
+                        "payload": {"lat": new_lat, "lon": new_lon, "task_type": task_type},
                     })
             else:
                 new_lat, new_lon, heading = _move_toward(

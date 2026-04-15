@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from geoalchemy2.shape import from_shape, to_shape
-from shapely.geometry import Point
+from shapely.geometry import Point, LineString, Polygon
 from sqlalchemy import select, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -479,7 +479,16 @@ class OrderService:
             order.parsed_intent = intent.model_dump(mode="json", exclude_none=True)
 
         # ── Build engine task ─────────────────────────────
-        task = self._build_engine_task(order, parsed, resolved, intent, grid_service=grid_service)
+        task = self._build_engine_task(
+            order,
+            parsed,
+            resolved,
+            intent,
+            grid_service=grid_service,
+            matched_units=matched_units,
+            units_context=units_context,
+            map_objects=map_objects,
+        )
         result.engine_task = task
 
         coordination_units = [
@@ -494,6 +503,23 @@ class OrderService:
         ]
 
         if task:
+            if task.get("type") == "resupply" and parsed.support_target_ref:
+                supply_targets = [
+                    u for u in self._match_units([parsed.support_target_ref], units_context, issuer_side)
+                    if u.get("id") not in {m.get("id") for m in matched_units}
+                ]
+                if supply_targets:
+                    supply_target = supply_targets[0]
+                    task["support_target_unit_id"] = supply_target["id"]
+                    task["follow_unit_id"] = supply_target["id"]
+                    task["follow_unit_name"] = supply_target.get("name", "")
+                    task["follow_distance_m"] = 60.0
+                    if supply_target.get("lat") is not None and supply_target.get("lon") is not None:
+                        task["target_location"] = {
+                            "lat": supply_target["lat"],
+                            "lon": supply_target["lon"],
+                        }
+
             if best_contact_uid and task.get("type") in ("attack", "engage", "fire", "request_fire"):
                 task["target_unit_id"] = best_contact_uid
 
@@ -570,7 +596,10 @@ class OrderService:
         # instead of showing a straight line until the next tick processes.
         route_impassable = False
         route_target_snail = ""
-        MOVEABLE_TASK_TYPES = {"move", "attack", "advance", "disengage", "resupply"}
+        MOVEABLE_TASK_TYPES = {
+            "move", "attack", "advance", "disengage", "resupply",
+            "breach", "lay_mines", "construct", "deploy_bridge",
+        }
         if (
             task
             and not target_outside_grid
@@ -1218,6 +1247,101 @@ class OrderService:
         ]
         return focus or ["full"]
 
+    @staticmethod
+    def _offset_point(lat: float, lon: float, north_m: float = 0.0, east_m: float = 0.0) -> tuple[float, float]:
+        return (
+            lat + north_m / _M_PER_DEG_LAT,
+            lon + east_m / _M_PER_DEG_LON_48,
+        )
+
+    def _default_engine_worksite(
+        self,
+        lat: float,
+        lon: float,
+        task_type: str,
+        object_type: str | None = None,
+    ) -> dict:
+        object_type = object_type or ""
+        if task_type == "lay_mines":
+            nw = self._offset_point(lat, lon, north_m=45, east_m=-45)
+            ne = self._offset_point(lat, lon, north_m=45, east_m=45)
+            se = self._offset_point(lat, lon, north_m=-45, east_m=45)
+            sw = self._offset_point(lat, lon, north_m=-45, east_m=-45)
+            poly = Polygon([
+                (nw[1], nw[0]),
+                (ne[1], ne[0]),
+                (se[1], se[0]),
+                (sw[1], sw[0]),
+            ])
+            return poly.__geo_interface__
+
+        if object_type in {"roadblock", "bridge_structure", "command_post_structure", "field_hospital", "supply_cache", "pillbox", "observation_tower"}:
+            return Point(lon, lat).__geo_interface__
+
+        line = LineString([
+            (self._offset_point(lat, lon, east_m=-40)[1], self._offset_point(lat, lon, east_m=-40)[0]),
+            (self._offset_point(lat, lon, east_m=40)[1], self._offset_point(lat, lon, east_m=40)[0]),
+        ])
+        return line.__geo_interface__
+
+    def _resolve_breach_object(
+        self,
+        map_objects: list[Any] | None,
+        unit_anchor: tuple[float, float] | None,
+        target_anchor: tuple[float, float] | None,
+        object_type: str | None,
+    ) -> tuple[str | None, dict | None]:
+        if not map_objects:
+            return None, None
+
+        preferred_types = []
+        if object_type:
+            preferred_types.append(object_type)
+        preferred_types.extend([
+            "minefield", "at_minefield", "barbed_wire", "concertina_wire",
+            "roadblock", "anti_tank_ditch", "dragons_teeth",
+        ])
+        preferred_types = list(dict.fromkeys(preferred_types))
+
+        anchor = target_anchor or unit_anchor
+        if anchor is None:
+            return None, None
+
+        best_obj = None
+        best_dist = float("inf")
+        for obj in map_objects:
+            if not getattr(obj, "is_active", True):
+                continue
+            obj_type = getattr(obj, "object_type", None)
+            if preferred_types and obj_type not in preferred_types:
+                continue
+            geometry = getattr(obj, "geometry", None)
+            if geometry is None:
+                continue
+            try:
+                shp = to_shape(geometry)
+                centroid = shp.centroid
+                obj_lat, obj_lon = centroid.y, centroid.x
+            except Exception:
+                continue
+            dlat = (obj_lat - anchor[0]) * _M_PER_DEG_LAT
+            dlon = (obj_lon - anchor[1]) * _M_PER_DEG_LON_48
+            dist = math.sqrt(dlat * dlat + dlon * dlon)
+            if dist < best_dist:
+                best_dist = dist
+                best_obj = obj
+
+        if best_obj is None:
+            return None, None
+
+        try:
+            shp = to_shape(best_obj.geometry)
+            centroid = shp.centroid
+            target = {"lat": centroid.y, "lon": centroid.x}
+        except Exception:
+            target = None
+        return str(best_obj.id), target
+
     def _build_engine_task(
         self,
         order: Order,
@@ -1225,6 +1349,9 @@ class OrderService:
         resolved_locations: list[ResolvedLocation],
         intent: Any,
         grid_service: Any = None,
+        matched_units: list[dict] | None = None,
+        units_context: list[dict] | None = None,
+        map_objects: list[Any] | None = None,
     ) -> dict | None:
         """
         Build a task dict compatible with the tick engine's _order_to_task().
@@ -1245,6 +1372,9 @@ class OrderService:
             "type": parsed.order_type.value,
             "order_id": str(order.id),
         }
+        matched_units = matched_units or []
+        units_context = units_context or []
+        primary_unit = matched_units[0] if matched_units else None
 
         # Add speed if specified
         if parsed.speed:
@@ -1281,6 +1411,8 @@ class OrderService:
             task["purpose"] = parsed.purpose
         if parsed.support_target_ref:
             task["support_target_ref"] = parsed.support_target_ref
+        if getattr(parsed, "map_object_type", None):
+            task["map_object_type"] = parsed.map_object_type
         if getattr(parsed, "coordination_unit_refs", None):
             task["coordination_unit_refs"] = list(parsed.coordination_unit_refs)
         if getattr(parsed, "coordination_kind", None):
@@ -1289,6 +1421,50 @@ class OrderService:
             task["maneuver_kind"] = parsed.maneuver_kind
         if getattr(parsed, "maneuver_side", None):
             task["maneuver_side"] = parsed.maneuver_side
+
+        if parsed.order_type.value == "breach":
+            unit_anchor = None
+            if primary_unit and primary_unit.get("lat") is not None and primary_unit.get("lon") is not None:
+                unit_anchor = (primary_unit["lat"], primary_unit["lon"])
+            target_anchor = None
+            if task.get("target_location"):
+                target_anchor = (
+                    task["target_location"].get("lat"),
+                    task["target_location"].get("lon"),
+                )
+            target_object_id, breach_target = self._resolve_breach_object(
+                map_objects,
+                unit_anchor,
+                target_anchor,
+                getattr(parsed, "map_object_type", None),
+            )
+            if target_object_id:
+                task["target_object_id"] = target_object_id
+            if breach_target:
+                task["target_location"] = breach_target
+
+        if parsed.order_type.value in ("lay_mines", "construct", "deploy_bridge"):
+            if "target_location" not in task and primary_unit and primary_unit.get("lat") is not None and primary_unit.get("lon") is not None:
+                task["target_location"] = {
+                    "lat": primary_unit["lat"],
+                    "lon": primary_unit["lon"],
+                }
+            if parsed.order_type.value == "deploy_bridge":
+                task["build_progress"] = task.get("build_progress", 0.0)
+            elif task.get("target_location"):
+                tgt = task["target_location"]
+                object_type = getattr(parsed, "map_object_type", None)
+                if parsed.order_type.value == "lay_mines":
+                    task["mine_type"] = "at_minefield" if object_type == "at_minefield" else "minefield"
+                if parsed.order_type.value == "construct":
+                    task["object_type"] = object_type or "entrenchment"
+                task["geometry"] = self._default_engine_worksite(
+                    tgt["lat"],
+                    tgt["lon"],
+                    parsed.order_type.value,
+                    object_type=(task.get("object_type") or object_type),
+                )
+                task["build_progress"] = task.get("build_progress", 0.0)
 
         # For commands that don't need a location (halt, regroup, report_status, disengage, withdraw, resupply)
         # Resupply target is auto-resolved by the resupply engine to the nearest supply source
@@ -1303,6 +1479,8 @@ class OrderService:
                 return task
             # Attack with fire_at_will (engage targets of opportunity) — no location needed
             if parsed.order_type.value in ("attack", "engage") and task.get("engagement_rules") == "fire_at_will":
+                return task
+            if parsed.order_type.value == "breach" and task.get("target_object_id"):
                 return task
             # For move/attack without location, intent might provide it
             if intent and hasattr(intent, "action"):
@@ -1708,6 +1886,8 @@ class OrderService:
             "mortar": ["миномёт", "минометн", "mortar"],
             "artillery": ["артилл", "artillery", "батар"],
             "engineer": ["сапёр", "сапер", "инженер", "engineer"],
+            "logistics": ["логист", "снабж", "supply", "logistics"],
+            "air": ["авиац", "air", "aviation", "helicopter", "drone", "бпла"],
             "sniper": ["снайп", "sniper"],
         }
         result = []

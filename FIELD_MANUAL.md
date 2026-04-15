@@ -2685,3 +2685,79 @@ doctrine.py (posture profiles)
 *Last updated: 2026-04-13*
 *Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/services/pathfinding_service.py`, `backend/prompts/tactical_doctrine.py`, `backend/engine/radio_chatter.py`*
 
+---
+
+## Appendix E. Command Families For Non-Infantry Units
+
+This appendix is normative for parser behavior, radio acknowledgments, and deterministic task construction.
+
+### E.1 Combat Engineers
+
+- `breach`: open a lane through an existing obstacle.
+  - EN examples: `breach the wire`, `clear a lane through the minefield`, `breach the roadblock`.
+  - RU examples: `проделайте проход в минном поле`, `разминируйте проход`, `снимите проволочное заграждение`.
+  - Expected behavior: move to the obstacle, work in place until the obstacle is neutralized, then report lane open.
+- `lay_mines`: emplace a mine obstacle in an area or on an avenue of approach.
+  - EN: `lay mines on the western approach`, `emplace an AT minefield on the road`.
+  - RU: `заминируйте дорогу`, `установите противотанковое минное поле`.
+  - Expected behavior: move to the worksite, create the obstacle geometry, remain vulnerable while building.
+- `construct`: build entrenchments or support structures.
+  - EN: `dig in`, `construct entrenchments`, `set up a command post`, `establish an aid station`.
+  - RU: `оборудуйте окопы`, `укрепите позицию`, `разверните КП`, `разверните медпункт`.
+  - Expected behavior: move to the site, build in place, then create the corresponding map object.
+- `deploy_bridge`: deploy a crossing asset at a water obstacle.
+  - EN: `deploy bridge at crossing E5-4`, `launch bridge`.
+  - RU: `наведите мост на переправе`, `разверните мостоукладчик`.
+  - Expected behavior: move to the crossing point, deploy in place, then create a usable bridge structure.
+
+### E.2 Logistics And Sustainment
+
+- `resupply` can mean self-resupply or mobile support to another unit.
+- If the order names a supported unit, sustainment becomes persistent support rather than a one-shot reload run.
+  - EN: `resupply B-squad and follow them`, `escort the lead company with ammo and medical support`.
+  - RU: `подвези боеприпасы B-squad и следуй за ними`, `снабжай роту на левом фланге`.
+- Expected behavior:
+  - logistics unit follows the supported unit;
+  - resupplies friendlies when close enough;
+  - does not terminate the mission only because its own ammo state is full.
+
+### E.3 Reconnaissance And Security
+
+- Recon orders usually resolve to `observe` plus security posture, not frontal assault.
+- Typical patterns:
+  - EN: `screen the left flank`, `observe the axis and report`, `recon the bridge and avoid decisive engagement`.
+  - RU: `прикрой левый фланг наблюдением`, `веди разведку переправы`, `доложи о контактах и не ввязывайся в бой`.
+- Expected behavior:
+  - maintain observation;
+  - report contacts quickly;
+  - avoid closing unless explicitly ordered to recon by force or attack.
+
+### E.4 Fire Support
+
+- `request_fire` is a coordination overlay, not a maneuver replacement.
+- Typical chain:
+  - supported unit detects or tracks the target;
+  - supported unit sends a fire mission to the mortar/artillery element;
+  - fire support acknowledges, fires, shifts with the supported unit's corrections, and ceases when friendlies close.
+- Explicit target shorthand like `на цель`, `по цели`, `the target`, `the enemy` should resolve from the current known contact when no fresh grid is given.
+
+### E.5 Aviation And Air Mobility
+
+The engine may not yet simulate every aviation effect, but parser and doctrine must still classify these orders consistently.
+
+- Transport / insertion / extraction:
+  - EN: `insert recon team to Hill 201`, `extract casualties from the LZ`.
+  - RU: `десантируйте разведгруппу на высоту 201`, `эвакуируйте раненых с площадки`.
+- Air recon / screen:
+  - EN: `drone team, screen the valley and report contacts`.
+  - RU: `БПЛА, веди разведку долины и докладывай контакты`.
+- Air fires:
+  - EN: `hold CAS on call`, `strike the enemy armor once marked`.
+  - RU: `держите авиаудар по вызову`, `нанесите удар по бронетехнике после целеуказания`.
+
+Until dedicated aviation task types exist, use the nearest doctrinal mapping:
+- movement / insertion / extraction -> `move`
+- screen / recon / overwatch -> `observe`
+- coordinated air fires -> `support` or `request_fire`
+- direct attack by the receiving air unit -> `attack` or `fire`, depending on whether it physically maneuvers or simply delivers fires
+

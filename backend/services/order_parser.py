@@ -616,7 +616,11 @@ class OrderParser:
                          "capture", "seize", "take", "occupy",
                          "eliminate", "destroy", "neutralize",
                          "call for fire", "request fire", "direct artillery", "call artillery",
-                         "request artillery"]
+                         "request artillery", "breach", "clear a lane", "clear lane",
+                         "lay mines", "mine the", "emplace mines", "deploy bridge",
+                         "bridge the", "construct", "build", "dig in", "entrench",
+                         "fortify", "establish command post", "set up aid station",
+                         "airlift", "insert", "extract", "landing zone", "lz"]
         command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
@@ -627,7 +631,12 @@ class OrderParser:
                          "откройте огонь", "открывай", "выдвину", "приказываю",
                          "наведите", "наведи", "наводите", "наводи",
                          "вызовите огонь", "вызови огонь", "запросите огонь", "запроси огонь",
-                         "артиллерию на", "миномёт на", "минометн на"]
+                         "артиллерию на", "миномёт на", "минометн на",
+                         "проделай проход", "проделайте проход", "разминир", "разминируй",
+                         "сними заграждение", "минируй", "заминируй", "ставь мины",
+                         "установи мины", "навести мост", "разверни мост", "оборудуй",
+                         "окопай", "укрепи", "построй", "возведи", "подвези",
+                         "снабди", "эвакуируй", "десант", "высад", "погруз", "выгруз"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         status_req_focus_map = {
             "nearby_friendlies": [
@@ -679,6 +688,7 @@ class OrderParser:
         coordination_kind = None
         maneuver_kind = None
         maneuver_side = None
+        map_object_type = None
 
         def _infer_status_request_focus(raw_text: str) -> list[str]:
             inferred: list[str] = []
@@ -856,6 +866,35 @@ class OrderParser:
                 "прикрой фланг наблюдением", "прикрыть фланг наблюдением",
                 "экранируй", "screen and report",
             ])
+            _has_breach_order = any(kw in text_lower for kw in [
+                "breach", "clear a lane", "clear lane", "open a lane",
+                "проделай проход", "проделайте проход", "разминир", "разминируй",
+                "сними заграждение", "очисти проход",
+            ])
+            _has_lay_mines_order = any(kw in text_lower for kw in [
+                "lay mines", "mine the", "emplace mines", "set a minefield",
+                "минируй", "заминируй", "ставь мины", "установи мины",
+                "создай минное поле", "поставь минное поле",
+            ])
+            _has_deploy_bridge_order = any(kw in text_lower for kw in [
+                "deploy bridge", "bridge the", "lay bridge", "launch bridge",
+                "навести мост", "разверни мост", "развернуть мост",
+                "мостоукладчик", "на переправе мост",
+            ])
+            _has_construct_order = any(kw in text_lower for kw in [
+                "construct", "build", "dig in", "entrench", "fortify",
+                "set up command post", "establish command post",
+                "set up aid station", "set up supply point", "set up observation post",
+                "оборудуй", "окопай", "окопаться", "укрепи", "построй", "возведи",
+                "оборудуй позицию", "оборудуй окоп", "разверни кп", "разверни медпункт",
+                "разверни пункт снабжения", "пост наблюдения",
+            ])
+            _has_air_mobility_order = any(kw in text_lower for kw in [
+                "insert", "extract", "airlift", "landing zone", "lz",
+                "casevac", "medevac", "pickup zone", "drop zone",
+                "десант", "высад", "эвакуируй", "эвакуация", "забери раненых",
+                "посадочная площадка", "площадка посадки",
+            ])
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
@@ -872,6 +911,14 @@ class OrderParser:
             ]):
                 # Standby for fire support → observe/wait, NOT immediate fire
                 order_type = "observe"
+            elif _has_breach_order:
+                order_type = "breach"
+            elif _has_lay_mines_order:
+                order_type = "lay_mines"
+            elif _has_deploy_bridge_order:
+                order_type = "deploy_bridge"
+            elif _has_construct_order:
+                order_type = "construct"
             elif _is_request_fire:
                 # "Request artillery support", "Direct artillery at enemy" → request_fire
                 # This creates a fire request to CoC artillery
@@ -921,6 +968,8 @@ class OrderParser:
                                                     "уничтож", "ликвидир", "поразить", "поразите",
                                                     "захвати", "захват", "овладе", "занять", "займ"]):
                 order_type = "attack"
+            elif _has_air_mobility_order:
+                order_type = "move"
             elif any(kw in text_lower for kw in ["move", "advance", "form ", "выдвигай", "двигай",
                                                      "движен", "марш", "обход", "перестрои", "построение"]):
                 order_type = "move"
@@ -1025,6 +1074,28 @@ class OrderParser:
                     "normalized": obj_text.lower(),
                 })
 
+        map_object_patterns = [
+            ("at_minefield", ["anti-tank minefield", "at minefield", "противотанковое минное поле", "пт минное поле"]),
+            ("minefield", ["minefield", "минное поле", "мины"]),
+            ("barbed_wire", ["barbed wire", "wire obstacle", "колючая проволока", "проволочное заграждение"]),
+            ("concertina_wire", ["concertina", "razor wire", "спираль бруно", "егоза"]),
+            ("roadblock", ["roadblock", "checkpoint", "блокпост", "дорожное заграждение"]),
+            ("anti_tank_ditch", ["anti-tank ditch", "tank ditch", "противотанковый ров"]),
+            ("dragons_teeth", ["dragon's teeth", "dragons teeth", "надолбы", "зубы дракона"]),
+            ("entrenchment", ["entrenchment", "trench", "foxhole", "окоп", "траншея", "укреплен"]),
+            ("observation_tower", ["observation tower", "watchtower", "вышка", "наблюдательный пост"]),
+            ("field_hospital", ["field hospital", "aid station", "медпункт", "полевой госпиталь"]),
+            ("command_post_structure", ["command post", "hq post", "командный пункт", "кп"]),
+            ("supply_cache", ["supply cache", "ammo dump", "supply point", "склад", "пункт снабжения"]),
+            ("bridge_structure", ["bridge", "crossing", "мост", "переправа"]),
+            ("pillbox", ["pillbox", "bunker", "дот", "дзот"]),
+            ("smoke", ["smoke", "smokescreen", "дым", "дымовая завеса"]),
+        ]
+        for candidate_type, patterns in map_object_patterns:
+            if any(pattern in text_lower for pattern in patterns):
+                map_object_type = candidate_type
+                break
+
         has_resolved_location = any(
             lr["ref_type"] in {"snail", "grid", "coordinate", "height", "map_object"}
             for lr in location_refs
@@ -1037,7 +1108,7 @@ class OrderParser:
         )
         if (
             classification == MessageClassification.command
-            and order_type in (OrderType.attack, OrderType.fire, OrderType.request_fire)
+            and order_type in ("attack", "fire", "request_fire")
             and not has_resolved_location
             and implied_contact_target
         ):
@@ -1106,7 +1177,8 @@ class OrderParser:
         # Named units: "Recon Team", "Mortar Section", "Tank Platoon"
         named_pat = re.compile(
             r'\b((?:recon|mortar|tank|sniper|engineer|artillery|logistics|observation|combat'
-            r'|infantry|mechanized)\s+(?:team|section|platoon|company|squad|battery|group)'
+            r'|infantry|mechanized|aviation|air|helicopter|drone|medevac)\s+'
+            r'(?:team|section|platoon|company|squad|battery|group|flight|wing|pair)'
             r'(?:\s+\d+)?)\b',
             re.IGNORECASE,
         )
@@ -1127,7 +1199,8 @@ class OrderParser:
 
         # Also match standalone known unit names (e.g. "Mortar" alone)
         standalone_pat = re.compile(
-            r'\b(Mortar|Sniper|Recon|Artillery|HQ|Штаб|Миномёт|Миномет|Разведка|Артиллерия)\b',
+            r'\b(Mortar|Sniper|Recon|Artillery|HQ|Logistics|Aviation|Air|Drone|Medevac'
+            r'|Штаб|Миномёт|Миномет|Разведка|Артиллерия|Авиация|Логистика|БПЛА)\b',
             re.IGNORECASE,
         )
         for m in standalone_pat.finditer(text):
@@ -1138,7 +1211,8 @@ class OrderParser:
         # Russian named: "разведгруппа", "миномётная секция"
         ru_named_pat = re.compile(
             r'\b((?:развед\w*|миномёт\w*|минометн\w*|танк\w*|снайпер\w*|сапёрн\w*'
-            r'|артиллер\w*|инженерн\w*)\s*(?:группа|секция|взвод|рота|команда)?)\b',
+            r'|артиллер\w*|инженерн\w*|логист\w*|авиац\w*|вертол[её]т\w*|бпла\w*)'
+            r'\s*(?:группа|секция|взвод|рота|команда|звено|экипаж)?)\b',
             re.IGNORECASE,
         )
         for m in ru_named_pat.finditer(text):
@@ -1271,7 +1345,7 @@ class OrderParser:
                                  "по вызову", "по команде", "в готовности",
                                  "support", "поддержать", "поддерж", "целям", "передаст",
                              ]))
-        if _is_standby_check or order_type == "observe":
+        if _is_standby_check or order_type in ("observe", "support", "resupply", "request_fire"):
             # Look for patterns like "support X", "поддержать X", "targets from X",
             # "которые вам передаст X", "целям X", "work with X"
             import re as _re2
@@ -1282,9 +1356,14 @@ class OrderParser:
                 r'targets?\s+from\s+([A-Za-z][\w-]+)',
                 r'work\s+with\s+([A-Za-z][\w-]+)',
                 r'coordinate\s+with\s+([A-Za-z][\w-]+)',
+                r'resupply\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'rearm\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'escort\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
                 # RU: "поддержать X", "целям от X", "передаст X"
                 r'поддержать\s+(?:огнём\s+)?(?:по\s+)?(?:целям[,\s]*)?(?:которые\s+)?(?:вам\s+)?(?:передаст|укажет|назначит)\s+([A-Za-zА-Яа-яё][\w-]+)',
                 r'поддержать\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'снабд(?:и|ить|ите)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'подвез(?:и|ите)\s+(?:боеприпасы|бк|снабжение)?\s*(?:к|для)?\s*([A-Za-zА-Яа-яё][\w-]+)',
                 r'передаст\s+([A-Za-zА-Яа-яё][\w-]+)',
                 r'укажет\s+([A-Za-zА-Яа-яё][\w-]+)',
                 r'целям\s+(?:от\s+)?([A-Za-zА-Яа-яё][\w-]+)',
@@ -1405,6 +1484,7 @@ class OrderParser:
             formation=formation,
             engagement_rules=engagement_rules,
             support_target_ref=support_target_ref,
+            map_object_type=map_object_type,
             coordination_unit_refs=coordination_unit_refs,
             coordination_kind=coordination_kind,
             maneuver_kind=maneuver_kind,

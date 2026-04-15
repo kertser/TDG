@@ -191,11 +191,22 @@ def process_resupply(
         unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
         ammo = unit.ammo if unit.ammo is not None else 1.0
 
+        task = unit.current_task
+        is_targeted_logistics_resupply = bool(
+            task
+            and task.get("type") == "resupply"
+            and _is_logistics_unit(unit)
+            and (
+                task.get("support_target_unit_id")
+                or task.get("follow_unit_id")
+                or task.get("support_target_ref")
+            )
+        )
+
         # Skip units that are already full on ammo
         if ammo >= 1.0:
             # If unit has a resupply task and is full, complete it
-            task = unit.current_task
-            if task and task.get("type") == "resupply":
+            if task and task.get("type") == "resupply" and not is_targeted_logistics_resupply:
                 unit.current_task = None
                 events.append({
                     "event_type": "order_completed",
@@ -259,8 +270,9 @@ def process_resupply(
                     break
 
         # --- Handle resupply task: set movement target to nearest supply source ---
-        task = unit.current_task
         if task and task.get("type") == "resupply":
+            if is_targeted_logistics_resupply:
+                continue
             # Check if already at a supply source
             at_source = False
             for sc in supply_caches:

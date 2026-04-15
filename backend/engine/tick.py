@@ -1216,7 +1216,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 # How often to recalculate paths (in ticks). Immediate recalc on new contacts.
 _PATH_RECALC_INTERVAL = 5
 
-WAYPOINT_MOVE_TASK_TYPES = {"move", "attack", "advance", "disengage", "withdraw", "resupply"}
+WAYPOINT_MOVE_TASK_TYPES = {
+    "move", "attack", "advance", "disengage", "withdraw", "resupply",
+    "breach", "lay_mines", "construct", "deploy_bridge",
+}
 
 # ── Session-level centroid + static graph cache ──
 # Cell centroids (snail_path → (lat,lon)) and the neighbor map are expensive
@@ -1634,7 +1637,7 @@ async def _process_orders(
 
             # Apply move speed from order if specified
             speed_label = task.get("speed")
-            if speed_label and task_type in ("move", "attack", "advance", "resupply"):
+            if speed_label and task_type in ("move", "attack", "advance", "resupply", "breach", "lay_mines", "construct", "deploy_bridge"):
                 speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
                 if speed_label in speeds:
                     unit.move_speed_mps = speeds[speed_label]
@@ -1724,6 +1727,7 @@ def _order_to_task(order: Order) -> dict | None:
             "formation",
             "engagement_rules",
             "support_target_ref",
+            "support_target_unit_id",
             "coordination_unit_refs",
             "coordination_unit_ids",
             "coordination_kind",
@@ -1743,6 +1747,13 @@ def _order_to_task(order: Order) -> dict | None:
             "advance_to_fire",
             "waypoints",
             "path_calc_tick",
+            "map_object_type",
+            "target_object_id",
+            "geometry",
+            "mine_type",
+            "object_type",
+            "build_progress",
+            "at_worksite",
         ):
             if po.get(key) is not None:
                 task[key] = po.get(key)
@@ -1806,6 +1817,33 @@ def _order_to_task(order: Order) -> dict | None:
         )
         if not liaison_only and any(kw in text for kw in _request_fire_kw):
             return {"type": "request_fire", "order_id": str(order.id)}
+
+        if any(kw in text for kw in [
+            "breach", "clear a lane", "clear lane", "open a lane",
+            "проделай проход", "проделайте проход", "разминир", "разминируй",
+            "сними заграждение", "очисти проход",
+        ]):
+            return {"type": "breach", "order_id": str(order.id)}
+        if any(kw in text for kw in [
+            "lay mines", "mine the", "emplace mines", "set a minefield",
+            "минируй", "заминируй", "ставь мины", "установи мины",
+        ]):
+            return {"type": "lay_mines", "order_id": str(order.id)}
+        if any(kw in text for kw in [
+            "deploy bridge", "bridge the", "lay bridge", "launch bridge",
+            "навести мост", "разверни мост", "развернуть мост",
+        ]):
+            return {"type": "deploy_bridge", "order_id": str(order.id)}
+        if any(kw in text for kw in [
+            "construct", "build", "dig in", "entrench", "fortify",
+            "оборудуй", "окопай", "укрепи", "построй", "возведи",
+        ]):
+            return {"type": "construct", "order_id": str(order.id)}
+        if any(kw in text for kw in [
+            "insert", "extract", "airlift", "landing zone", "lz",
+            "casevac", "medevac", "десант", "высад", "эвакуируй", "эвакуация",
+        ]):
+            return {"type": "move", "order_id": str(order.id)}
 
         if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй",
                                       "огонь на цель", "огонь по цели",
