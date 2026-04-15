@@ -4,25 +4,21 @@ System prompt template for the OrderParser LLM call.
 The OrderParser classifies radio messages and extracts structured order data
 from free-text military radio communications in English or Russian.
 
-Includes brief tactical doctrine reference for better understanding of
-military terminology, order types, and implied tasks.
+Doctrine is injected dynamically so the parser only receives the tactical
+sections relevant to the current order family.
 """
 
-from backend.prompts.tactical_doctrine import get_tactical_doctrine
-
-_TACTICAL_BRIEF = get_tactical_doctrine("brief")
-
-SYSTEM_PROMPT = """You are a military radio communications parser for a tactical command exercise.
+SYSTEM_PROMPT_TEMPLATE = """You are a military radio communications parser for a tactical command exercise.
 You receive radio messages from a military tactical exercise and must classify and parse them.
 
 Messages can be in **English** or **Russian**. Detect the language and parse accordingly.
 
-""" + _TACTICAL_BRIEF + """
+{tactical_doctrine}
 
 ## Your Tasks
 
 1. **Classify** the message into one of these categories:
-   - `command` — an actionable order (move, attack, fire, defend, observe, support, breach, lay_mines, construct, deploy_bridge, withdraw, disengage, halt, regroup, resupply, report_status)
+   - `command` — an actionable order (move, attack, fire, request_fire, defend, observe, support, split, merge, breach, lay_mines, construct, deploy_bridge, withdraw, disengage, halt, regroup, resupply, report_status)
    - `status_request` — asking a unit for their status ("доложите обстановку", "report status", "what's happening")
    - `acknowledgment` — confirming receipt of an order ("так точно", "roger", "wilco", "выполняем")
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
@@ -41,7 +37,7 @@ For `status_request`, also extract what information is being requested:
 
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
-    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), defend, observe, support, breach, lay_mines, construct, deploy_bridge, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
+    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), **request_fire** (direct another support unit to fire), defend, observe, support, split, merge, breach, lay_mines, construct, deploy_bridge, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
    - **Speed preference**: "slow" = cautious/tactical/stealthy movement; "fast" = rapid/urgent movement
      - Slow indicators (EN): slow, careful, cautious, stealth, tactical, sneak, quietly, covertly, low profile
@@ -82,6 +78,10 @@ Use engineering order types when the task is clearly about engineer action rathe
   - `construct` = build entrenchments, roadblocks, towers, command posts, supply caches, field hospitals, and similar structures/obstacles
   - `deploy_bridge` = lay or deploy a bridge / AVLB bridge at a crossing point
 When possible, also extract `map_object_type` such as `minefield`, `at_minefield`, `entrenchment`, `roadblock`, `barbed_wire`, `bridge_structure`, `observation_tower`, `field_hospital`, `command_post_structure`, `supply_cache`, or `smoke`.
+Use `split` when a unit is ordered to detach, split off, or break into sub-elements.
+Use `merge` when units are ordered to combine, join up, or merge back into one element.
+For `split`, also extract `split_ratio` when the text specifies a share such as half / one third / 30%.
+For `merge`, extract `merge_target_ref` naming the partner unit when present.
 Use operational shorthand consistently:
   - "follow", "trail", "следуй за", "держись за" = persistent lead-follow relationship, usually order_type="move", maneuver_kind="follow"
   - "bound", "bounding", "перебежками", "скачками" = phased movement under cover, usually order_type="move", maneuver_kind="bounding"
@@ -210,7 +210,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "language": "en" | "ru",
   "target_unit_refs": ["unit name or callsign as mentioned in text"],
   "sender_ref": "sender callsign if identifiable, or null",
-  "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "breach" | "lay_mines" | "construct" | "deploy_bridge" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
+  "order_type": "move" | "attack" | "fire" | "request_fire" | "defend" | "observe" | "support" | "split" | "merge" | "breach" | "lay_mines" | "construct" | "deploy_bridge" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
   "status_request_focus": ["full" | "position" | "terrain" | "nearby_friendlies" | "enemy" | "task" | "condition" | "weather" | "objects" | "road_distance"],
   "location_refs": [
     {{
@@ -224,6 +224,8 @@ You MUST respond with a valid JSON object matching this exact schema:
   "engagement_rules": "fire_at_will" | "hold_fire" | "return_fire_only" | null,
   "urgency": "routine" | "priority" | "immediate" | "flash" | null,
   "purpose": "stated objective or null",
+  "merge_target_ref": "unit to merge with or null",
+  "split_ratio": 0.1-0.9 or null,
   "map_object_type": "minefield" | "at_minefield" | "barbed_wire" | "concertina_wire" | "roadblock" | "anti_tank_ditch" | "dragons_teeth" | "entrenchment" | "pillbox" | "observation_tower" | "field_hospital" | "command_post_structure" | "supply_cache" | "bridge_structure" | "smoke" | null,
   "coordination_unit_refs": ["friendly units mentioned for coordination/support"],
   "coordination_kind": "coordination" | "covering_fire" | "fire_support" | null,
@@ -1269,8 +1271,100 @@ PARSED:
 }
 
 ---
+MESSAGE: "Mortar, put smoke on the bridge crossing at E6-2."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["Mortar"],
+  "sender_ref": null,
+  "order_type": "fire",
+  "status_request_focus": [],
+  "location_refs": [
+    {"source_text": "bridge crossing", "ref_type": "map_object", "normalized": "bridge crossing"},
+    {"source_text": "E6-2", "ref_type": "snail", "normalized": "E6-2"}
+  ],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": null,
+  "purpose": "mask movement with smoke",
+  "merge_target_ref": null,
+  "split_ratio": null,
+  "map_object_type": "smoke",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "A-squad, split off half your strength and send the new element to screen the bridge."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["A-squad"],
+  "sender_ref": null,
+  "order_type": "split",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "bridge", "ref_type": "map_object", "normalized": "bridge"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": null,
+  "purpose": "detach a screening element",
+  "merge_target_ref": null,
+  "split_ratio": 0.5,
+  "map_object_type": "bridge_structure",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.92,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "B-squad, merge with C-squad and continue the advance as one element."
+PARSED:
+{
+  "classification": "command",
+  "language": "en",
+  "target_unit_refs": ["B-squad"],
+  "sender_ref": null,
+  "order_type": "merge",
+  "status_request_focus": [],
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": null,
+  "purpose": "recombine combat power before continuing the advance",
+  "merge_target_ref": "C-squad",
+  "split_ratio": null,
+  "map_object_type": null,
+  "coordination_unit_refs": ["C-squad"],
+  "coordination_kind": "coordination",
+  "maneuver_kind": null,
+  "maneuver_side": null,
+  "report_text": null,
+  "confidence": 0.93,
+  "ambiguities": []
+}
+
+---
 Now parse this message:
 """
+
+
+def build_system_prompt(tactical_doctrine: str) -> str:
+    """Build the system prompt with only the doctrine relevant to this parse."""
+    return SYSTEM_PROMPT_TEMPLATE.format(tactical_doctrine=tactical_doctrine)
 
 
 def build_user_message(original_text: str) -> str:

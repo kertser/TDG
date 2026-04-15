@@ -357,6 +357,20 @@ class OrderService:
         if not order.target_unit_ids and matched_units:
             order.target_unit_ids = [uuid.UUID(u["id"]) for u in matched_units]
 
+        if parsed.order_type and parsed.order_type.value in ("split", "merge"):
+            handled = await self._process_reorganization_command(
+                order=order,
+                parsed=parsed,
+                result=result,
+                matched_units=matched_units,
+                units_context=units_context,
+                session_id=session_id,
+                db=db,
+                issuer_side=issuer_side,
+            )
+            if handled:
+                return
+
         # ── Resolve locations ─────────────────────────────
         # Load elevation peaks for height reference resolution
         elevation_peaks = await self._load_elevation_peaks(session_id, db)
@@ -1411,8 +1425,19 @@ class OrderService:
             task["purpose"] = parsed.purpose
         if parsed.support_target_ref:
             task["support_target_ref"] = parsed.support_target_ref
+        if getattr(parsed, "merge_target_ref", None):
+            task["merge_target_ref"] = parsed.merge_target_ref
+        if getattr(parsed, "split_ratio", None) is not None:
+            task["split_ratio"] = parsed.split_ratio
         if getattr(parsed, "map_object_type", None):
             task["map_object_type"] = parsed.map_object_type
+            if (
+                parsed.map_object_type == "smoke"
+                and parsed.order_type.value in ("fire", "request_fire")
+            ):
+                task["fire_effect_type"] = "smoke"
+                task["smoke_duration_ticks"] = 3
+                task["salvos_remaining"] = 1
         if getattr(parsed, "coordination_unit_refs", None):
             task["coordination_unit_refs"] = list(parsed.coordination_unit_refs)
         if getattr(parsed, "coordination_kind", None):
@@ -1469,7 +1494,7 @@ class OrderService:
         # For commands that don't need a location (halt, regroup, report_status, disengage, withdraw, resupply)
         # Resupply target is auto-resolved by the resupply engine to the nearest supply source
         # request_fire target is resolved from nearest enemy contact at tick time
-        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "withdraw", "resupply", "request_fire"):
+        if parsed.order_type.value in ("halt", "regroup", "report_status", "disengage", "withdraw", "resupply", "request_fire", "split", "merge"):
             return task
 
         # Commands that need a location but don't have one — still valid for
@@ -1608,6 +1633,220 @@ class OrderService:
             r.from_unit_id == candidate.from_unit_id and r.text == candidate.text
             for r in existing
         )
+
+    async def _process_reorganization_command(
+        self,
+        order: Order,
+        parsed: ParsedOrderData,
+        result: OrderParseResult,
+        matched_units: list[dict],
+        units_context: list[dict],
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+    ) -> bool:
+        """Handle split/merge immediately as C2 reorganization commands."""
+        order_type = parsed.order_type.value if parsed.order_type else ""
+        if order_type not in {"split", "merge"}:
+            return False
+
+        from backend.api.units import (
+            get_current_echelon,
+            echelon_one_down,
+            echelon_one_up,
+            get_principal_type,
+            make_unit_type,
+            update_sidc_echelon,
+            get_unit_latlon,
+            haversine_m,
+        )
+
+        if order_type == "split":
+            ratio = max(0.1, min(0.9, parsed.split_ratio or 0.5))
+            split_units = []
+            for unit_info in matched_units:
+                db_unit = await db.get(Unit, uuid.UUID(unit_info["id"]))
+                if db_unit is None or db_unit.is_destroyed:
+                    continue
+
+                base_name = db_unit.name
+                prefix = base_name.rsplit("/", 1)[0] if "/" in base_name else base_name
+                sibling_names = await db.execute(
+                    select(Unit.name).where(
+                        Unit.session_id == session_id,
+                        Unit.is_destroyed == False,
+                        Unit.name.like(f"{prefix}/%"),
+                    )
+                )
+                existing_names = {name for (name,) in sibling_names}
+                num = 1
+                name_a = f"{prefix}/{num}"
+                while name_a in existing_names:
+                    num += 1
+                    name_a = f"{prefix}/{num}"
+                existing_names.add(name_a)
+                num += 1
+                name_b = f"{prefix}/{num}"
+                while name_b in existing_names:
+                    num += 1
+                    name_b = f"{prefix}/{num}"
+
+                pos_copy = db_unit.position
+                if db_unit.position is not None:
+                    try:
+                        pt = to_shape(db_unit.position)
+                        pos_copy = from_shape(Point(pt.x + 0.0004, pt.y), srid=4326)
+                    except Exception:
+                        pos_copy = db_unit.position
+
+                new_echelon = echelon_one_down(get_current_echelon(db_unit.sidc))
+                principal = get_principal_type(db_unit.unit_type)
+                new_unit_type = make_unit_type(principal, new_echelon)
+                new_sidc = update_sidc_echelon(db_unit.sidc, new_echelon)
+
+                new_unit = Unit(
+                    session_id=session_id,
+                    side=db_unit.side,
+                    name=name_b,
+                    unit_type=new_unit_type,
+                    sidc=new_sidc,
+                    parent_unit_id=db_unit.parent_unit_id,
+                    position=pos_copy,
+                    heading_deg=db_unit.heading_deg,
+                    strength=(db_unit.strength or 1.0) * ratio,
+                    ammo=db_unit.ammo,
+                    morale=db_unit.morale,
+                    suppression=db_unit.suppression,
+                    comms_status=db_unit.comms_status,
+                    capabilities=dict(db_unit.capabilities) if db_unit.capabilities else None,
+                    move_speed_mps=db_unit.move_speed_mps,
+                    detection_range_m=db_unit.detection_range_m,
+                    assigned_user_ids=list(db_unit.assigned_user_ids) if db_unit.assigned_user_ids else None,
+                )
+                db.add(new_unit)
+
+                db_unit.name = name_a
+                db_unit.strength = (db_unit.strength or 1.0) * (1 - ratio)
+                db_unit.unit_type = new_unit_type
+                db_unit.sidc = new_sidc
+                split_units.append((db_unit, new_unit, ratio))
+
+            await db.flush()
+            for original, new_unit, used_ratio in split_units:
+                if parsed.language.value == "ru":
+                    text = (
+                        f"Здесь {original.name}. Выполняю разделение. "
+                        f"Новый элемент {new_unit.name}, доля {int(used_ratio * 100)}%. Приём."
+                    )
+                else:
+                    text = (
+                        f"{original.name} here. Splitting as ordered. "
+                        f"New element {new_unit.name}, share {int(used_ratio * 100)} percent. Over."
+                    )
+                result.responses.append(UnitRadioResponse(
+                    from_unit_name=original.name,
+                    from_unit_id=str(original.id),
+                    text=text,
+                    language=parsed.language,
+                    response_type=ResponseType.wilco,
+                ))
+
+            order.status = OrderStatus.completed
+            order.completed_at = datetime.now(timezone.utc)
+            order.parsed_intent = {
+                **(order.parsed_intent or {}),
+                "action": "split",
+                "split_ratio": ratio,
+            }
+            return True
+
+        merge_partner = None
+        if parsed.merge_target_ref:
+            partners = self._match_units([parsed.merge_target_ref], units_context, issuer_side)
+            merge_partner = partners[0] if partners else None
+        elif len(matched_units) >= 2:
+            merge_partner = matched_units[1]
+
+        if not matched_units or merge_partner is None:
+            order.status = OrderStatus.failed
+            result.responses.append(UnitRadioResponse(
+                from_unit_name=matched_units[0]["name"] if matched_units else "Unit",
+                from_unit_id=matched_units[0]["id"] if matched_units else None,
+                text="Не могу выполнить слияние: не указан второй элемент." if parsed.language.value == "ru"
+                else "Unable to merge: no partner element specified.",
+                language=parsed.language,
+                response_type=ResponseType.clarify,
+            ))
+            return True
+
+        survivor = await db.get(Unit, uuid.UUID(matched_units[0]["id"]))
+        absorbed = await db.get(Unit, uuid.UUID(merge_partner["id"]))
+        if survivor is None or absorbed is None or survivor.is_destroyed or absorbed.is_destroyed:
+            order.status = OrderStatus.failed
+            return True
+
+        if survivor.side != absorbed.side or get_principal_type(survivor.unit_type) != get_principal_type(absorbed.unit_type):
+            order.status = OrderStatus.failed
+            return True
+
+        surv_lat, surv_lon = get_unit_latlon(survivor)
+        abs_lat, abs_lon = get_unit_latlon(absorbed)
+        if surv_lat is not None and abs_lat is not None:
+            dist = haversine_m(surv_lat, surv_lon, abs_lat, abs_lon)
+            if dist > 50:
+                order.status = OrderStatus.failed
+                result.responses.append(UnitRadioResponse(
+                    from_unit_name=survivor.name,
+                    from_unit_id=str(survivor.id),
+                    text=f"Не могу выполнить слияние: дистанция до {absorbed.name} {dist:.0f}м." if parsed.language.value == "ru"
+                    else f"Unable to merge: distance to {absorbed.name} is {dist:.0f}m.",
+                    language=parsed.language,
+                    response_type=ResponseType.unable,
+                ))
+                return True
+
+        total_str = (survivor.strength or 0.0) + (absorbed.strength or 0.0)
+        w_surv = (survivor.strength or 0.0) / total_str if total_str > 0 else 0.5
+        w_abs = (absorbed.strength or 0.0) / total_str if total_str > 0 else 0.5
+        survivor.strength = min(1.0, total_str)
+        survivor.ammo = min(1.0, (survivor.ammo or 0.0) * w_surv + (absorbed.ammo or 0.0) * w_abs)
+        survivor.morale = min(1.0, (survivor.morale or 0.0) * w_surv + (absorbed.morale or 0.0) * w_abs)
+        survivor.suppression = max(0.0, (survivor.suppression or 0.0) * w_surv + (absorbed.suppression or 0.0) * w_abs)
+
+        child_result = await db.execute(select(Unit).where(Unit.parent_unit_id == absorbed.id))
+        for child in child_result.scalars().all():
+            child.parent_unit_id = survivor.id
+
+        absorbed.is_destroyed = True
+        absorbed.strength = 0.0
+        absorbed.current_task = None
+
+        survivor.name = survivor.name.rsplit("/", 1)[0] if "/" in survivor.name else survivor.name
+        new_echelon = echelon_one_up(get_current_echelon(survivor.sidc))
+        principal = get_principal_type(survivor.unit_type)
+        survivor.unit_type = make_unit_type(principal, new_echelon)
+        survivor.sidc = update_sidc_echelon(survivor.sidc, new_echelon)
+        await db.flush()
+
+        result.responses.append(UnitRadioResponse(
+            from_unit_name=survivor.name,
+            from_unit_id=str(survivor.id),
+            text=(
+                f"Здесь {survivor.name}. Слился с {absorbed.name}, продолжаем одним элементом. Приём."
+                if parsed.language.value == "ru"
+                else f"{survivor.name} here. Merged with {absorbed.name}, continuing as one element. Over."
+            ),
+            language=parsed.language,
+            response_type=ResponseType.wilco,
+        ))
+        order.status = OrderStatus.completed
+        order.completed_at = datetime.now(timezone.utc)
+        order.parsed_intent = {
+            **(order.parsed_intent or {}),
+            "action": "merge",
+            "merge_target_ref": parsed.merge_target_ref or merge_partner.get("name"),
+        }
+        return True
 
     async def _compute_immediate_waypoints(
         self,

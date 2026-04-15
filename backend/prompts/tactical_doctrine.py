@@ -1,36 +1,30 @@
 """
 Tactical doctrine reference for LLM context injection.
 
-**SINGLE SOURCE OF TRUTH: FIELD_MANUAL.md (Appendix C)**
+Single source of truth: `FIELD_MANUAL.md`.
 
-This module reads tactical doctrine from FIELD_MANUAL.md at import time.
-It extracts text between marker comments:
-  - <!-- DOCTRINE:FULL:START --> / <!-- DOCTRINE:FULL:END -->   → Red AI commander
-  - <!-- DOCTRINE:BRIEF:START --> / <!-- DOCTRINE:BRIEF:END --> → Order parser
-
-NEVER put doctrine text directly in this file. Edit FIELD_MANUAL.md instead.
+This loader supports:
+- full doctrine slices for deep reasoning
+- concise brief doctrine for order parsing
+- topic-scoped doctrine snippets so prompts receive only relevant context
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── Locate FIELD_MANUAL.md relative to project root ──────────────────────────
-
 
 def _find_field_manual() -> Path:
     """Find FIELD_MANUAL.md by walking up from this file's directory."""
-    # This file is at backend/prompts/tactical_doctrine.py
-    # FIELD_MANUAL.md is at the project root
     current = Path(__file__).resolve()
     for ancestor in [current.parent.parent.parent, current.parent.parent]:
         candidate = ancestor / "FIELD_MANUAL.md"
         if candidate.exists():
             return candidate
-    # Fallback: check CWD
     cwd_candidate = Path.cwd() / "FIELD_MANUAL.md"
     if cwd_candidate.exists():
         return cwd_candidate
@@ -53,92 +47,140 @@ def _extract_section(text: str, start_marker: str, end_marker: str) -> str:
     return text[start_idx:end_idx].strip()
 
 
-def _load_doctrine() -> tuple[str, str]:
-    """
-    Load full and brief doctrine text from FIELD_MANUAL.md.
-
-    Returns:
-        (full_doctrine, brief_doctrine) tuple of strings.
-    """
-    try:
-        fm_path = _find_field_manual()
-        raw = fm_path.read_text(encoding="utf-8")
-
-        full = _extract_section(
-            raw,
-            "<!-- DOCTRINE:FULL:START -->",
-            "<!-- DOCTRINE:FULL:END -->",
-        )
-        brief = _extract_section(
-            raw,
-            "<!-- DOCTRINE:BRIEF:START -->",
-            "<!-- DOCTRINE:BRIEF:END -->",
-        )
-
-        # Prepend a header for LLM context
-        full_with_header = "## TACTICAL DOCTRINE REFERENCE\n\n" + full
-        brief_with_header = "## Tactical Reference (Brief)\n\n" + brief
-
-        logger.info(
-            "Loaded tactical doctrine from %s (full=%d chars, brief=%d chars)",
-            fm_path.name,
-            len(full_with_header),
-            len(brief_with_header),
-        )
-        return full_with_header, brief_with_header
-
-    except (FileNotFoundError, ValueError) as e:
-        logger.warning(
-            "Failed to load doctrine from FIELD_MANUAL.md: %s. "
-            "Using fallback minimal doctrine.",
-            e,
-        )
-        return _FALLBACK_FULL, _FALLBACK_BRIEF
+def _extract_topic_sections(text: str) -> dict[str, str]:
+    """Extract all topic-scoped doctrine snippets from FIELD_MANUAL.md."""
+    topic_pattern = re.compile(
+        r"<!-- DOCTRINE:TOPIC:([A-Z0-9_]+):START -->(.*?)<!-- DOCTRINE:TOPIC:\1:END -->",
+        re.DOTALL,
+    )
+    topics: dict[str, str] = {}
+    for match in topic_pattern.finditer(text):
+        key = match.group(1).lower()
+        topics[key] = match.group(2).strip()
+    return topics
 
 
-# ── Minimal fallback (only used if FIELD_MANUAL.md is missing/broken) ─────────
+def _normalize_topic(topic: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", (topic or "").strip().lower())
+
+
+def _compose_topic_doctrine(
+    header: str,
+    base_text: str,
+    topic_map: dict[str, str],
+    topics: list[str] | None,
+) -> str:
+    """Compose doctrine text with only the requested topics plus general context."""
+    if not topics:
+        return f"{header}\n\n{base_text}"
+
+    ordered_topics: list[str] = []
+    for topic in ["general", *topics]:
+        normalized = _normalize_topic(topic)
+        if normalized and normalized not in ordered_topics:
+            ordered_topics.append(normalized)
+
+    blocks = []
+    for topic in ordered_topics:
+        snippet = topic_map.get(topic)
+        if snippet:
+            blocks.append(f"### Topic: {topic.replace('_', ' ').title()}\n{snippet}")
+
+    if not blocks:
+        return f"{header}\n\n{base_text}"
+
+    return f"{header}\n\n" + "\n\n".join(blocks)
+
+
+def _load_doctrine() -> tuple[str, str, dict[str, str]]:
+    """Load full, brief, and topic-scoped doctrine from FIELD_MANUAL.md."""
+    fm_path = _find_field_manual()
+    raw = fm_path.read_text(encoding="utf-8")
+
+    full = _extract_section(
+        raw,
+        "<!-- DOCTRINE:FULL:START -->",
+        "<!-- DOCTRINE:FULL:END -->",
+    )
+    brief = _extract_section(
+        raw,
+        "<!-- DOCTRINE:BRIEF:START -->",
+        "<!-- DOCTRINE:BRIEF:END -->",
+    )
+    topics = _extract_topic_sections(raw)
+
+    logger.info(
+        "Loaded tactical doctrine from %s (full=%d chars, brief=%d chars, topics=%d)",
+        fm_path.name,
+        len(full),
+        len(brief),
+        len(topics),
+    )
+    return full, brief, topics
+
 
 _FALLBACK_FULL = """
-## TACTICAL DOCTRINE REFERENCE (FALLBACK — FIELD_MANUAL.md not loaded)
-
 Key principles:
 - Fire and maneuver: one element suppresses while another moves.
 - Combined arms: infantry clears close terrain, armor in open terrain, artillery suppresses.
-- Concentration of force: 3:1 superiority at the decisive point.
-- Terrain: use cover and concealment, seek elevation advantage.
-- Recon finds the enemy, does not fight. Artillery supports, does not act alone.
-- Protect flanks. Maintain reserves. Coordinate fires with maneuver.
-"""
+- Recon finds the enemy, does not fight decisively. Protect flanks. Coordinate fires.
+""".strip()
 
 _FALLBACK_BRIEF = """
-## Tactical Reference (FALLBACK)
+- Fire and maneuver.
+- Recon forward, artillery in support, engineers enable mobility, logistics sustain.
+""".strip()
 
-- Fire and maneuver: suppress + move. Combined arms: infantry/armor/artillery.
-- 3:1 superiority at point of attack. Use terrain. Protect flanks.
-- Recon observes, artillery supports, infantry assaults, armor exploits.
-"""
+_FALLBACK_TOPICS = {
+    "general": "- Use combined arms, maintain security, and coordinate maneuver with fires.",
+    "offense": "- Offensive action combines suppression, maneuver, and flank security.",
+    "defense": "- Defensive action preserves observation, cover, and planned disengagement routes.",
+    "fires": "- Fire support suppresses and shifts with maneuver; cease when friendlies close.",
+    "recon": "- Recon screens, observes, and reports; avoid decisive engagement.",
+    "engineers": "- Engineers breach, emplace obstacles, construct positions, and deploy bridges.",
+    "logistics": "- Logistics follows supported units and sustains them in protected positions.",
+    "aviation": "- Use air mobility for insertion/extraction and air reconnaissance for screening.",
+    "map_objects": "- Bridges, minefields, wire, smoke, bunkers, and roadblocks change routes and tactics.",
+    "split_merge": "- Split to create a detached element; merge to recombine combat power when close.",
+}
 
 
-# ── Load at import time ──────────────────────────────────────────────────────
+try:
+    _FULL_RAW, _BRIEF_RAW, _TOPIC_MAP = _load_doctrine()
+except (FileNotFoundError, ValueError) as exc:
+    logger.warning(
+        "Failed to load doctrine from FIELD_MANUAL.md: %s. Using fallback doctrine.",
+        exc,
+    )
+    _FULL_RAW, _BRIEF_RAW, _TOPIC_MAP = _FALLBACK_FULL, _FALLBACK_BRIEF, _FALLBACK_TOPICS
 
-TACTICAL_DOCTRINE_FULL, TACTICAL_DOCTRINE_BRIEF = _load_doctrine()
 
-
-def get_tactical_doctrine(level: str = "full") -> str:
+def get_tactical_doctrine(level: str = "full", topics: list[str] | None = None) -> str:
     """
-    Get tactical doctrine text for injection into LLM prompts.
-
-    The text is read from FIELD_MANUAL.md at import time (single source of truth).
-    To update doctrine, edit FIELD_MANUAL.md Appendix C and restart the backend.
+    Get tactical doctrine text for prompt injection.
 
     Args:
-        level: "full" for comprehensive (Red AI commander),
-               "brief" for condensed (order parser, response generator).
+        level: "full" or "brief".
+        topics: optional topic keys such as ["fires", "recon", "engineers"].
 
     Returns:
-        Tactical doctrine text string.
+        Doctrine text string.
     """
     if level == "brief":
-        return TACTICAL_DOCTRINE_BRIEF
-    return TACTICAL_DOCTRINE_FULL
+        return _compose_topic_doctrine(
+            "## Tactical Reference (Brief)",
+            _BRIEF_RAW,
+            _TOPIC_MAP,
+            topics,
+        )
+    return _compose_topic_doctrine(
+        "## Tactical Doctrine Reference",
+        _FULL_RAW,
+        _TOPIC_MAP,
+        topics,
+    )
 
+
+def available_doctrine_topics() -> list[str]:
+    """Return the available topic keys from FIELD_MANUAL.md."""
+    return sorted(_TOPIC_MAP.keys())

@@ -14,11 +14,12 @@ from __future__ import annotations
 import math
 import uuid
 
-from geoalchemy2.shape import to_shape
+from geoalchemy2.shape import from_shape, to_shape
 from shapely.geometry import Point
 
 from backend.engine.terrain import TerrainService
 from backend.engine.map_objects import MAP_OBJECT_DEFS
+from backend.models.map_object import MapObject, ObjectCategory, ObjectSide
 
 METERS_PER_DEG_LAT = 111_320.0
 METERS_PER_DEG_LON_AT_48 = 74_000.0
@@ -222,6 +223,7 @@ def process_combat(
     terrain: TerrainService,
     map_objects: list | None = None,
     contacts: list | None = None,
+    new_map_objects_out: list | None = None,
 ) -> tuple[list[dict], set[uuid.UUID]]:
     """
     Resolve combat for all units with attack/engage tasks.
@@ -275,7 +277,14 @@ def process_combat(
         if task_type == "fire" and target_location and not target_id:
             if attacker.unit_type in ARTILLERY_TYPES:
                 area_evts = _process_area_fire(
-                    attacker, atk_pos, target_location, all_units, terrain, map_objects or [],
+                    attacker,
+                    atk_pos,
+                    target_location,
+                    all_units,
+                    terrain,
+                    map_objects or [],
+                    task=task,
+                    new_map_objects_out=new_map_objects_out,
                 )
                 events.extend(area_evts)
                 # Mark any hit units as under fire
@@ -626,6 +635,8 @@ def _process_area_fire(
     all_units: list,
     terrain: TerrainService,
     map_objects: list,
+    task: dict | None = None,
+    new_map_objects_out: list | None = None,
 ) -> list[dict]:
     """
     Process indirect area fire at a location (no specific target unit).
@@ -673,6 +684,43 @@ def _process_area_fire(
     # Check ammo
     ammo = attacker.ammo or 1.0
     if ammo <= 0:
+        return events
+
+    fire_effect_type = (task or {}).get("fire_effect_type") or (task or {}).get("map_object_type")
+    if fire_effect_type == "smoke":
+        smoke_radius_m = float((task or {}).get("smoke_radius_m") or target_location.get("radius_m") or 100.0)
+        smoke_duration_ticks = int((task or {}).get("smoke_duration_ticks") or target_location.get("duration_ticks") or 3)
+        smoke_poly = Point(target_lon, target_lat).buffer(smoke_radius_m / 111_320.0, resolution=16)
+        smoke_obj = MapObject(
+            session_id=attacker.session_id,
+            side=ObjectSide.neutral,
+            object_type="smoke",
+            object_category=ObjectCategory.effect,
+            geometry=from_shape(smoke_poly, srid=4326),
+            properties={
+                "ticks_remaining": smoke_duration_ticks,
+                "radius_m": smoke_radius_m,
+                "fired_by": str(attacker.id),
+            },
+            label=f"Smoke ({attacker.name})",
+            is_active=True,
+            discovered_by_blue=True,
+            discovered_by_red=True,
+        )
+        if new_map_objects_out is not None:
+            new_map_objects_out.append(smoke_obj)
+        events.append({
+            "event_type": "smoke_deployed",
+            "actor_unit_id": attacker.id,
+            "text_summary": f"{attacker.name} deployed smoke at target location",
+            "payload": {
+                "attacker": str(attacker.id),
+                "target_lat": target_lat,
+                "target_lon": target_lon,
+                "radius_m": smoke_radius_m,
+                "duration_ticks": smoke_duration_ticks,
+            },
+        })
         return events
 
     # Danger-close check: don't fire if friendly forces within danger close radius of target
@@ -1361,6 +1409,8 @@ def process_artillery_support(
         req_unit_id = req.get("unit_id")
         req_target_loc = req.get("target_location")
         req_target_uid = req.get("target_unit_id")
+        req_fire_effect_type = req.get("fire_effect_type")
+        req_smoke_duration_ticks = req.get("smoke_duration_ticks")
         req_coord_refs = [str(ref).lower() for ref in (req.get("coordination_unit_refs") or []) if ref]
         req_coord_ids = {str(ref) for ref in (req.get("coordination_unit_ids") or []) if ref}
         req_support_ids = {str(ref) for ref in (req.get("supporting_unit_ids") or []) if ref}
@@ -1451,23 +1501,24 @@ def process_artillery_support(
                 if dist > weapon_range:
                     continue
 
-                # Danger-close check
-                friendly_danger = False
-                for fu in all_units:
-                    if fu.is_destroyed or fu.id == sib.id:
+                # Danger-close applies to lethal fire, not smoke masking.
+                if req_fire_effect_type != "smoke":
+                    friendly_danger = False
+                    for fu in all_units:
+                        if fu.is_destroyed or fu.id == sib.id:
+                            continue
+                        fu_side = fu.side.value if hasattr(fu.side, 'value') else str(fu.side)
+                        if fu_side != unit_side:
+                            continue
+                        fu_pos = _get_position(fu)
+                        if fu_pos is None:
+                            continue
+                        d_friendly = _distance_m(fu_pos[0], fu_pos[1], req_target_loc["lat"], req_target_loc["lon"])
+                        if d_friendly <= DANGER_CLOSE_RADIUS_M:
+                            friendly_danger = True
+                            break
+                    if friendly_danger:
                         continue
-                    fu_side = fu.side.value if hasattr(fu.side, 'value') else str(fu.side)
-                    if fu_side != unit_side:
-                        continue
-                    fu_pos = _get_position(fu)
-                    if fu_pos is None:
-                        continue
-                    d_friendly = _distance_m(fu_pos[0], fu_pos[1], req_target_loc["lat"], req_target_loc["lon"])
-                    if d_friendly <= DANGER_CLOSE_RADIUS_M:
-                        friendly_danger = True
-                        break
-                if friendly_danger:
-                    continue
 
                 # Assign fire mission (responding to explicit request)
                 sib.current_task = {
@@ -1475,21 +1526,29 @@ def process_artillery_support(
                     "target_location": req_target_loc,
                     "target_unit_id": req_target_uid,
                     "support_for": str(unit.id),
-                    "support_type": "fire_request",
-                    "sustained_support": True,
-                    "salvos_remaining": DEFAULT_FIRE_SALVOS,
+                    "support_type": "smoke_request" if req_fire_effect_type == "smoke" else "fire_request",
+                    "sustained_support": req_fire_effect_type != "smoke",
+                    "salvos_remaining": 1 if req_fire_effect_type == "smoke" else DEFAULT_FIRE_SALVOS,
                 }
+                if req_fire_effect_type:
+                    sib.current_task["fire_effect_type"] = req_fire_effect_type
+                if req_smoke_duration_ticks:
+                    sib.current_task["smoke_duration_ticks"] = req_smoke_duration_ticks
                 tasked_artillery.add(str(sib.id))
 
                 events.append({
                     "event_type": "artillery_support",
                     "actor_unit_id": sib.id,
                     "target_unit_id": uuid.UUID(req_target_uid) if req_target_uid else None,
-                    "text_summary": f"{sib.name} responding to fire request from {unit.name}",
+                    "text_summary": (
+                        f"{sib.name} responding to smoke request from {unit.name}"
+                        if req_fire_effect_type == "smoke"
+                        else f"{sib.name} responding to fire request from {unit.name}"
+                    ),
                     "payload": {
                         "artillery_id": str(sib.id),
                         "supported_unit_id": str(unit.id),
-                        "support_type": "fire_request",
+                        "support_type": "smoke_request" if req_fire_effect_type == "smoke" else "fire_request",
                         "target_lat": req_target_loc["lat"],
                         "target_lon": req_target_loc["lon"],
                     },

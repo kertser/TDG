@@ -22,11 +22,12 @@ from openai import AsyncOpenAI
 from backend.config import settings
 from backend.schemas.order import ParsedOrderData, MessageClassification, DetectedLanguage
 from backend.prompts.order_parser import (
-    SYSTEM_PROMPT,
+    build_system_prompt,
     build_user_message,
     build_unit_roster,
     build_grid_info,
 )
+from backend.prompts.tactical_doctrine import get_tactical_doctrine
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,56 @@ class OrderParser:
             any(marker in text_lower for marker in ["наведите", "наведи", "наводите", "наводи"])
             and any(marker in text_lower for marker in ["на цель", "по цели", "по противнику", "на противника"])
         )
+
+    @staticmethod
+    def _infer_doctrine_topics(original_text: str) -> list[str]:
+        """Select only the doctrinal slices relevant to this order family."""
+        text_lower = (original_text or "").lower()
+        topics = ["general"]
+
+        topic_keywords = {
+            "offense": [
+                "attack", "assault", "advance", "flank", "bound", "engage",
+                "атак", "наступ", "охват", "обход", "штурм", "перебежк",
+            ],
+            "defense": [
+                "defend", "hold", "screen", "delay", "withdraw",
+                "оборон", "удерж", "сдержива", "отход", "отступ",
+            ],
+            "fires": [
+                "fire", "artillery", "mortar", "call for fire", "smoke",
+                "огонь", "артилл", "мином", "дым", "подав",
+            ],
+            "recon": [
+                "recon", "observe", "screen", "drone", "uav",
+                "развед", "наблюд", "бпла", "прикрой фланг наблюдением",
+            ],
+            "engineers": [
+                "engineer", "breach", "mine", "bridge", "construct", "dig in",
+                "сап", "инженер", "размини", "мин", "мост", "окоп", "укреп",
+            ],
+            "logistics": [
+                "logistics", "resupply", "rearm", "ammo", "supply",
+                "логист", "снабж", "боеприпас", "бк", "пополн",
+            ],
+            "aviation": [
+                "aviation", "air", "helicopter", "medevac", "casevac", "airlift", "insert", "extract",
+                "авиац", "вертол", "эвакуац", "десант", "высад",
+            ],
+            "map_objects": [
+                "bridge", "roadblock", "minefield", "wire", "bunker", "smoke",
+                "мост", "блокпост", "минное поле", "провол", "дот", "дым",
+            ],
+            "split_merge": [
+                "split", "detach", "break into", "merge", "join up", "combine",
+                "раздел", "выдел", "отдели", "слей", "объедин", "соединись",
+            ],
+        }
+        for topic, keywords in topic_keywords.items():
+            if any(keyword in text_lower for keyword in keywords):
+                topics.append(topic)
+
+        return list(dict.fromkeys(topics))
 
     def _reconcile_llm_result(
         self,
@@ -509,7 +560,10 @@ class OrderParser:
         else:
             filtered_units = [u for u in units if not u.get("is_destroyed")]
 
-        system = SYSTEM_PROMPT.format(
+        doctrine_topics = self._infer_doctrine_topics(original_text)
+        system = build_system_prompt(
+            get_tactical_doctrine("brief", topics=doctrine_topics)
+        ).format(
             unit_roster=build_unit_roster(filtered_units),
             grid_info=build_grid_info(grid_info),
             game_time=game_time or "Unknown",
@@ -617,6 +671,7 @@ class OrderParser:
                          "eliminate", "destroy", "neutralize",
                          "call for fire", "request fire", "direct artillery", "call artillery",
                          "request artillery", "breach", "clear a lane", "clear lane",
+                         "split", "split off", "detach", "merge with", "join up with", "combine with",
                          "lay mines", "mine the", "emplace mines", "deploy bridge",
                          "bridge the", "construct", "build", "dig in", "entrench",
                          "fortify", "establish command post", "set up aid station",
@@ -632,6 +687,7 @@ class OrderParser:
                          "наведите", "наведи", "наводите", "наводи",
                          "вызовите огонь", "вызови огонь", "запросите огонь", "запроси огонь",
                          "артиллерию на", "миномёт на", "минометн на",
+                         "раздел", "выдел", "отдели", "слей", "объедин", "соединись",
                          "проделай проход", "проделайте проход", "разминир", "разминируй",
                          "сними заграждение", "минируй", "заминируй", "ставь мины",
                          "установи мины", "навести мост", "разверни мост", "оборудуй",
@@ -889,6 +945,20 @@ class OrderParser:
                 "оборудуй позицию", "оборудуй окоп", "разверни кп", "разверни медпункт",
                 "разверни пункт снабжения", "пост наблюдения",
             ])
+            _has_smoke_fire_order = any(kw in text_lower for kw in [
+                "fire smoke", "lay smoke", "deploy smoke", "screen with smoke",
+                "put smoke", "smoke the", "set smoke",
+                "поставь дым", "поставьте дым", "дымовую завесу", "прикрой дымом",
+                "накрой дымом", "отстреляй дымами",
+            ])
+            _has_split_order = any(kw in text_lower for kw in [
+                "split", "split off", "detach", "break into", "peel off",
+                "раздел", "разделись", "выдели", "выделите", "отдели", "отделите",
+            ])
+            _has_merge_order = any(kw in text_lower for kw in [
+                "merge with", "join up with", "combine with", "rejoin",
+                "merge back", "слий", "слейтесь", "объедин", "соединись", "соединитесь",
+            ])
             _has_air_mobility_order = any(kw in text_lower for kw in [
                 "insert", "extract", "airlift", "landing zone", "lz",
                 "casevac", "medevac", "pickup zone", "drop zone",
@@ -911,6 +981,10 @@ class OrderParser:
             ]):
                 # Standby for fire support → observe/wait, NOT immediate fire
                 order_type = "observe"
+            elif _has_split_order:
+                order_type = "split"
+            elif _has_merge_order:
+                order_type = "merge"
             elif _has_breach_order:
                 order_type = "breach"
             elif _has_lay_mines_order:
@@ -919,6 +993,10 @@ class OrderParser:
                 order_type = "deploy_bridge"
             elif _has_construct_order:
                 order_type = "construct"
+            elif _has_smoke_fire_order and _is_request_fire:
+                order_type = "request_fire"
+            elif _has_smoke_fire_order:
+                order_type = "fire"
             elif _is_request_fire:
                 # "Request artillery support", "Direct artillery at enemy" → request_fire
                 # This creates a fire request to CoC artillery
@@ -1060,9 +1138,11 @@ class OrderParser:
         # Match named map objects: airfield, bridge, hospital, fuel depot, etc.
         obj_pattern = re.compile(
             r'\b(airfield|bridge|fuel\s+depot|hospital|command\s+post|supply\s+cache'
-            r'|observation\s+tower|pillbox|roadblock|bunker'
-            r'|аэродром|мост|госпиталь|медпункт|склад|заправк\w*'
-            r'|кп|командный\s+пункт|вышк\w*|дот|дзот|блокпост)\b',
+            r'|observation\s+tower|pillbox|roadblock|bunker|crossing|minefield'
+            r'|trench|entrenchment|wire|smoke(?:\s+screen)?|anti-tank\s+ditch'
+            r'|аэродром|мост|переправ\w*|госпиталь|медпункт|склад|заправк\w*'
+            r'|кп|командный\s+пункт|вышк\w*|дот|дзот|блокпост|минн\w+\s+пол\w*'
+            r'|окоп\w*|транше\w*|проволок\w*|дым\w*|противотанков\w+\s+ров\w*)\b',
             re.IGNORECASE,
         )
         for m in obj_pattern.finditer(text):
@@ -1336,6 +1416,8 @@ class OrderParser:
         # e.g. "be ready to support C-squad's targets" → support_target_ref = "C-squad"
         # e.g. "Будьте готовы поддержать огнём по целям, которые вам передаст C-squad" → "C-squad"
         support_target_ref = None
+        merge_target_ref = None
+        split_ratio = None
         _is_standby_check = (classification == MessageClassification.command
                              and order_type == "observe"
                              and any(kw in text_lower for kw in [
@@ -1379,6 +1461,37 @@ class OrderParser:
                     if candidate.lower() not in generic and len(candidate) > 1:
                         support_target_ref = candidate
                         break
+
+        if order_type == "merge":
+            import re as _re_merge
+            merge_patterns = [
+                r'merge\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
+                r'join\s+up\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
+                r'combine\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
+                r'соедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'объедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'слей(?:ся|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+            ]
+            for pat in merge_patterns:
+                match = _re_merge.search(pat, text, _re_merge.IGNORECASE)
+                if match:
+                    merge_target_ref = match.group(1).strip().rstrip(".,;!")
+                    break
+
+        if order_type == "split":
+            import re as _re_split
+            ratio_patterns = [
+                (r'(\d{1,2})\s*%', lambda m: max(0.1, min(0.9, int(m.group(1)) / 100.0))),
+                (r'half|one half|половин', lambda _m: 0.5),
+                (r'one third|third|треть', lambda _m: 1 / 3),
+                (r'two thirds|две трети', lambda _m: 2 / 3),
+                (r'quarter|четверт', lambda _m: 0.25),
+            ]
+            for pat, builder in ratio_patterns:
+                match = _re_split.search(pat, text_lower, _re_split.IGNORECASE)
+                if match:
+                    split_ratio = round(builder(match), 2)
+                    break
 
         # ── Coordination refs: units mentioned for liaison / support, not as recipients ──
         if classification == MessageClassification.command:
@@ -1484,6 +1597,8 @@ class OrderParser:
             formation=formation,
             engagement_rules=engagement_rules,
             support_target_ref=support_target_ref,
+            merge_target_ref=merge_target_ref,
+            split_ratio=split_ratio,
             map_object_type=map_object_type,
             coordination_unit_refs=coordination_unit_refs,
             coordination_kind=coordination_kind,

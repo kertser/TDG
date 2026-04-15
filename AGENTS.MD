@@ -5,6 +5,22 @@
 
 ---
 
+## Current Directive: Tactical Breadth
+
+The platform must support a broad command vocabulary across heterogeneous unit families, not only infantry maneuver.
+
+Implementation priority:
+- engineer, artillery, recon, logistics, and aviation-related command families
+- map-object-aware command execution (bridges, minefields, wire, smoke, roadblocks, fortifications, support structures)
+- split/merge and other command-and-control reorganization actions
+- bilingual EN/RU parsing and regression scenarios for offensive, defensive, withdrawal, sustainment, breach, screening, air-mobility, and reorganization cases
+- doctrine loading from `FIELD_MANUAL.md` by targeted topic snippets rather than injecting the full doctrine block into every prompt
+- favor scenario-style regression tests that replay multi-step tactical interactions over single-command parser checks alone
+
+Any future agent work must preserve this direction when modifying parser prompts, doctrine loading, tests, or simulation behavior.
+
+---
+
 ## Section 1: Research Summary
 
 ### 1.1 Web Mapping Stacks

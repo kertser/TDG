@@ -858,6 +858,9 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                     "target_location": target_loc,
                     "target_unit_id": target_uid,
                     "coordination_unit_refs": list(task.get("coordination_unit_refs") or []),
+                    "fire_effect_type": task.get("fire_effect_type"),
+                    "map_object_type": task.get("map_object_type"),
+                    "smoke_duration_ticks": task.get("smoke_duration_ticks"),
                 })
                 # Clear the request task after processing
                 unit.current_task = None
@@ -874,6 +877,9 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                     "coordination_unit_refs": list(task.get("coordination_unit_refs") or []),
                     "coordination_unit_ids": list(task.get("coordination_unit_ids") or []),
                     "supporting_unit_ids": list(task.get("supporting_unit_ids") or []),
+                    "fire_effect_type": task.get("fire_effect_type"),
+                    "map_object_type": task.get("map_object_type"),
+                    "smoke_duration_ticks": task.get("smoke_duration_ticks"),
                 })
                 # Clear the flag so we don't request repeatedly
                 new_task = dict(task)
@@ -895,9 +901,18 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
 
     # ── 5. Execute combat ────────────────────────────────────────
     _t0 = time.monotonic()
-    combat_events, under_fire = process_combat(all_units, terrain, map_objects_list,
-                                                contacts=existing_contacts)
+    combat_new_map_objects: list = []
+    combat_events, under_fire = process_combat(
+        all_units,
+        terrain,
+        map_objects_list,
+        contacts=existing_contacts,
+        new_map_objects_out=combat_new_map_objects,
+    )
     all_events.extend(combat_events)
+    for new_obj in combat_new_map_objects:
+        db.add(new_obj)
+        map_objects_list.append(new_obj)
     _t_combat = time.monotonic() - _t0
     if _debug:
         dlog(f"  [5] Combat: {_t_combat:.2f}s, events={len(combat_events)}, under_fire={len(under_fire)}")
@@ -1748,12 +1763,16 @@ def _order_to_task(order: Order) -> dict | None:
             "waypoints",
             "path_calc_tick",
             "map_object_type",
+            "fire_effect_type",
+            "merge_target_ref",
+            "split_ratio",
             "target_object_id",
             "geometry",
             "mine_type",
             "object_type",
             "build_progress",
             "at_worksite",
+            "smoke_duration_ticks",
         ):
             if po.get(key) is not None:
                 task[key] = po.get(key)
@@ -1839,6 +1858,16 @@ def _order_to_task(order: Order) -> dict | None:
             "оборудуй", "окопай", "укрепи", "построй", "возведи",
         ]):
             return {"type": "construct", "order_id": str(order.id)}
+        if any(kw in text for kw in [
+            "split", "split off", "detach", "break into",
+            "раздел", "выдел", "отдели",
+        ]):
+            return {"type": "split", "order_id": str(order.id)}
+        if any(kw in text for kw in [
+            "merge with", "join up with", "combine with", "rejoin",
+            "слей", "объедин", "соединись",
+        ]):
+            return {"type": "merge", "order_id": str(order.id)}
         if any(kw in text for kw in [
             "insert", "extract", "airlift", "landing zone", "lz",
             "casevac", "medevac", "десант", "высад", "эвакуируй", "эвакуация",

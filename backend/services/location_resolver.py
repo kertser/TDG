@@ -266,7 +266,7 @@ class LocationResolver:
         # Map object type keywords for matching
         TYPE_KEYWORDS = {
             "airfield": ["airfield", "аэродром", "впп", "runway"],
-            "bridge_structure": ["bridge", "мост"],
+            "bridge_structure": ["bridge", "crossing", "мост", "переправа"],
             "fuel_depot": ["fuel depot", "fuel", "топлив", "склад горюч", "горючее", "заправк"],
             "supply_cache": ["supply", "cache", "склад", "запас"],
             "field_hospital": ["hospital", "госпиталь", "медпункт", "медсанбат"],
@@ -274,6 +274,14 @@ class LocationResolver:
             "observation_tower": ["tower", "вышка", "наблюдательн"],
             "pillbox": ["pillbox", "дот", "дзот", "bunker"],
             "roadblock": ["roadblock", "блокпост", "заграждение", "кпп"],
+            "minefield": ["minefield", "минное поле", "мины"],
+            "at_minefield": ["anti-tank minefield", "at minefield", "противотанковое минное поле", "пт минное поле"],
+            "barbed_wire": ["barbed wire", "wire obstacle", "колючая проволока", "проволочное заграждение"],
+            "concertina_wire": ["concertina", "razor wire", "спираль бруно", "егоза"],
+            "anti_tank_ditch": ["anti-tank ditch", "tank ditch", "противотанковый ров"],
+            "dragons_teeth": ["dragon's teeth", "dragons teeth", "надолбы", "зубы дракона"],
+            "entrenchment": ["entrenchment", "trench", "foxhole", "окоп", "траншея", "укрытие"],
+            "smoke": ["smoke", "smokescreen", "smoke screen", "дым", "дымовая завеса"],
         }
 
         best_obj = None

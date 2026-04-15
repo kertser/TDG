@@ -2673,12 +2673,14 @@ doctrine.py (posture profiles)
 
 ### D.4 How to Update Tactical Doctrine
 
-1. **Edit FIELD_MANUAL.md** — Appendix C sections only.
+1. **Edit FIELD_MANUAL.md** — Appendix C for broad doctrine and Appendix F for compact topic snippets.
 2. Do NOT edit `tactical_doctrine.py` — it reads from FIELD_MANUAL.md automatically.
 3. Keep content between the DOCTRINE FULL START/END markers (Appendix C.1–C.12).
 4. Keep content between the DOCTRINE BRIEF START/END markers (Appendix C.13).
-5. Restart the backend to pick up changes (doctrine is loaded at import time).
-6. Test with: `python -c "from backend.prompts.tactical_doctrine import get_tactical_doctrine; print(len(get_tactical_doctrine('full')))"`
+5. Keep compact targeted snippets between the `DOCTRINE:TOPIC:<NAME>:START/END` markers in Appendix F.
+6. The order parser should receive only the relevant topic snippets plus `general`, not the full doctrine blob.
+7. Restart the backend to pick up changes (doctrine is loaded at import time).
+8. Test with: `python -c "from backend.prompts.tactical_doctrine import get_tactical_doctrine; print(get_tactical_doctrine('brief', topics=['fires','engineers']))"`
 
 ---
 
@@ -2760,4 +2762,68 @@ Until dedicated aviation task types exist, use the nearest doctrinal mapping:
 - screen / recon / overwatch -> `observe`
 - coordinated air fires -> `support` or `request_fire`
 - direct attack by the receiving air unit -> `attack` or `fire`, depending on whether it physically maneuvers or simply delivers fires
+
+---
+
+## Appendix F. Topic-Scoped Doctrine Snippets
+
+These snippets are the compact doctrine source for targeted prompt injection.
+
+<!-- DOCTRINE:TOPIC:GENERAL:START -->
+- Apply fire and maneuver, maintain security, and preserve continuity with previous orders and radio traffic.
+- Prefer clear command intent over literal wording when the message uses shorthand.
+- Use terrain, weather, visibility, and known map objects when interpreting ambiguous phrasing.
+<!-- DOCTRINE:TOPIC:GENERAL:END -->
+
+<!-- DOCTRINE:TOPIC:OFFENSE:START -->
+- Offensive action includes attack, assault, advance to contact, flanking movement, bounding overwatch, and support by fire.
+- A maneuver element closes only when a support element suppresses or screens the threat.
+- If a unit is ordered to flank or envelop, calculate an approach that offsets from the enemy rather than driving straight at the target.
+<!-- DOCTRINE:TOPIC:OFFENSE:END -->
+
+<!-- DOCTRINE:TOPIC:DEFENSE:START -->
+- Defensive action includes hold, defend, delay, disengage, fighting withdrawal, and flank screening.
+- A defending unit should seek cover, retain observation, and preserve a route for disengagement or relief.
+<!-- DOCTRINE:TOPIC:DEFENSE:END -->
+
+<!-- DOCTRINE:TOPIC:FIRES:START -->
+- Fire support is an overlay on maneuver, not a replacement for it.
+- Mortars/artillery acknowledge support, fire on the designated or current contact target, shift with corrections, and cease when friendlies close.
+- Smoke and suppressive fires are valid ways to support movement across exposed terrain or crossings.
+<!-- DOCTRINE:TOPIC:FIRES:END -->
+
+<!-- DOCTRINE:TOPIC:RECON:START -->
+- Reconnaissance, screen, and observation missions emphasize detection and reporting, not decisive engagement.
+- Recon and drone elements should cover flanks, bridges, crossings, and avenues of approach, then report quickly.
+<!-- DOCTRINE:TOPIC:RECON:END -->
+
+<!-- DOCTRINE:TOPIC:ENGINEERS:START -->
+- Engineers enable mobility and deny enemy mobility: breach, lay mines, construct positions, and deploy bridges.
+- Breach tasks require movement to the obstacle, work at the obstacle, and a clear “lane open” result.
+- Construction and mine-laying require interaction with the actual map geometry, not abstract movement only.
+<!-- DOCTRINE:TOPIC:ENGINEERS:END -->
+
+<!-- DOCTRINE:TOPIC:LOGISTICS:START -->
+- Sustainment missions may target a location or a supported unit.
+- When a supported unit is named, logistics should follow and sustain that unit rather than immediately terminating after self-checks.
+- Rearm, resupply, casualty collection, and aid-station tasks are part of the same sustainment family.
+<!-- DOCTRINE:TOPIC:LOGISTICS:END -->
+
+<!-- DOCTRINE:TOPIC:AVIATION:START -->
+- Aviation and air mobility commands include insert, extract, CASEVAC/MEDEVAC, air reconnaissance, overwatch, and strike-on-call.
+- Until dedicated air simulation exists, map air insertion/extraction to movement, air recon to observe, and coordinated air fires to support/request_fire.
+<!-- DOCTRINE:TOPIC:AVIATION:END -->
+
+<!-- DOCTRINE:TOPIC:MAP_OBJECTS:START -->
+- Bridges, minefields, wire, ditches, smoke, bunkers, roadblocks, hospitals, and command posts are tactically meaningful objects.
+- Orders that reference them should bind to the actual discovered map object when possible.
+- Object interaction must influence both unit answers and deterministic action generation.
+- Smoke is an object-level battlefield effect: it may be requested to mask movement, crossings, breach work, disengagement, or casualty evacuation.
+<!-- DOCTRINE:TOPIC:MAP_OBJECTS:END -->
+
+<!-- DOCTRINE:TOPIC:SPLIT_MERGE:START -->
+- Split is a reorganization order: detach a sub-element, preserve command continuity, and keep combat power accounting consistent.
+- Merge is a recombination order: units must be compatible and physically co-located closely enough to recombine safely.
+- Split/merge are command-and-control actions, not standard movement tasks.
+<!-- DOCTRINE:TOPIC:SPLIT_MERGE:END -->
 

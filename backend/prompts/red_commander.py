@@ -31,7 +31,13 @@ def build_red_commander_prompt(
         (system_prompt, user_message) tuple
     """
     # Load tactical doctrine reference
-    tactical_doctrine = get_tactical_doctrine("full")
+    tactical_doctrine = get_tactical_doctrine(
+        "full",
+        topics=[
+            "general", "offense", "defense", "fires", "recon",
+            "engineers", "logistics", "map_objects", "aviation",
+        ],
+    )
 
     # ── System Prompt ─────────────────────────────────────
     system_prompt = f"""You are a Red force military commander in a tactical exercise.

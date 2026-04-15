@@ -38,6 +38,8 @@ class OrderType(str, enum.Enum):
     defend = "defend"
     observe = "observe"
     support = "support"
+    split = "split"
+    merge = "merge"
     breach = "breach"
     lay_mines = "lay_mines"
     construct = "construct"
@@ -135,6 +137,17 @@ class ParsedOrderData(BaseModel):
         None,
         description="Unit name/callsign that this unit should support/relay to, "
                     "e.g. 'C-squad' in 'be ready to support C-squad's targets'",
+    )
+    merge_target_ref: Optional[str] = Field(
+        None,
+        description="Unit name/callsign to merge with, e.g. 'B-squad' in "
+                    "'A-squad merge with B-squad'",
+    )
+    split_ratio: Optional[float] = Field(
+        None,
+        ge=0.1,
+        le=0.9,
+        description="For split orders, approximate fraction detached into the new element",
     )
     map_object_type: Optional[str] = Field(
         None,

@@ -11,15 +11,16 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Tactical A* Pathfinding** — Terrain-aware movement trajectories over depth-1 terrain cells (~333m resolution); considers terrain cost, slope, minefields, enemy avoidance, cover preference, friendly proximity; speed-mode-aware routing (slow=concealment, fast=speed); waypoints computed immediately on order and recalculated every 5 ticks; smooth Catmull-Rom spline rendering on frontend
 - **Collaborative Overlays** — Real-time synchronized drawing tools (arrows, polylines, rectangles, markers, ellipses, measurement) via WebSocket; shared across all sides
 - **Terrain Intelligence** — Automatic terrain classification from OSM Overpass + ESA WorldCover + Open-Elevation API; 12-type taxonomy with military modifiers; admin manual painting; SSE progress streaming; height tops detection
-- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos, combat role coordination), morale, suppression, ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply
+- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos, combat role coordination), morale, suppression, ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply, engineer task execution, and targeted logistics support
 - **Combat Role Coordination** — Units attacking the same enemy auto-coordinate: suppress (~40%, covering fire at weapon range), assault (1–2 infantry close in), flank (60° offset approach via covered terrain). Radio announces roles.
 - **Artillery-Infantry Coordination** — Three-tier friendly fire prevention: proactive ceasefire request at 250m, danger-close auto-stop at 50m, area-fire friendly check. Artillery supports both attacking and defending units. Explicit fire request system. Auto-artillery-request on target acquisition.
 - **Tactical Map Objects** — Static battlefield objects: barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, command posts, fuel depots, airfields (rotatable), etc. NATO-style markers with per-side discovery system
 - **Area Effects** — Transient polygon-based hazards: smoke (blocks detection), fog (reduces visibility), fire (damages units, blocks movement), chemical clouds (heavy infantry damage). All effects decay over time. Combat impact visual effects (explosions).
 - **Resupply System** — Supply caches (+10% ammo/tick), logistics units (mobile +8% ammo/tick), field hospitals (+1% strength/tick). Resupply order type with auto-movement to nearest supply source.
-- **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge, authority checks
+- **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge, authority checks, and support for command-driven reorganization orders
 - **Admin Panel** — Floating admin window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, area effects placement
-- **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with tactical assessment, smart formation suggestion, height/coordinate/snail location resolution, immediate task assignment
+- **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with tactical assessment, smart formation suggestion, height/coordinate/snail location resolution, immediate task assignment, map-object-aware engineer/logistics handling, and doctrinal parsing of split/merge and support-unit commands
+- **Doctrine-Aware Prompting** — Tactical doctrine is loaded from `FIELD_MANUAL.md` and injected by topic so prompts receive only relevant slices such as fires, recon, engineers, logistics, aviation, map objects, or split/merge
 - **Radio Chat** — Tactical radio channel between session commanders with recipient selection, three channel filters (All / 💬 Chat / 📡 Units), and unread indicator. Auto-generated unit radio chatter: idle reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance halt/resume
 - **Reports** — Five auto-generated report types: SPOTREP (enemy contacts), SHELREP (under fire), CASREP (unit destroyed), SITREP (periodic status), INTSUM (intelligence summary). Bilingual RU/EN. Unread badge on sidebar tab.
 - **AI Victory Referee** — LLM-based victory evaluation every 5 ticks against scenario objectives. Game turn limit support. Auto-finish on victory or turn limit.
@@ -67,6 +68,23 @@ uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 7. Open the frontend
 Navigate to `http://localhost:8000` in your browser.
+
+## Doctrine Loading
+
+- `FIELD_MANUAL.md` is the authoritative tactical source.
+- `backend/prompts/tactical_doctrine.py` loads:
+  - full doctrine markers for deep AI reasoning
+  - brief doctrine markers for compact parsing context
+  - topic-scoped snippets (`DOCTRINE:TOPIC:*`) so prompts receive only relevant tactical context
+- Tactical regression should be expanded as scenario packs, not only isolated parser tests. Keep bilingual RU/EN cases for maneuver, fires, engineers, logistics, aviation, split/merge, and map-object interaction.
+- The order parser now selects doctrine by command family, for example:
+  - `fires`
+  - `recon`
+  - `engineers`
+  - `logistics`
+  - `aviation`
+  - `map_objects`
+  - `split_merge`
 
 ## Usage
 
