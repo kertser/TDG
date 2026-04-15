@@ -38,6 +38,8 @@
         try { KGrid.clearAll(); } catch(e) {}
         try { KUnits.clearAll(); } catch(e) {}
         try { KContacts.clearAll(); } catch(e) {}
+        try { KMapObjects.clearAll(); } catch(e) {}
+        try { KTerrain.hide(); } catch(e) {}
 
         // Deactivate scenario builder if active (prevents double grid/units)
         try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}

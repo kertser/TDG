@@ -1298,9 +1298,9 @@ const KAdmin = (() => {
                 _adminSelectedSessionId = null;
                 KWebSocket.disconnect();
                 document.getElementById('session-info').textContent = '';
-                const startBtn = document.getElementById('start-session-btn');
+                const exitBtn0 = document.getElementById('exit-session-btn');
                 const turnBtn = document.getElementById('turn-btn');
-                if (startBtn) startBtn.style.display = 'none';
+                if (exitBtn0) exitBtn0.style.display = 'none';
                 if (turnBtn) turnBtn.style.display = 'none';
                 KSessionUI.loadSessions();
                 KGameLog.addEntry('All sessions deleted (admin)', 'info');
@@ -1330,14 +1330,15 @@ const KAdmin = (() => {
                 if (sessionId === _getUserSessionId()) {
                     KWebSocket.disconnect();
                     document.getElementById('session-info').textContent = '';
-                    const startBtn = document.getElementById('start-session-btn');
+                    const exitBtn1 = document.getElementById('exit-session-btn');
                     const turnBtn = document.getElementById('turn-btn');
-                    if (startBtn) startBtn.style.display = 'none';
+                    if (exitBtn1) exitBtn1.style.display = 'none';
                     if (turnBtn) turnBtn.style.display = 'none';
                     try { KUnits.clearAll(); } catch(e) {}
                     try { KContacts.clearAll(); } catch(e) {}
                     try { KGrid.clearAll(); } catch(e) {}
                     try { KOverlays.clearAll(); } catch(e) {}
+                    try { KMapObjects.clearAll(); } catch(e) {}
                 }
                 if (sessionId === _adminSelectedSessionId) {
                     _adminSelectedSessionId = null;

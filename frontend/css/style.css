@@ -1841,12 +1841,20 @@ button:hover { background: #1a5276; }
 }
 
 /* ── Start Session Button ─────────────────────── */
-#start-session-btn {
-    background: #1b5e20;
-    color: #a5d6a7;
-    font-weight: 700;
+.exit-session-btn {
+    background: #37474f;
+    color: #b0bec5;
+    font-weight: 600;
+    border: 1px solid #546e7a;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    margin-bottom: 8px;
+    width: 100%;
+    transition: background 0.15s;
 }
-#start-session-btn:hover { background: #2e7d32; }
+.exit-session-btn:hover { background: #455a64; color: #eceff1; }
 
 /* ── Turn Button ──────────────────────────────── */
 #turn-btn {

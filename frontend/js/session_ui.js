@@ -27,7 +27,7 @@ const KSessionUI = (() => {
         const loginBtn = document.getElementById('login-btn');
         const nameInput = document.getElementById('display-name-input');
         const pwInput = document.getElementById('password-input');
-        const startBtn = document.getElementById('start-session-btn');
+        const exitBtn = document.getElementById('exit-session-btn');
         const turnBtn = document.getElementById('turn-btn');
 
         if (registerBtn) registerBtn.addEventListener('click', () => _doRegister());
@@ -83,67 +83,8 @@ const KSessionUI = (() => {
         if (descOk) descOk.addEventListener('click', () => { if (descModal) descModal.style.display = 'none'; });
         if (descModal) descModal.addEventListener('click', (e) => { if (e.target === descModal) descModal.style.display = 'none'; });
 
-        if (startBtn) {
-            startBtn.addEventListener('click', async () => {
-                if (!currentSessionId || !currentToken) return;
-                try {
-                    const resp = await fetch(`/api/sessions/${currentSessionId}/start`, {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${currentToken}` },
-                    });
-                    if (!resp.ok) {
-                        const errData = await resp.json().catch(() => ({}));
-                        KGameLog.addEntry(`Start failed: ${errData.detail || resp.status}`, 'error');
-                        return;
-                    }
-                    const data = await resp.json();
-                    KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
-                    // Update game clock from start response
-                    KMap.setGameTime(data.tick || 0, data.current_time || null);
-                    startBtn.style.display = 'none';
-                    if (turnBtn && _canAdvanceTurn) turnBtn.style.display = 'inline-block';
-
-                    // Reload grid + units + contacts after session start
-                    // (grid & units are created on start from scenario data)
-                    const map = KMap.getMap();
-                    await KGrid.load(map, currentSessionId);
-
-                    // Center map on grid area
-                    const gridGJ = KGrid.getGridGeoJson();
-                    if (gridGJ && gridGJ.features && gridGJ.features.length > 0) {
-                        let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-                        gridGJ.features.forEach(f => {
-                            if (f.geometry && f.geometry.coordinates) {
-                                f.geometry.coordinates[0].forEach(c => {
-                                    if (c[1] < minLat) minLat = c[1];
-                                    if (c[1] > maxLat) maxLat = c[1];
-                                    if (c[0] < minLng) minLng = c[0];
-                                    if (c[0] > maxLng) maxLng = c[0];
-                                });
-                            }
-                        });
-                        const cLat = (minLat + maxLat) / 2;
-                        const cLng = (minLng + maxLng) / 2;
-                        KMap.setOperationCenter(cLat, cLng, 13);
-                        map.setView([cLat, cLng], 13);
-                    }
-
-                    await KUnits.load(currentSessionId, currentToken);
-                    // If admin god view is active, re-fetch all units
-                    if (typeof KAdmin !== 'undefined' && KAdmin.isGodViewEnabled()) {
-                        try { await KAdmin.refreshMapUnits(); } catch(e) {}
-                    }
-                    await KContacts.load(currentSessionId, currentToken);
-
-                    // Ensure WebSocket is connected (reconnect if needed)
-                    try { KWebSocket.connect(currentSessionId, currentToken); } catch(e) {}
-
-                    // Refresh chain of command tree after start
-                    try { KAdmin.loadPublicCoC(); } catch(e) {}
-                } catch (err) {
-                    console.error('Start session failed:', err);
-                }
-            });
+        if (exitBtn) {
+            exitBtn.addEventListener('click', () => _exitSession());
         }
 
         if (turnBtn) {
@@ -441,20 +382,22 @@ const KSessionUI = (() => {
         // Reset game clock
         KMap.setGameTime(0, null);
 
-        const startBtn = document.getElementById('start-session-btn');
+        const exitBtn = document.getElementById('exit-session-btn');
         const turnBtn = document.getElementById('turn-btn');
-        if (startBtn) startBtn.style.display = 'none';
+        if (exitBtn) exitBtn.style.display = 'none';
         if (turnBtn) turnBtn.style.display = 'none';
 
         // Clear session list
         const listEl = document.getElementById('session-list');
         if (listEl) listEl.innerHTML = '';
 
-        // Clear map layers (units, contacts, overlays, grid)
+        // Clear map layers (units, contacts, overlays, grid, map objects, terrain)
         try { KUnits.clearAll(); } catch(e) {}
         try { KContacts.clearAll(); } catch(e) {}
         try { KOverlays.clearAll(); } catch(e) {}
         try { KGrid.clearAll(); } catch(e) {}
+        try { KMapObjects.clearAll(); } catch(e) {}
+        try { KTerrain.hide(); } catch(e) {}
 
         // Clear sidebar panels content
         const cocTree = document.getElementById('coc-tree-public');
@@ -484,6 +427,84 @@ const KSessionUI = (() => {
 
         // Reset admin state (re-lock, close window, clear god view)
         try { KAdmin.resetOnLogout(); } catch(e) {}
+    }
+
+    /** Exit the current session (back to session list), without logging out. */
+    function _exitSession() {
+        // Disconnect WebSocket
+        KWebSocket.disconnect();
+
+        // Reset session state
+        currentSessionId = null;
+        _currentRole = null;
+        _currentSide = null;
+        _canAdvanceTurn = false;
+        _scenarioTitle = null;
+        _scenarioDescription = null;
+        _scenarioEnvironment = null;
+        _scenarioObjectives = null;
+
+        // Reset UI
+        document.getElementById('session-info').textContent = '';
+
+        // Hide session controls
+        const exitBtn = document.getElementById('exit-session-btn');
+        const turnBtn = document.getElementById('turn-btn');
+        if (exitBtn) exitBtn.style.display = 'none';
+        if (turnBtn) turnBtn.style.display = 'none';
+
+        // Show session list again
+        const sessionList = document.getElementById('session-list');
+        if (sessionList) sessionList.style.display = '';
+
+        // Reset game clock
+        KMap.setGameTime(0, null);
+
+        // Hide admin topbar button and close admin window
+        const adminWindow = document.getElementById('admin-window');
+        if (adminWindow) adminWindow.style.display = 'none';
+
+        // Hide drawing tools group
+        const drawGroup = document.getElementById('map-draw-group');
+        if (drawGroup) drawGroup.style.display = 'none';
+
+        // Clear map layers
+        try { KUnits.clearAll(); } catch(e) {}
+        try { KContacts.clearAll(); } catch(e) {}
+        try { KOverlays.clearAll(); } catch(e) {}
+        try { KGrid.clearAll(); } catch(e) {}
+        try { KMapObjects.clearAll(); } catch(e) {}
+        try { KTerrain.hide(); } catch(e) {}
+
+        // Clear sidebar panels content
+        const cocTree = document.getElementById('coc-tree-public');
+        if (cocTree) cocTree.innerHTML = '';
+        const eventsList = document.getElementById('events-list');
+        if (eventsList) eventsList.innerHTML = '';
+        const orderList = document.getElementById('order-list');
+        if (orderList) orderList.innerHTML = '';
+        const gameLog = document.getElementById('game-log');
+        if (gameLog) gameLog.innerHTML = '';
+
+        // Hide command panel
+        try { KOrders.hide(); } catch(e) {}
+
+        // Reset sidebar to session tab
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const sessionTabBtn = document.querySelector('[data-tab="session-tab"]');
+        if (sessionTabBtn) sessionTabBtn.classList.add('active');
+        const sessionTab = document.getElementById('session-tab');
+        if (sessionTab) sessionTab.classList.add('active');
+
+        // Deactivate scenario builder if active
+        try { if (KScenarioBuilder.isActive()) KScenarioBuilder.deactivate(); } catch(e) {}
+
+        // Reset admin state
+        try { KAdmin.resetOnLogout(); } catch(e) {}
+
+        // Reload session list
+        loadSessions();
     }
 
     async function _createSession() {
@@ -568,23 +589,32 @@ const KSessionUI = (() => {
             _scenarioObjectives = sessInfo.scenario_objectives || null;
         }
 
-        // Show session control buttons based on status AND role
-        const startBtn = document.getElementById('start-session-btn');
-        const turnBtn = document.getElementById('turn-btn');
+        // Auto-start the session if it's in lobby or paused
         const status = sessionData && sessionData.status;
+        const turnBtn = document.getElementById('turn-btn');
+        const exitBtn = document.getElementById('exit-session-btn');
 
-        if (status === 'running') {
-            if (startBtn) startBtn.style.display = 'none';
-            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'inline-block' : 'none';
-        } else if (status === 'paused') {
-            if (startBtn && _canAdvanceTurn) { startBtn.style.display = 'block'; startBtn.textContent = '▶ Resume Session'; }
-            else if (startBtn) startBtn.style.display = 'none';
-            if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'inline-block' : 'none';
-        } else {
-            if (startBtn && _canAdvanceTurn) { startBtn.style.display = 'block'; startBtn.textContent = 'Start Session'; }
-            else if (startBtn) startBtn.style.display = 'none';
-            if (turnBtn) turnBtn.style.display = 'none';
+        if (status === 'lobby' || status === 'paused') {
+            try {
+                const resp = await fetch(`/api/sessions/${currentSessionId}/start`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${currentToken}` },
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    KGameLog.addEntry(`Session started (Turn ${data.tick})`, 'info');
+                    KMap.setGameTime(data.tick || 0, data.current_time || null);
+                }
+            } catch (err) {
+                console.warn('Auto-start session failed:', err);
+            }
         }
+
+        // Show turn button for commanders, show exit button, hide session list
+        if (turnBtn) turnBtn.style.display = _canAdvanceTurn ? 'inline-block' : 'none';
+        if (exitBtn) exitBtn.style.display = 'block';
+        const sessionList = document.getElementById('session-list');
+        if (sessionList) sessionList.style.display = 'none';
 
         // Show map control buttons are now always visible on the map
         // (rendered as a Leaflet control in top-right corner)

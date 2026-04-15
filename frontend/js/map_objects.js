@@ -459,12 +459,13 @@ const KMapObjects = (() => {
         const group = L.featureGroup();
 
         // Main smoke polygon — blurred edge
-        const poly = L.polygon(latlngs, {
-            color: 'rgba(180,180,180,0.2)',
+        const poly = L.rectangle(latlngs, {
+            stroke: false,
             weight: 0,
-            fillColor: '#b0b0b0',
-            fillOpacity: baseOpacity * 0.4,
-            className: 'smoke-polygon',
+            fill: true,
+            fillColor: 'transparent',
+            fillOpacity: 0.0001,
+            color: 'transparent',
             interactive: true,
         });
         group.addLayer(poly);
@@ -536,14 +537,16 @@ const KMapObjects = (() => {
         const group = L.featureGroup();
 
         // Main fog polygon — soft white diffuse area
-        const poly = L.polygon(latlngs, {
-            color: 'rgba(220,220,220,0.1)',
+        const poly = L.rectangle(latlngs, {
+            stroke: false,
+            color: 'transparent',
             weight: 0,
             fillColor: '#f0f0f0',
             fillOpacity: baseOpacity * 0.5,
             className: 'fog-polygon',
             interactive: true,
         });
+
         group.addLayer(poly);
 
         // Compute centroid + rough radius
@@ -609,14 +612,16 @@ const KMapObjects = (() => {
         const group = L.featureGroup();
 
         // Main fire polygon — orange-red area
-        const poly = L.polygon(latlngs, {
-            color: 'rgba(255,68,0,0.3)',
-            weight: 1,
-            fillColor: '#FF4400',
-            fillOpacity: baseOpacity * 0.4,
-            className: 'fire-polygon',
+        const poly = L.rectangle(latlngs, {
+            stroke: false,
+            weight: 0,
+            fill: true,
+            fillColor: 'transparent',
+            fillOpacity: 0.0001,
+            color: 'transparent',
             interactive: true,
         });
+
         group.addLayer(poly);
 
         // Compute centroid + rough radius
@@ -694,12 +699,13 @@ const KMapObjects = (() => {
         const group = L.featureGroup();
 
         // Main chemical polygon — yellow-green toxic area
-        const poly = L.polygon(latlngs, {
-            color: 'rgba(170,204,0,0.25)',
-            weight: 1,
-            fillColor: '#AACC00',
-            fillOpacity: baseOpacity * 0.4,
-            className: 'chem-polygon',
+        const poly = L.rectangle(latlngs, {
+            stroke: false,
+            weight: 0,
+            fill: true,
+            fillColor: 'transparent',
+            fillOpacity: 0.0001,
+            color: 'transparent',
             interactive: true,
         });
         group.addLayer(poly);
