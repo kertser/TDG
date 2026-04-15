@@ -716,6 +716,7 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                     "unit_id": str(unit.id),
                     "target_location": target_loc,
                     "target_unit_id": target_uid,
+                    "coordination_unit_refs": list(task.get("coordination_unit_refs") or []),
                 })
                 # Clear the request task after processing
                 unit.current_task = None
@@ -1537,6 +1538,20 @@ def _order_to_task(order: Order) -> dict | None:
             task["target_snail"] = target_snail
         if speed:
             task["speed"] = speed
+        for key in (
+            "formation",
+            "engagement_rules",
+            "support_target_ref",
+            "coordination_unit_refs",
+            "coordination_kind",
+            "purpose",
+            "intent_action",
+            "advance_to_fire",
+            "waypoints",
+            "path_calc_tick",
+        ):
+            if po.get(key) is not None:
+                task[key] = po.get(key)
         # Add salvos for fire tasks (default 3 unless specified)
         if task_type == "fire":
             from backend.engine.combat import DEFAULT_FIRE_SALVOS
@@ -1585,12 +1600,17 @@ def _order_to_task(order: Order) -> dict | None:
             "наведите миномёт", "наведи миномёт", "наведите миномет",
             "наводите миномёт", "наводи миномёт", "наводите миномет",
             "наведите огонь", "наведи огонь",
-            "свяжитесь с артиллерией", "свяжись с артиллерией",
-            "свяжитесь с миномёт", "свяжись с миномёт",
-            "свяжитесь с mortar", "свяжись с mortar",
             "артиллерию на цель", "миномёт на цель", "миномет на цель",
         ]
-        if any(kw in text for kw in _request_fire_kw):
+        liaison_only = (
+            any(kw in text for kw in ["свяж", "координиру", "coordinate with", "link up with", "liaise with"])
+            and not any(kw in text for kw in [
+                "огонь", "fire support", "support fire", "артподдержк",
+                "огневая поддержк", "на цель", "по цели", "противник", "enemy",
+                "suppress", "подав",
+            ])
+        )
+        if not liaison_only and any(kw in text for kw in _request_fire_kw):
             return {"type": "request_fire", "order_id": str(order.id)}
 
         if any(kw in text for kw in ["fire at", "fire on", "fire mission", "огонь по", "стреляй",
@@ -1603,8 +1623,8 @@ def _order_to_task(order: Order) -> dict | None:
         if any(kw in text for kw in ["attack", "engage", "eliminate", "destroy", "neutralize",
                                       "атаку", "уничтож", "ликвидир", "поразить"]):
             return {"type": "attack", "order_id": str(order.id)}
-        if "move" in text or "advance" in text:
-            return {"type": "attack", "order_id": str(order.id)}
+        if any(kw in text for kw in ["move", "advance", "выдвиг", "двигай", "марш"]):
+            return {"type": "move", "order_id": str(order.id)}
         if "defend" in text or "hold" in text:
             return {"type": "defend", "order_id": str(order.id)}
         if "observe" in text or "recon" in text:

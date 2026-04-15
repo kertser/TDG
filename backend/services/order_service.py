@@ -35,6 +35,7 @@ from backend.schemas.order import (
     MessageClassification,
     OrderParseResult,
     ResolvedLocation,
+    UnitRadioResponse,
     ResponseType,
 )
 from backend.services.order_parser import order_parser
@@ -314,14 +315,16 @@ class OrderService:
         """Process a command-type order through the full pipeline."""
 
         # ── Match target units ────────────────────────────
-        matched_units = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
+        matched_units = []
 
-        # If no units matched but we have target_unit_ids on the order, use those
-        if not matched_units and order.target_unit_ids:
+        # Prefer explicit recipients from the order payload/UI when present.
+        if order.target_unit_ids:
             for uid in order.target_unit_ids:
                 for u in units_context:
                     if u.get("id") == str(uid):
                         matched_units.append(u)
+        if not matched_units:
+            matched_units = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
 
         result.matched_unit_ids = [u["id"] for u in matched_units]
 
@@ -671,6 +674,7 @@ class OrderService:
                             "Requesting alternate coordinates or engineer support."
                         )
             elif resp_type in (ResponseType.status, ResponseType.wilco, ResponseType.wilco_fire,
+                               ResponseType.wilco_request_fire,
                                ResponseType.wilco_disengage, ResponseType.wilco_resupply,
                                ResponseType.wilco_observe, ResponseType.wilco_standby,
                                ResponseType.ack):
@@ -760,8 +764,22 @@ class OrderService:
                                        "flank", "assault", "withdraw", "retreat", "regroup")
                     # Defense/observe/halt orders — report position only
                     _static_types = ("defend", "observe", "halt", "regroup")
+                    coord_refs = (task or {}).get("coordination_unit_refs") or []
+                    coord_kind = (task or {}).get("coordination_kind")
 
-                    if order_type_val in _movement_types and task_target_snail and own_grid:
+                    if order_type_val == "request_fire" and task_target_snail:
+                        coord_name = coord_refs[0] if coord_refs else "поддержку"
+                        if lang == "ru":
+                            prefix = f"нахожусь в квадрате {own_grid}. " if own_grid else ""
+                            status_text = (
+                                f"{prefix}передаю {coord_name} огневую задачу по квадрату {task_target_snail}"
+                            )
+                        else:
+                            prefix = f"at grid {own_grid}. " if own_grid else ""
+                            status_text = (
+                                f"{prefix}passing {coord_name} a fire mission on grid {task_target_snail}"
+                            )
+                    elif order_type_val in _movement_types and task_target_snail and own_grid:
                         if lang == "ru":
                             status_text = f"нахожусь в квадрате {own_grid}. Выдвигаемся в квадрат {task_target_snail}"
                         else:
@@ -802,6 +820,28 @@ class OrderService:
                             unit_dict, lang, situation=situation,
                         )
 
+                    if coord_refs:
+                        coord_name = coord_refs[0]
+                        if lang == "ru":
+                            if coord_kind == "covering_fire":
+                                coord_text = (
+                                    f"связываюсь с {coord_name}, выдвигаюсь под их огневым прикрытием"
+                                )
+                            elif coord_kind == "fire_support":
+                                coord_text = (
+                                    f"связываюсь с {coord_name}, согласую огневую поддержку"
+                                )
+                            else:
+                                coord_text = f"связываюсь с {coord_name}, координирую действия"
+                        else:
+                            if coord_kind == "covering_fire":
+                                coord_text = f"linking up with {coord_name} and advancing under their covering fire"
+                            elif coord_kind == "fire_support":
+                                coord_text = f"linking up with {coord_name} for fire support"
+                            else:
+                                coord_text = f"linking up with {coord_name} to coordinate actions"
+                        status_text = f"{status_text}. {coord_text}" if status_text else coord_text
+
             resp = response_generator.generate_response(
                 parsed=parsed,
                 unit=unit_dict,
@@ -812,6 +852,18 @@ class OrderService:
             )
             if resp:
                 result.responses.append(resp)
+
+        await self._append_coordination_partner_responses(
+            parsed=parsed,
+            result=result,
+            primary_units=matched_units,
+            units_context=units_context,
+            session_id=session_id,
+            db=db,
+            issuer_side=issuer_side,
+            grid_service=grid_service,
+            task=task,
+        )
 
         # ── Set order status ──────────────────────────────
         if fire_range_issues and len(fire_range_issues) == len(matched_units):
@@ -906,14 +958,16 @@ class OrderService:
         (acknowledgments, status reports, encouragement). Units reply with a
         short "Принял" / "Acknowledged" so the commander knows they heard.
         """
-        matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
+        matched = []
 
-        # If no specific units referenced, use order's target_unit_ids
-        if not matched and order.target_unit_ids:
+        # Prefer explicit recipients from the order payload/UI when present.
+        if order.target_unit_ids:
             for uid in order.target_unit_ids:
                 for u in units_context:
                     if u.get("id") == str(uid):
                         matched.append(u)
+        if not matched:
+            matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
 
         # If still no units, pick first available same-side unit
         if not matched:
@@ -953,14 +1007,16 @@ class OrderService:
         grid_service: Any = None,
     ):
         """Process a status request — generate status reports from units."""
-        matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
+        matched = []
 
-        # If no units matched from text, try order.target_unit_ids (from selected units)
-        if not matched and order.target_unit_ids:
+        # Prefer explicit recipients from the order payload/UI when present.
+        if order.target_unit_ids:
             for uid in order.target_unit_ids:
                 for u in units_context:
                     if u.get("id") == str(uid):
                         matched.append(u)
+        if not matched:
+            matched = self._match_units(parsed.target_unit_refs, units_context, issuer_side)
 
         # Only fall back to all own-side units if BOTH text refs AND target_unit_ids are empty
         if not matched:
@@ -1045,6 +1101,10 @@ class OrderService:
                 "объект", "препятств", "загражден", "строени", "map object",
                 "obstacle", "structure", "bridge nearby",
             ],
+            "road_distance": [
+                "дорог", "road", "distance to road", "nearest road",
+                "сколько до дороги", "дистанция до дороги", "как далеко до дороги",
+            ],
         }
 
         focus = [
@@ -1112,6 +1172,14 @@ class OrderService:
         # Add engagement rules if specified
         if parsed.engagement_rules:
             task["engagement_rules"] = parsed.engagement_rules
+        if parsed.purpose:
+            task["purpose"] = parsed.purpose
+        if parsed.support_target_ref:
+            task["support_target_ref"] = parsed.support_target_ref
+        if getattr(parsed, "coordination_unit_refs", None):
+            task["coordination_unit_refs"] = list(parsed.coordination_unit_refs)
+        if getattr(parsed, "coordination_kind", None):
+            task["coordination_kind"] = parsed.coordination_kind
 
         # For commands that don't need a location (halt, regroup, report_status, disengage, withdraw, resupply)
         # Resupply target is auto-resolved by the resupply engine to the nearest supply source
@@ -1133,6 +1201,89 @@ class OrderService:
             return task  # Return task anyway — engine will handle as best it can
 
         return task
+
+    async def _append_coordination_partner_responses(
+        self,
+        parsed: ParsedOrderData,
+        result: OrderParseResult,
+        primary_units: list[dict],
+        units_context: list[dict],
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        issuer_side: str,
+        grid_service: Any = None,
+        task: dict | None = None,
+    ) -> None:
+        """
+        Generate replies from contacted coordination/support units.
+
+        Field manual basis:
+        - Fire and maneuver: one element suppresses while another moves.
+        - Fire support units acknowledge standby/support and keep range.
+        - Recon units acknowledge observation/reporting rather than assault.
+        """
+        coord_refs = list(getattr(parsed, "coordination_unit_refs", []) or [])
+        if not coord_refs or not primary_units:
+            return
+
+        primary_ids = {u.get("id") for u in primary_units}
+        coordination_units = [
+            u for u in self._match_units(coord_refs, units_context, issuer_side)
+            if u.get("id") not in primary_ids
+            and not u.get("is_destroyed")
+            and u.get("comms_status") != "offline"
+        ]
+        if not coordination_units:
+            return
+
+        supported_unit = primary_units[0]
+        supported_name = supported_unit.get("name", "supported unit")
+        target_grid = (task or {}).get("target_snail", "") or ""
+        if not target_grid and task and task.get("target_location") and grid_service:
+            try:
+                tgt = task["target_location"]
+                target_grid = grid_service.point_to_snail(
+                    tgt.get("lat"), tgt.get("lon"), depth=2
+                ) or ""
+            except Exception:
+                pass
+
+        for partner in coordination_units:
+            partner_situation = await self._build_unit_situation(
+                partner, session_id, issuer_side, units_context, db, grid_service,
+            )
+            own_grid = partner_situation.get("grid_ref", "") or ""
+            resp_type, status_text = response_generator.generate_coordination_ack(
+                unit=partner,
+                language=parsed.language.value,
+                supported_unit_name=supported_name,
+                own_grid=own_grid,
+                target_grid=target_grid,
+                coordination_kind=getattr(parsed, "coordination_kind", None),
+                explicit_fire_request=(
+                    getattr(parsed, "order_type", None) is not None
+                    and parsed.order_type.value == "request_fire"
+                ),
+            )
+            resp = response_generator.generate_response(
+                parsed=parsed,
+                unit=partner,
+                response_type=resp_type,
+                status_text=status_text,
+                support_target=supported_name,
+            )
+            if resp and not self._has_duplicate_response(result.responses, resp):
+                result.responses.append(resp)
+
+    @staticmethod
+    def _has_duplicate_response(
+        existing: list[UnitRadioResponse],
+        candidate: UnitRadioResponse,
+    ) -> bool:
+        return any(
+            r.from_unit_id == candidate.from_unit_id and r.text == candidate.text
+            for r in existing
+        )
 
     async def _compute_immediate_waypoints(
         self,
@@ -1688,6 +1839,14 @@ class OrderService:
                         pass
             if task.get("speed"):
                 task_info["speed_mode"] = task["speed"]
+            if task.get("purpose"):
+                task_info["purpose"] = task["purpose"]
+            if task.get("coordination_unit_refs"):
+                task_info["coordination_unit_refs"] = list(task["coordination_unit_refs"])
+            if task.get("coordination_kind"):
+                task_info["coordination_kind"] = task["coordination_kind"]
+            if task.get("support_target_ref"):
+                task_info["support_target_ref"] = task["support_target_ref"]
             situation["current_task"] = task_info
 
         # ── Terrain at position ───────────────────────────
@@ -1713,6 +1872,47 @@ class OrderService:
                             snail_path = snail_path.rsplit("-", 1)[0]
                         else:
                             break
+
+                    # Fallback: use the most specific descendant terrain cells under the
+                    # current grid and infer the majority terrain if parent cells are absent.
+                    if not tc:
+                        child_result = await db.execute(
+                            select(
+                                TerrainCell.terrain_type,
+                                TerrainCell.depth,
+                                TerrainCell.elevation_m,
+                                TerrainCell.slope_deg,
+                            ).where(
+                                TerrainCell.session_id == session_id,
+                                TerrainCell.snail_path.like(f"{situation['grid_ref']}-%"),
+                            )
+                        )
+                        child_rows = child_result.all()
+                        if child_rows:
+                            terrain_counts: dict[str, int] = {}
+                            elev_samples: list[float] = []
+                            slope_samples: list[float] = []
+                            for terrain_type, _depth, elevation_m, slope_deg in child_rows:
+                                terrain_counts[terrain_type] = terrain_counts.get(terrain_type, 0) + 1
+                                if elevation_m is not None:
+                                    elev_samples.append(float(elevation_m))
+                                if slope_deg is not None:
+                                    slope_samples.append(float(slope_deg))
+
+                            dominant = max(
+                                terrain_counts.items(),
+                                key=lambda item: (item[1], item[0]),
+                            )[0]
+                            terrain_info = {
+                                "type": dominant,
+                                "modifiers": {},
+                            }
+                            if elev_samples:
+                                terrain_info["elevation_m"] = round(sum(elev_samples) / len(elev_samples), 1)
+                            if slope_samples:
+                                terrain_info["slope_deg"] = round(sum(slope_samples) / len(slope_samples), 1)
+                            terrain_info["inferred"] = True
+                            situation["terrain"] = terrain_info
 
                     if tc:
                         terrain_info = {
@@ -1770,6 +1970,7 @@ class OrderService:
                     sibs_result = await db.execute(
                         select(TC2.terrain_type, func.count(TC2.id)).where(
                             TC2.session_id == session_id,
+                            TC2.depth == depth,
                             TC2.snail_path.like(f"{parent_path}-%"),
                         ).group_by(TC2.terrain_type)
                     )
@@ -1778,6 +1979,41 @@ class OrderService:
                         surrounding[row[0]] = row[1]
                     if surrounding:
                         situation["surrounding_terrain"] = surrounding
+            except Exception:
+                pass
+
+        # ── Nearest road / route access ───────────────────
+        if unit_lat and unit_lon:
+            try:
+                from backend.models.terrain_cell import TerrainCell as RoadCell
+
+                road_result = await db.execute(
+                    select(
+                        RoadCell.centroid_lat,
+                        RoadCell.centroid_lon,
+                        RoadCell.snail_path,
+                    ).where(
+                        RoadCell.session_id == session_id,
+                        RoadCell.terrain_type.in_(("road", "bridge")),
+                    )
+                )
+                nearest_road = None
+                for road_lat, road_lon, road_snail in road_result.all():
+                    dlat = math.radians(road_lat - unit_lat)
+                    dlon = math.radians(road_lon - unit_lon)
+                    a = (math.sin(dlat / 2) ** 2 +
+                         math.cos(math.radians(unit_lat)) *
+                         math.cos(math.radians(road_lat)) *
+                         math.sin(dlon / 2) ** 2)
+                    dist_m = 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                    if nearest_road is None or dist_m < nearest_road["distance_m"]:
+                        nearest_road = {
+                            "distance_m": round(dist_m),
+                            "snail_path": road_snail,
+                        }
+                if nearest_road:
+                    situation["nearest_road"] = nearest_road
+                    situation["nearest_road_distance_m"] = nearest_road["distance_m"]
             except Exception:
                 pass
 

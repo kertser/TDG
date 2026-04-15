@@ -1194,6 +1194,7 @@ def process_artillery_support(
         req_unit_id = req.get("unit_id")
         req_target_loc = req.get("target_location")
         req_target_uid = req.get("target_unit_id")
+        req_coord_refs = [str(ref).lower() for ref in (req.get("coordination_unit_refs") or []) if ref]
         
         if not req_unit_id or not req_target_loc:
             continue
@@ -1203,8 +1204,32 @@ def process_artillery_support(
             continue
             
         unit_side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
-        
-        # Find artillery to fulfill this request (walk CoC)
+
+        preferred_artillery: list = []
+        if req_coord_refs:
+            for candidate in all_units:
+                if candidate.is_destroyed:
+                    continue
+                if candidate.unit_type not in ARTILLERY_TYPES:
+                    continue
+                cand_side = candidate.side.value if hasattr(candidate.side, 'value') else str(candidate.side)
+                if cand_side != unit_side:
+                    continue
+                cand_name = (candidate.name or "").lower()
+                if any(
+                    ref in cand_name
+                    or cand_name in ref
+                    or (ref == "mortar" and "мином" in cand_name)
+                    or (ref == "миномёт" and "mortar" in cand_name)
+                    or (ref == "миномет" and "mortar" in cand_name)
+                    for ref in req_coord_refs
+                ):
+                    preferred_artillery.append(candidate)
+
+        candidate_groups: list[list] = []
+        if preferred_artillery:
+            candidate_groups.append(preferred_artillery)
+
         visited = set()
         current_id = str(unit.id)
         for _ in range(3):
@@ -1215,8 +1240,11 @@ def process_artillery_support(
             if parent_id in visited:
                 break
             visited.add(parent_id)
+            candidate_groups.append(children_by_parent.get(parent_id, []))
+            current_id = parent_id
 
-            siblings = children_by_parent.get(parent_id, [])
+        assigned = False
+        for siblings in candidate_groups:
             for sib in siblings:
                 if str(sib.id) in tasked_artillery:
                     continue
@@ -1291,9 +1319,10 @@ def process_artillery_support(
                         "target_lon": req_target_loc["lon"],
                     },
                 })
+                assigned = True
                 break  # One artillery per request
-
-            current_id = parent_id
+            if assigned:
+                break
 
     # ── Existing auto-support logic for attacking/under-fire units ──
     # (rest of original code follows...)

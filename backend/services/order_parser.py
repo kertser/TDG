@@ -83,6 +83,129 @@ class OrderParser:
             )
         return self._local_client
 
+    @staticmethod
+    def _has_status_request_frame(text: str) -> bool:
+        """Detect whether a message is asking for information rather than issuing an order."""
+        text_lower = (text or "").lower().strip()
+        if not text_lower:
+            return False
+        if text_lower.startswith("как только"):
+            return False
+        request_openers = [
+            "доложи", "доложите", "сообщи", "сообщите", "опиши", "опишите",
+            "какая", "какой", "какие", "каково", "сколько", "кто", "где",
+            "what", "what's", "who", "where", "which", "describe", "report",
+            "how far", "distance to",
+        ]
+        return (
+            text_lower.endswith("?")
+            or any(text_lower.startswith(opener) for opener in request_openers)
+            or any(f" {opener} " in text_lower for opener in request_openers)
+        )
+
+    @staticmethod
+    def _has_command_frame(text: str) -> bool:
+        """Heuristic for imperative command phrasing."""
+        text_lower = (text or "").lower()
+        command_markers = [
+            "выдвигай", "двигай", "обход", "охват", "заносите фланг",
+            "свяжись", "свяжитесь", "скоординируй", "скоординируйте",
+            "договорись", "договоритесь", "наведи", "наведите",
+            "открывай огонь", "откройте огонь", "выполняй", "выполняйте",
+            "move", "advance", "attack", "engage", "coordinate", "contact",
+            "call for fire", "request fire", "direct fire", "lead",
+        ]
+        return any(marker in text_lower for marker in command_markers)
+
+    @staticmethod
+    def _has_explicit_fire_request_signal(text: str) -> bool:
+        """Detect strong call-for-fire / fire-direction language."""
+        text_lower = (text or "").lower()
+        fire_request_markers = [
+            "request fire", "call for fire", "request artillery", "call artillery",
+            "direct artillery", "direct fire",
+            "наведите артиллерию", "наведи артиллерию",
+            "наведите миномёт", "наведи миномёт",
+            "наведите миномет", "наведи миномет",
+            "наведите огонь", "наведи огонь",
+            "запросите огонь", "запроси огонь",
+            "вызовите огонь", "вызови огонь",
+            "артиллерию на цель", "миномёт на цель", "миномет на цель",
+        ]
+        if any(marker in text_lower for marker in fire_request_markers):
+            return True
+        return (
+            any(marker in text_lower for marker in ["наведите", "наведи", "наводите", "наводи"])
+            and any(marker in text_lower for marker in ["на цель", "по цели", "по противнику", "на противника"])
+        )
+
+    def _reconcile_llm_result(
+        self,
+        original_text: str,
+        llm_result: ParsedOrderData | None,
+        keyword_result: ParsedOrderData,
+    ) -> ParsedOrderData | None:
+        """
+        Keep strong imperative command signals from being downgraded by the LLM.
+        """
+        if llm_result is None:
+            return None
+
+        strong_command = (
+            self._has_command_frame(original_text)
+            and not self._has_status_request_frame(original_text)
+        )
+        strong_fire_request = self._has_explicit_fire_request_signal(original_text)
+
+        if (
+            strong_command
+            and keyword_result.classification == MessageClassification.command
+            and llm_result.classification != MessageClassification.command
+        ):
+            return keyword_result.model_copy(
+                update={
+                    "language": llm_result.language,
+                    "confidence": max(keyword_result.confidence, 0.7),
+                    "ambiguities": [
+                        *(llm_result.ambiguities or []),
+                        "LLM non-command overridden by strong command phrasing",
+                    ],
+                }
+            )
+
+        if (
+            strong_fire_request
+            and llm_result.classification == MessageClassification.command
+            and keyword_result.order_type is not None
+            and keyword_result.order_type.value == "request_fire"
+            and (
+                llm_result.order_type is None
+                or llm_result.order_type.value != "request_fire"
+            )
+        ):
+            merged_coord_refs = list(llm_result.coordination_unit_refs or [])
+            for ref in keyword_result.coordination_unit_refs or []:
+                if ref not in merged_coord_refs:
+                    merged_coord_refs.append(ref)
+            merged_location_refs = list(llm_result.location_refs or [])
+            if not merged_location_refs and keyword_result.location_refs:
+                merged_location_refs = list(keyword_result.location_refs)
+            return llm_result.model_copy(
+                update={
+                    "order_type": keyword_result.order_type,
+                    "location_refs": merged_location_refs,
+                    "coordination_unit_refs": merged_coord_refs,
+                    "coordination_kind": (
+                        llm_result.coordination_kind
+                        or keyword_result.coordination_kind
+                        or "fire_support"
+                    ),
+                    "confidence": max(llm_result.confidence, 0.72),
+                }
+            )
+
+        return llm_result
+
     async def parse(
         self,
         original_text: str,
@@ -136,6 +259,7 @@ class OrderParser:
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
                 )
+                result = self._reconcile_llm_result(original_text, result, keyword_result)
                 return result if result else keyword_result
             # No cloud key — try local model for force_full_model too
             local_client = self._get_local_client()
@@ -157,6 +281,7 @@ class OrderParser:
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
                 )
+                result = self._reconcile_llm_result(original_text, result, keyword_result)
                 return result if result else keyword_result
             return keyword_result
 
@@ -189,6 +314,7 @@ class OrderParser:
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
                 )
+                result = self._reconcile_llm_result(original_text, result, keyword_result)
                 return result if result else keyword_result
             else:
                 logger.warning("OrderParser: no API key and no local model — using keyword result")
@@ -241,6 +367,7 @@ class OrderParser:
                 reports_context=reports_context,
                 map_objects_context=map_objects_context,
             )
+            result = self._reconcile_llm_result(original_text, result, keyword_result)
 
             # If nano returned unclear, escalate to full model
             if result and result.classification == MessageClassification.unclear and tier != "full":
@@ -263,6 +390,7 @@ class OrderParser:
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
                 )
+                full_result = self._reconcile_llm_result(original_text, full_result, keyword_result)
                 if full_result and full_result.classification != MessageClassification.unclear:
                     return full_result
                 if full_result:
@@ -313,6 +441,7 @@ class OrderParser:
             reports_context=reports_context,
             map_objects_context=map_objects_context,
         )
+        result = self._reconcile_llm_result(original_text, result, keyword_result)
 
         # If unclear, escalate to full model
         if result and result.classification == MessageClassification.unclear and tier != "full":
@@ -335,6 +464,7 @@ class OrderParser:
                 reports_context=reports_context,
                 map_objects_context=map_objects_context,
             )
+            full_result = self._reconcile_llm_result(original_text, full_result, keyword_result)
             if full_result and full_result.classification != MessageClassification.unclear:
                 return full_result
             if full_result:
@@ -525,6 +655,10 @@ class OrderParser:
                 "объект", "препятств", "загражден", "строени", "map object",
                 "obstacle", "structure", "bridge nearby",
             ],
+            "road_distance": [
+                "дорог", "road", "distance to road", "nearest road", "сколько до дороги",
+                "дистанция до дороги", "как далеко до дороги",
+            ],
         }
         ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
         report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
@@ -533,6 +667,8 @@ class OrderParser:
         classification = MessageClassification.unclear
         order_type = None
         status_request_focus: list[str] = []
+        coordination_unit_refs: list[str] = []
+        coordination_kind = None
 
         def _infer_status_request_focus(raw_text: str) -> list[str]:
             inferred: list[str] = []
@@ -541,6 +677,8 @@ class OrderParser:
                 if any(pat in raw_lower for pat in patterns):
                     inferred.append(focus_name)
             return inferred or ["full"]
+
+        has_status_request_frame = self._has_status_request_frame(text)
 
         # ── Question detection ──────────────────────────────
         # Questions like "Почему не наводите?" / "Why aren't you..." are NOT commands.
@@ -589,7 +727,7 @@ class OrderParser:
             classification = MessageClassification.status_request
             order_type = "report_status"
             status_request_focus = _infer_status_request_focus(text)
-        elif any(
+        elif has_status_request_frame and any(
             any(pat in text_lower for pat in patterns)
             for patterns in status_req_focus_map.values()
         ):
@@ -648,13 +786,22 @@ class OrderParser:
                 "наводите огонь", "наводи огонь",
                 "запросите огонь", "запроси огонь",
                 "вызовите огонь", "вызови огонь",
-                "свяжитесь с артиллерией", "свяжись с артиллерией",
-                "свяжитесь с миномёт", "свяжись с миномёт",
-                "свяжитесь с mortar", "свяжись с mortar",
                 "артиллерию на цель", "миномёт на цель", "миномет на цель",
                 "артиллерию на противника", "миномёт на противника",
             ]
             _is_request_fire = any(kw in text_lower for kw in _request_fire_kw)
+            _liaison_only = (
+                any(kw in text_lower for kw in [
+                    "свяж", "координиру", "coordinate with", "link up with", "liaise with",
+                ])
+                and not any(kw in text_lower for kw in [
+                    "огонь", "fire support", "support fire", "артподдержк",
+                    "огневая поддержк", "на цель", "по цели", "противник", "enemy",
+                    "suppress", "подав",
+                ])
+            )
+            if _liaison_only:
+                _is_request_fire = False
             # Also detect "наведите ... на цель" / "наводите ... на цель" patterns
             # even if "артиллерию/миномёт" is not right after
             if not _is_request_fire:
@@ -668,6 +815,13 @@ class OrderParser:
                 ])
                 if _navedi_pattern and _on_target:
                     _is_request_fire = True
+
+            _has_enemy_reference = any(kw in text_lower for kw in [
+                "противник", "враг", "enemy", "contact", "contacts",
+            ])
+            _has_flank_maneuver = any(kw in text_lower for kw in [
+                "обход", "охват", "flank", "envelop", "заносите фланг",
+            ])
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
@@ -716,6 +870,10 @@ class OrderParser:
                 # "Hit any enemy target in your sight" → engage (fire at targets of opportunity)
                 order_type = "attack"
                 engagement_rules = "fire_at_will"
+            elif _is_coordination and coordination_unit_refs:
+                order_type = "support"
+            elif _has_flank_maneuver and _has_enemy_reference:
+                order_type = "attack"
             # Check attack/eliminate BEFORE move: "Move to X. Eliminate enemy" should be attack
             elif any(kw in text_lower for kw in ["attack", "engage", "eliminate", "destroy", "neutralize",
                                                     "атак",
@@ -842,6 +1000,17 @@ class OrderParser:
             if _target_match:
                 location_refs.append({
                     "source_text": _target_match,
+                    "ref_type": "contact_target",
+                    "normalized": "nearest_enemy_contact",
+                })
+            elif (
+                classification == MessageClassification.command
+                and order_type in ("attack", "request_fire", "support")
+                and any(kw in text_lower for kw in ["противник", "враг", "enemy", "contact"])
+                and any(kw in text_lower for kw in ["обход", "охват", "flank", "envelop", "фланг", "fire", "огонь"])
+            ):
+                location_refs.append({
+                    "source_text": "enemy contact",
                     "ref_type": "contact_target",
                     "normalized": "nearest_enemy_contact",
                 })
@@ -981,6 +1150,11 @@ class OrderParser:
             if pattern in text_lower:
                 formation = form_name
                 break
+        if not formation:
+            if any(kw in text_lower for kw in ["левым охватом", "обход слева", "левый фланг"]):
+                formation = "echelon_left"
+            elif any(kw in text_lower for kw in ["правым охватом", "обход справа", "правый фланг"]):
+                formation = "echelon_right"
 
         # Also look for explicit formation commands
         import re as _re
@@ -1055,6 +1229,60 @@ class OrderParser:
                         support_target_ref = candidate
                         break
 
+        # ── Coordination refs: units mentioned for liaison / support, not as recipients ──
+        if classification == MessageClassification.command:
+            import re as _re3
+
+            coord_patterns = [
+                r'coordinate\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'link\s+up\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'liaise\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'contact\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'work\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'свяж(?:ись|итесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'скоординиру(?:й|йте)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'договор(?:ись|итесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+            ]
+            for pat in coord_patterns:
+                for match in _re3.finditer(pat, text, _re3.IGNORECASE):
+                    candidate = match.group(1).strip().rstrip(".,;!")
+                    candidate = _re3.split(
+                        r'\b(?:и|and|then|чтобы|for|to|with|с\s+ними)\b',
+                        candidate,
+                        maxsplit=1,
+                        flags=_re3.IGNORECASE,
+                    )[0].strip().rstrip(".,;!")
+                    if candidate and candidate not in coordination_unit_refs:
+                        coordination_unit_refs.append(candidate)
+
+            # If the text refers to "the mortars"/"artillery" generically, keep that context
+            if any(kw in text_lower for kw in ["миномёт", "миномет", "mortar"]):
+                if not any("мином" in ref.lower() or "mortar" in ref.lower() for ref in coordination_unit_refs):
+                    coordination_unit_refs.append("Mortar")
+            elif any(kw in text_lower for kw in ["артиллер", "artillery"]):
+                if not any("артилл" in ref.lower() or "artillery" in ref.lower() for ref in coordination_unit_refs):
+                    coordination_unit_refs.append("Artillery")
+
+            # Do not confuse the addressed unit with the coordination partner.
+            addressed_refs = {ref.lower() for ref in target_unit_refs}
+            coordination_unit_refs = [
+                ref for ref in coordination_unit_refs
+                if ref.lower() not in addressed_refs
+            ]
+
+            if any(kw in text_lower for kw in [
+                "прикры", "covering fire", "cover me", "cover your movement",
+                "огневое прикрытие", "прикроют", "поддержат огн",
+            ]):
+                coordination_kind = "covering_fire"
+            elif any(kw in text_lower for kw in [
+                "огневая поддержк", "артподдержк", "fire support", "support fire",
+                "suppress", "подав",
+            ]):
+                coordination_kind = "fire_support"
+            elif coordination_unit_refs:
+                coordination_kind = "coordination"
+
         return ParsedOrderData(
             classification=classification,
             language=lang,
@@ -1067,6 +1295,8 @@ class OrderParser:
             formation=formation,
             engagement_rules=engagement_rules,
             support_target_ref=support_target_ref,
+            coordination_unit_refs=coordination_unit_refs,
+            coordination_kind=coordination_kind,
             confidence=self._compute_keyword_confidence(
                 classification, order_type, location_refs,
                 target_unit_refs, speed, engagement_rules, formation,

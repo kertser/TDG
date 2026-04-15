@@ -198,7 +198,7 @@ You MUST respond with a valid JSON object matching this exact schema:
   "target_unit_refs": ["unit name or callsign as mentioned in text"],
   "sender_ref": "sender callsign if identifiable, or null",
   "order_type": "move" | "attack" | "fire" | "defend" | "observe" | "support" | "withdraw" | "disengage" | "halt" | "regroup" | "report_status" | null,
-  "status_request_focus": ["full" | "position" | "terrain" | "nearby_friendlies" | "enemy" | "task" | "condition" | "weather" | "objects"],
+  "status_request_focus": ["full" | "position" | "terrain" | "nearby_friendlies" | "enemy" | "task" | "condition" | "weather" | "objects" | "road_distance"],
   "location_refs": [
     {{
       "source_text": "original text fragment",
@@ -211,6 +211,8 @@ You MUST respond with a valid JSON object matching this exact schema:
   "engagement_rules": "fire_at_will" | "hold_fire" | "return_fire_only" | null,
   "urgency": "routine" | "priority" | "immediate" | "flash" | null,
   "purpose": "stated objective or null",
+  "coordination_unit_refs": ["friendly units mentioned for coordination/support"],
+  "coordination_kind": "coordination" | "covering_fire" | "fire_support" | null,
   "report_text": "key content of status report or ack, or null",
   "confidence": 0.0-1.0,
   "ambiguities": ["list of unclear elements"]
@@ -236,6 +238,8 @@ PARSED:
   "engagement_rules": "fire_at_will",
   "urgency": "immediate",
   "purpose": "обнаружение и уничтожение противника",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []
@@ -256,6 +260,8 @@ PARSED:
   "engagement_rules": null,
   "urgency": null,
   "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": "Подтверждение получения приказа, начало движения",
   "confidence": 0.95,
   "ambiguities": []
@@ -277,6 +283,8 @@ PARSED:
   "engagement_rules": null,
   "urgency": "priority",
   "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []
@@ -298,6 +306,8 @@ PARSED:
   "engagement_rules": null,
   "urgency": "routine",
   "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []
@@ -319,6 +329,31 @@ PARSED:
   "engagement_rules": null,
   "urgency": "routine",
   "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "report_text": null,
+  "confidence": 0.95,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "C-squad, какая дистанция до ближайшей дороги?"
+PARSED:
+{
+  "classification": "status_request",
+  "language": "ru",
+  "target_unit_refs": ["C-squad"],
+  "sender_ref": null,
+  "order_type": "report_status",
+  "status_request_focus": ["road_distance"],
+  "location_refs": [],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": null,
   "confidence": 0.95,
   "ambiguities": []
@@ -340,6 +375,8 @@ PARSED:
   "engagement_rules": null,
   "urgency": null,
   "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": "Near treeline, 600m from objective. No enemy observed. Moving per plan.",
   "confidence": 0.90,
   "ambiguities": []
@@ -360,8 +397,33 @@ PARSED:
   "engagement_rules": null,
   "urgency": "priority",
   "purpose": null,
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
   "report_text": "Enemy forces up to platoon size detected. Moving rapidly southeast in area C7-8-3.",
   "confidence": 0.90,
+  "ambiguities": []
+}
+
+---
+MESSAGE: "C-squad, выдвигайся в северном направлении. Свяжись с миномётами и договорись о прикрытии огнём."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["C-squad"],
+  "sender_ref": null,
+  "order_type": "move",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "в северном направлении", "ref_type": "relative", "normalized": "north"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "routine",
+  "purpose": "выдвижение с координацией огневого прикрытия",
+  "coordination_unit_refs": ["миномёты"],
+  "coordination_kind": "covering_fire",
+  "report_text": null,
+  "confidence": 0.92,
   "ambiguities": []
 }
 
@@ -383,6 +445,52 @@ PARSED:
   "report_text": null,
   "confidence": 0.85,
   "ambiguities": ["No specific destination; 'left' is relative to current unit heading or enemy position"]
+}
+
+---
+MESSAGE: "B-squad, обходите противника левым охватом с северо-запада. Заносите фланг."
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["B-squad"],
+  "sender_ref": null,
+  "order_type": "attack",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "enemy contact", "ref_type": "contact_target", "normalized": "nearest_enemy_contact"}],
+  "speed": null,
+  "formation": "echelon_left",
+  "engagement_rules": null,
+  "urgency": "priority",
+  "purpose": "левый охват и выход во фланг противника",
+  "coordination_unit_refs": [],
+  "coordination_kind": null,
+  "report_text": null,
+  "confidence": 0.9,
+  "ambiguities": ["Enemy location is implicit and should be resolved from known contacts"]
+}
+
+---
+MESSAGE: "C-squad, Наведи Миномёт на цель!"
+PARSED:
+{
+  "classification": "command",
+  "language": "ru",
+  "target_unit_refs": ["C-squad"],
+  "sender_ref": null,
+  "order_type": "request_fire",
+  "status_request_focus": [],
+  "location_refs": [{"source_text": "на цель", "ref_type": "contact_target", "normalized": "nearest_enemy_contact"}],
+  "speed": null,
+  "formation": null,
+  "engagement_rules": null,
+  "urgency": "immediate",
+  "purpose": "вызов огня по обнаруженной цели",
+  "coordination_unit_refs": ["Миномёт"],
+  "coordination_kind": "fire_support",
+  "report_text": null,
+  "confidence": 0.94,
+  "ambiguities": []
 }
 
 ---
