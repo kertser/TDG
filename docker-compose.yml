@@ -29,46 +29,40 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Local LLM sidecar (OpenAI-compatible API) ───────────────────
-  # Optional: provides a local LLM for air-gapped / offline use.
-  # Uses the official pre-built llama.cpp server image — NO compilation.
+  # ── Local LLM — Ollama (OpenAI-compatible API) ───────────────────
+  # Auto-detects CPU features (AVX2/AVX-512), manages models internally.
+  # Serves OpenAI-compatible API at http://localhost:11434/v1
   #
-  # Start with:  docker compose --profile llm up -d
-  # Model file must exist at ./models/model.gguf
-  # Download one:  .\scripts\download_model.ps1
-  llm:
-    image: ghcr.io/ggml-org/llama.cpp:server
-    container_name: tdg-llm
-    profiles: ["llm"]
-    volumes:
-      - ./models:/models:ro
+  # After starting:
+  #   docker exec tdg-ollama ollama pull llama3.2:1b
+  #
+  # Backend .env config:
+  #   LOCAL_MODEL_URL=http://localhost:11434/v1
+  #   LOCAL_MODEL_NAME=llama3.2:1b
+  #
+  # Recommended models:
+  #   llama3.2:1b  — 770MB, 128K ctx, fastest (classification/simple tasks)
+  #   llama3.2:3b  — 2GB, 128K ctx, better accuracy
+  #   phi3.5       — 2.2GB, 128K ctx, best JSON output
+  ollama:
+    image: ollama/ollama:latest
+    container_name: tdg-ollama
     ports:
-      - "8081:8080"            # llama.cpp server listens on 8080 by default
-    # IPC_LOCK allows use_mlock (model pinned in RAM) if enabled
-    cap_add:
-      - IPC_LOCK
-    shm_size: "512m"
-    # llama.cpp server CLI args — tuned for single-user TDG workload
-    command: >
-      --model /models/model.gguf
-      --alias local
-      --ctx-size 4096
-      --threads 4
-      --parallel 1
-      --flash-attn on
-      --cache-type-k q8_0
-      --cache-type-v q8_0
-      --mlock
-      --host 0.0.0.0
-      --port 8080
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_NUM_PARALLEL: "2"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_CONTEXT_LENGTH: "32768"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 30s       # pre-built image loads model much faster
+      start_period: 30s
 
 volumes:
   pgdata:
-
+  ollama_data:

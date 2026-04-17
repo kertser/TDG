@@ -7,17 +7,17 @@
 #
 # Recommended models (pick ONE — larger = better quality, slower):
 #
-#  Model                          Size    Speed   Quality  Context  JSON Output
+#  Model                          Size    Speed*  Quality  Context  JSON Output
 #  ─────────────────────────────  ──────  ──────  ───────  ───────  ───────────
-#  Llama-3.2-1B-Instruct-Q4_K_S  ~700MB  fast    basic    8K       weak
-#  Llama-3.2-3B-Instruct-Q4_K_M  ~1.8GB  medium  good     8K       decent
-#  Phi-3.5-mini-Q4_K_M           ~2.2GB  medium  good     128K     good
-#  Mistral-7B-Instruct-Q4_K_M    ~4.4GB  slow    great    32K     great
+#  Llama-3.2-1B-Q4_K_M ★DEFAULT  ~0.8GB  ~15t/s  good     128K     good
+#  Phi-3.5-mini-Q4_K_M            ~2.2GB  ~8t/s   good     128K     excellent
+#  Qwen2.5-3B-Instruct-Q4_K_M    ~2.0GB  ~6t/s   medium   32K      poor
+#  Mistral-7B-Instruct-Q4_K_M    ~4.4GB  ~3t/s   great    32K      great
 #
-# For structured JSON output (order parsing, Red AI), 3B+ is recommended.
+#  * Speed estimates for Linux server with AVX2. Windows/WSL2 may be 3-5× slower.
 
 param(
-    [ValidateSet("1B", "3B", "phi", "7B", "custom")]
+    [ValidateSet("llama1b", "phi", "qwen3b", "7B", "custom")]
     [string]$Size = "",
 
     [string]$Url = "",
@@ -28,17 +28,17 @@ $ErrorActionPreference = "Stop"
 
 # Pre-defined model URLs
 $Models = @{
-    "1B"  = "https://huggingface.co/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_S.gguf"
-    "3B"  = "https://huggingface.co/unsloth/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-    "phi" = "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf"
-    "7B"  = "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+    "llama1b"  = "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf"
+    "phi"      = "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf"
+    "qwen3b"   = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+    "7B"       = "https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
 }
 
 # Resolve URL
 if (-not $Url) {
     if (-not $Size) {
-        $Size = "1B"
-        Write-Host "No size specified, defaulting to 1B (Llama-3.2-1B-Instruct-Q4_K_S)" -ForegroundColor Yellow
+        $Size = "llama1b"
+        Write-Host "No size specified, defaulting to Llama 3.2 1B Instruct (small, fast, 128K context)" -ForegroundColor Yellow
     }
     $Url = $Models[$Size]
     Write-Host "Selected model: $Size" -ForegroundColor Cyan

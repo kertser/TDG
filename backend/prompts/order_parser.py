@@ -1437,3 +1437,4 @@ def build_grid_info(grid_def: dict | None) -> str:
             f"Snail subdivision: 3×3, max depth 3."
         )
 
+
