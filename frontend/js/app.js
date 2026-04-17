@@ -23,6 +23,7 @@
     KOverlays.init(map);
     KTerrain.init(map);
     KMapObjects.init(map);
+    KReplay.init();
 
     // Fetch and display app version
     fetch('/api/version').then(r => r.json()).then(data => {
@@ -81,6 +82,9 @@
 
         // Initialize orders panel (sync DOM setup, its internal fetches are fire-and-forget)
         try { KOrders.init(sessionId, token); } catch (err) { console.warn('Orders init error:', err); }
+
+        // Set replay session context
+        try { KReplay.setSession(sessionId, token); } catch(e) {}
 
         // Fire off non-blocking loads (terrain, map objects) — don't await
         try {

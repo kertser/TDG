@@ -819,6 +819,11 @@ class OrderParser:
             classification = MessageClassification.command
 
         # Determine order type for all command-classified messages
+        _has_enemy_reference = False
+        _has_flank_maneuver = False
+        _has_follow_maneuver = False
+        _has_bounding_maneuver = False
+        _has_support_by_fire = False
         if classification == MessageClassification.command:
             # ── Standby / ready-for-support detection ──
             # "Get ready for fire support on request" / "Будьте готовы к огневой поддержке по запросу"
