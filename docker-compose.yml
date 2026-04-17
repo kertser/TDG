@@ -34,16 +34,16 @@ services:
   # Serves OpenAI-compatible API at http://localhost:11434/v1
   #
   # After starting:
-  #   docker exec tdg-ollama ollama pull llama3.2:1b
+  #   docker exec tdg-ollama ollama pull llama3.2:1b-instruct-q4_K_M
   #
   # Backend .env config:
   #   LOCAL_MODEL_URL=http://localhost:11434/v1
-  #   LOCAL_MODEL_NAME=llama3.2:1b
+  #   LOCAL_MODEL_NAME=llama3.2:1b-instruct-q4_K_M
   #
   # Recommended models:
-  #   llama3.2:1b  — 770MB, 128K ctx, fastest (classification/simple tasks)
-  #   llama3.2:3b  — 2GB, 128K ctx, better accuracy
-  #   phi3.5       — 2.2GB, 128K ctx, best JSON output
+  #   llama3.2:1b-instruct-q4_K_M — 770MB, 128K ctx, fastest, 4-bit quantized
+  #   llama3.2:1b                 — 1.3GB, 128K ctx, 8-bit (default tag)
+  #   llama3.2:3b                 — 2GB, 128K ctx, better accuracy
   ollama:
     image: ollama/ollama:latest
     container_name: tdg-ollama
@@ -52,9 +52,12 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     environment:
-      OLLAMA_NUM_PARALLEL: "2"
+      OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_CONTEXT_LENGTH: "32768"
+      # For Linux production server: raise OLLAMA_CONTEXT_LENGTH back to 32768 or higher
+      OLLAMA_CONTEXT_LENGTH: "8192"
+      OLLAMA_FLASH_ATTENTION: "true"
+      OLLAMA_KV_CACHE_TYPE: "q4_0"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
