@@ -14,9 +14,21 @@ from backend.models.grid import GridDefinition
 
 router = APIRouter()
 
+# In-memory cache for GridService instances (grid_definitions rarely change)
+import time as _time
+_grid_service_cache: dict[str, tuple[Any, float]] = {}  # session_id → (GridService, timestamp)
+_GRID_CACHE_TTL = 300  # 5 minutes
+
+from typing import Any
+
 
 async def _get_grid_service(session_id: uuid.UUID, db: AsyncSession):
-    """Helper: load GridDefinition and return GridService instance."""
+    """Helper: load GridDefinition and return GridService instance (cached)."""
+    sid = str(session_id)
+    cached = _grid_service_cache.get(sid)
+    if cached and (_time.time() - cached[1]) < _GRID_CACHE_TTL:
+        return cached[0]
+
     result = await db.execute(
         select(GridDefinition).where(GridDefinition.session_id == session_id)
     )
@@ -24,7 +36,9 @@ async def _get_grid_service(session_id: uuid.UUID, db: AsyncSession):
     if grid_def is None:
         raise HTTPException(status_code=404, detail="Grid not defined for this session")
     from backend.services.grid_service import GridService
-    return GridService(grid_def)
+    svc = GridService(grid_def)
+    _grid_service_cache[sid] = (svc, _time.time())
+    return svc
 
 
 @router.get("/{session_id}/grid")

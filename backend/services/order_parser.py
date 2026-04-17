@@ -18,6 +18,7 @@ import json
 import logging
 
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
 from backend.config import settings
 from backend.schemas.order import ParsedOrderData, MessageClassification, DetectedLanguage
@@ -43,8 +44,8 @@ def _build_height_tops_context(grid_info: dict | None) -> str:
         lines.append(f"  - {p['label']} ({p['label_ru']}) at grid {p.get('snail_path', '?')}")
     return "\n".join(lines)
 
-# Max retries on LLM parse failure
-MAX_RETRIES = 1
+# Max retries on LLM parse failure (all models get MAX_RETRIES + 1 attempts)
+MAX_RETRIES = 2
 
 # Confidence thresholds for model routing (commands ALWAYS go to LLM)
 CONF_SKIP_LLM = 0.95    # only non-commands (acks, reports) can skip LLM
@@ -70,7 +71,10 @@ class OrderParser:
 
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            self._client = AsyncOpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                timeout=15.0,  # 15s total timeout per request
+            )
         return self._client
 
     def _get_local_client(self) -> AsyncOpenAI | None:
@@ -583,7 +587,16 @@ class OrderParser:
         last_error = None
         raw_content = None
 
-        for attempt in range(MAX_RETRIES + 1):
+        _max_attempts = MAX_RETRIES + 1
+        _exclude_params: set[str] = set()  # params to skip on retry
+
+        # Reasoning models (o1, o3, gpt-*-nano) use internal reasoning tokens
+        # that count against max_completion_tokens. They also don't support
+        # temperature or response_format in most cases.
+        _model_lower = model.lower()
+        _is_reasoning = any(tag in _model_lower for tag in ("nano", "o1", "o3", "o4"))
+
+        for attempt in range(_max_attempts):
             try:
                 create_kwargs = dict(
                     model=model,
@@ -593,8 +606,14 @@ class OrderParser:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_completion_tokens=1000,
+                    max_completion_tokens=16384 if _is_reasoning else 2048,
                 )
+                # Reasoning models don't support temperature
+                if _is_reasoning:
+                    del create_kwargs["temperature"]
+                # Drop params that failed on previous attempts
+                for p in _exclude_params:
+                    create_kwargs.pop(p, None)
                 # Progressively strip unsupported params (some models reject
                 # max_tokens, temperature, or both — e.g. gpt-5-nano).
                 response = None
@@ -603,7 +622,7 @@ class OrderParser:
                         response = await client.chat.completions.create(**create_kwargs)
                         break
                     except Exception as api_err:
-                        err_str = str(api_err)
+                        err_str = str(api_err).lower()
                         stripped = False
                         if ("max_tokens" in err_str or "max_completion_tokens" in err_str):
                             create_kwargs.pop("max_tokens", None)
@@ -612,16 +631,46 @@ class OrderParser:
                         if "temperature" in err_str:
                             create_kwargs.pop("temperature", None)
                             stripped = True
+                        if "response_format" in err_str or "json" in err_str:
+                            create_kwargs.pop("response_format", None)
+                            stripped = True
                         if not stripped:
                             raise
                 if response is None:
                     raise RuntimeError(f"Failed to call {model} after stripping params")
 
-                raw_content = response.choices[0].message.content
-                if not raw_content:
-                    raise ValueError("Empty LLM response")
+                choice = response.choices[0]
+                raw_content = choice.message.content
 
-                raw_json = json.loads(raw_content)
+                # Log finish_reason for diagnostics
+                if choice.finish_reason and choice.finish_reason != "stop":
+                    logger.warning(
+                        "OrderParser[%s]: finish_reason=%s (attempt %d)",
+                        model, choice.finish_reason, attempt + 1,
+                    )
+
+                # Some models put output in 'refusal' when they refuse
+                if not raw_content and hasattr(choice.message, 'refusal') and choice.message.refusal:
+                    raise ValueError(f"LLM refused: {choice.message.refusal}")
+
+                if not raw_content:
+                    # finish_reason=length means token budget exhausted (reasoning ate all tokens)
+                    _reason = choice.finish_reason
+                    raise ValueError(
+                        f"Empty LLM response (finish_reason={_reason}, "
+                        f"usage={getattr(response, 'usage', None)})"
+                    )
+
+                # Strip markdown code fences if present (```json ... ```)
+                _content = raw_content.strip()
+                if _content.startswith("```"):
+                    first_nl = _content.find("\n")
+                    if first_nl != -1:
+                        _content = _content[first_nl + 1:]
+                    if _content.endswith("```"):
+                        _content = _content[:-3].strip()
+
+                raw_json = json.loads(_content)
                 parsed = ParsedOrderData.model_validate(raw_json)
 
                 # Normalize formation values (LLM may return non-canonical names)
@@ -643,13 +692,25 @@ class OrderParser:
                 last_error = f"JSON decode error: {e}"
                 logger.warning("OrderParser[%s] attempt %d: %s. Raw: %s",
                                model, attempt + 1, last_error,
-                               raw_content[:200] if raw_content else "empty")
+                               raw_content[:300] if raw_content else "empty")
+                _exclude_params.add("response_format")
+            except ValidationError as e:
+                last_error = f"Pydantic validation: {e}"
+                logger.warning("OrderParser[%s] attempt %d: %s. Raw JSON keys: %s",
+                               model, attempt + 1, last_error,
+                               list(raw_json.keys()) if 'raw_json' in dir() else "N/A")
             except Exception as e:
                 last_error = str(e)
                 logger.warning("OrderParser[%s] attempt %d: %s", model, attempt + 1, last_error)
+                if "Empty LLM response" in last_error:
+                    # finish_reason=length → reasoning model ran out of token budget
+                    # Remove cap so next attempt gets unlimited tokens
+                    _exclude_params.update({"max_completion_tokens", "max_tokens"})
+                    if "finish_reason=length" in last_error:
+                        _exclude_params.add("response_format")  # also try without json mode
 
         logger.error("OrderParser[%s]: failed after %d attempts (%s)",
-                      model, MAX_RETRIES + 1, last_error)
+                      model, _max_attempts, last_error)
         return None
 
     def _fallback_parse(self, text: str) -> ParsedOrderData:

@@ -99,40 +99,49 @@ class OrderService:
         """
         original_text = order.original_text or ""
 
-        # ── 1. Gather context ────────────────────────────────────
-        units_context = await self._load_units_context(session_id, db)
-        grid_info, grid_service = await self._load_grid(session_id, db)
-        game_time = await self._get_game_time(session_id, db)
-        map_objects_context = await self._load_map_objects_context(
-            session_id, db, issuer_side=issuer_side
+        # ── 1. Gather context (parallel batch 1) ──────────────────
+        import asyncio as _aio
+        (
+            units_context,
+            (grid_info, grid_service),
+            game_time,
+            map_objects_context,
+            elevation_peaks,
+            _session_scenario,
+        ) = await _aio.gather(
+            self._load_units_context(session_id, db),
+            self._load_grid(session_id, db),
+            self._get_game_time(session_id, db),
+            self._load_map_objects_context(session_id, db, issuer_side=issuer_side),
+            self._load_elevation_peaks(session_id, db),
+            self._load_session_and_scenario(session_id, db),
         )
-
-        # Load elevation peaks for height references in orders
-        elevation_peaks = await self._load_elevation_peaks(session_id, db)
         if elevation_peaks and grid_info:
             grid_info["height_tops"] = [
                 {"label": p["label"], "label_ru": p["label_ru"],
                  "elevation_m": p["elevation_m"], "snail_path": p.get("snail_path", "")}
-                for p in elevation_peaks[:30]  # Limit to top 30 peaks
+                for p in elevation_peaks[:30]
             ]
 
-        # ── 1b. Build enriched context for LLM ───────────────────
-        terrain_ctx = await self._build_terrain_context(
-            session_id, db, units_context, issuer_side
+        # ── 1b. Build enriched context for LLM (parallel batch 2) ─
+        (
+            terrain_ctx,
+            contacts_ctx,
+            objectives_ctx,
+            environment_ctx,
+            orders_ctx,
+            radio_ctx,
+            reports_ctx,
+        ) = await _aio.gather(
+            self._build_terrain_context(session_id, db, units_context, issuer_side),
+            self._build_contacts_context(session_id, db, issuer_side, grid_service=grid_service),
+            self._build_objectives_context(session_id, db, _cached=_session_scenario),
+            self._build_environment_context(session_id, db, _cached=_session_scenario),
+            self._build_orders_history_context(session_id, db, issuer_side, units_context),
+            self._build_radio_context(session_id, db, issuer_side),
+            self._build_reports_context(session_id, db, issuer_side, units_context),
         )
-        contacts_ctx = await self._build_contacts_context(
-            session_id, db, issuer_side, grid_service=grid_service
-        )
-        objectives_ctx = await self._build_objectives_context(session_id, db)
         friendly_ctx = self._build_friendly_status_context(units_context, issuer_side)
-        environment_ctx = await self._build_environment_context(session_id, db)
-        orders_ctx = await self._build_orders_history_context(
-            session_id, db, issuer_side, units_context
-        )
-        radio_ctx = await self._build_radio_context(session_id, db, issuer_side)
-        reports_ctx = await self._build_reports_context(
-            session_id, db, issuer_side, units_context
-        )
         map_objects_ctx = self._build_map_objects_prompt_context(map_objects_context)
 
         # ── 2. Parse via LLM ────────────────────────────────────
@@ -684,6 +693,11 @@ class OrderService:
                             "compass": compass,
                         }
 
+        # ── Pre-load shared data for unit situation building ──
+        _preloaded_ctx = await self._preload_unit_situation_context(
+            session_id, issuer_side, db,
+        )
+
         # ── Check unit states & generate responses ────────
         all_ok = True
         for unit_dict in matched_units:
@@ -785,7 +799,7 @@ class OrderService:
                                ResponseType.ack):
                 situation = await self._build_unit_situation(
                     unit_dict, session_id, issuer_side, units_context,
-                    db, grid_service,
+                    db, grid_service, preloaded=_preloaded_ctx,
                 )
                 lang = parsed.language.value
                 own_grid = situation.get("grid_ref", "")
@@ -1171,19 +1185,20 @@ class OrderService:
             matched = [u for u in units_context
                        if u.get("side") == issuer_side and not u.get("is_destroyed")]
 
-        # Pre-build all situations in parallel for speed (each does ~10 DB queries)
-        import asyncio as _asyncio_sr
-        from backend.database import async_session_factory as _asf_sr
-
-        async def _par_build_sit(ud):
-            async with _asf_sr() as s:
-                return ud.get("id", ""), await self._build_unit_situation(
-                    ud, session_id, issuer_side, units_context, s, grid_service,
-                )
+        # Pre-load shared context once, then build per-unit situations
+        _preloaded_sr = await self._preload_unit_situation_context(
+            session_id, issuer_side, db,
+        )
 
         if matched:
-            _sit_results = await _asyncio_sr.gather(*[_par_build_sit(ud) for ud in matched])
-            _sit_map = {uid: sit for uid, sit in _sit_results}
+            _sit_map = {}
+            for ud in matched:
+                uid = ud.get("id", "")
+                sit = await self._build_unit_situation(
+                    ud, session_id, issuer_side, units_context, db, grid_service,
+                    preloaded=_preloaded_sr,
+                )
+                _sit_map[uid] = sit
         else:
             _sit_map = {}
 
@@ -1890,6 +1905,14 @@ class OrderService:
             import time as _pf_time
             _t0 = _pf_time.monotonic()
 
+            # Fast path: only compute waypoints if graph is already in memory.
+            # If not cached, let the tick engine compute on first tick (path_calc_tick=-1).
+            from backend.services.pathfinding_service import get_cached_graph
+            cached_graph = get_cached_graph(sid_str)
+            if not cached_graph or not cached_graph.get("centroids"):
+                logger.info("Pathfinding: graph not in memory cache, deferring to tick engine")
+                return None, True
+
             # Load terrain data from cache or DB
             from backend.engine.terrain import get_cached_terrain_data
             cached = get_cached_terrain_data(sid_str)
@@ -1931,38 +1954,15 @@ class OrderService:
 
             # Load static graph from memory → DB → build
             from backend.services.pathfinding_service import (
-                load_or_build_static_graph,
-                get_cached_graph,
                 PathfindingService,
             )
 
-            # Fast path: check in-memory cache first (avoids DB query for GridDefinition)
-            cached_graph = get_cached_graph(sid_str)
-            if cached_graph and cached_graph.get("centroids"):
-                static_graph = cached_graph
-                cell_centroids = cached_graph["centroids"]
-            else:
-                # Slow path: load GridDefinition from DB for persisted graph
-                from backend.models.grid import GridDefinition
-                gd_result = await db.execute(
-                    select(GridDefinition).where(GridDefinition.session_id == session_id)
-                )
-                gd = gd_result.scalar_one_or_none()
-                gd_settings = dict(gd.settings_json) if gd and gd.settings_json else None
-
-                static_graph, cell_centroids = load_or_build_static_graph(
-                    sid_str,
-                    terrain_cells,
-                    elevation_cells,
-                    None,  # let it use cached or build
-                    grid_service,
-                    grid_def_settings_json=gd_settings,
-                )
+            # Graph is guaranteed in memory (checked at top of method)
+            static_graph = cached_graph
+            cell_centroids = cached_graph["centroids"]
 
             _t_graph = _pf_time.monotonic()
 
-            if not static_graph or not static_graph.get("centroids"):
-                return None, True  # No graph → can't compute, not an error
 
             # Build PathfindingService and find path
             speed_mode = task.get("speed", "slow")
@@ -2296,6 +2296,119 @@ class OrderService:
             return f"Turn {row[1]}, {row[0].isoformat()}"
         return "Unknown"
 
+    async def _preload_unit_situation_context(
+        self,
+        session_id: uuid.UUID,
+        issuer_side: str,
+        db: AsyncSession,
+    ) -> dict:
+        """Pre-load all shared data needed by _build_unit_situation in one pass."""
+        import asyncio as _aio
+        from backend.models.terrain_cell import TerrainCell
+        from backend.models.elevation_cell import ElevationCell
+        from backend.models.contact import Contact
+        from backend.models.map_object import MapObject
+        from backend.models.session import Session as Sess
+        from backend.models.scenario import Scenario
+
+        async def _load_terrain_cells():
+            r = await db.execute(
+                select(
+                    TerrainCell.snail_path,
+                    TerrainCell.terrain_type,
+                    TerrainCell.modifiers,
+                    TerrainCell.elevation_m,
+                    TerrainCell.slope_deg,
+                    TerrainCell.depth,
+                ).where(TerrainCell.session_id == session_id)
+            )
+            return {row[0]: row for row in r.all()}
+
+        async def _load_elevation_cells():
+            r = await db.execute(
+                select(
+                    ElevationCell.snail_path,
+                    ElevationCell.elevation_m,
+                    ElevationCell.slope_deg,
+                    ElevationCell.aspect_deg,
+                ).where(ElevationCell.session_id == session_id)
+            )
+            return {row[0]: row for row in r.all()}
+
+        async def _load_contacts():
+            r = await db.execute(
+                select(Contact).where(
+                    Contact.session_id == session_id,
+                    Contact.observing_side == issuer_side,
+                    Contact.is_stale == False,
+                ).limit(15)
+            )
+            return r.scalars().all()
+
+        async def _load_map_objects():
+            discovery_filter = (
+                MapObject.discovered_by_blue == True if issuer_side == "blue"
+                else MapObject.discovered_by_red == True
+            )
+            r = await db.execute(
+                select(MapObject).where(
+                    MapObject.session_id == session_id,
+                    MapObject.is_active == True,
+                    discovery_filter,
+                )
+            )
+            return r.scalars().all()
+
+        async def _load_session_scenario():
+            r = await db.execute(select(Sess).where(Sess.id == session_id))
+            sess = r.scalar_one_or_none()
+            scen = None
+            if sess:
+                r2 = await db.execute(select(Scenario).where(Scenario.id == sess.scenario_id))
+                scen = r2.scalar_one_or_none()
+            return sess, scen
+
+        async def _load_peaks():
+            return await self._load_elevation_peaks(session_id, db)
+
+        (
+            terrain_cells,
+            elevation_cells,
+            contacts,
+            map_objects,
+            (session_obj, scenario_obj),
+            peaks,
+        ) = await _aio.gather(
+            _load_terrain_cells(),
+            _load_elevation_cells(),
+            _load_contacts(),
+            _load_map_objects(),
+            _load_session_scenario(),
+            _load_peaks(),
+        )
+
+        # Build road cells index from terrain_cells
+        road_cells = [
+            (row[4] if row[4] is not None else 0, row[3] if row[3] is not None else 0, row[0])
+            for path, row in terrain_cells.items()
+            if row[1] in ("road", "bridge") and row[3] is not None and row[4] is not None
+        ]
+        # Actually we need centroid_lat/lon which aren't in our select... use snail_path keys
+        # We'll store full row data keyed by snail_path for road lookup
+
+        current_tick = session_obj.tick if session_obj else 0
+
+        return {
+            "terrain_cells": terrain_cells,
+            "elevation_cells": elevation_cells,
+            "contacts": contacts,
+            "map_objects": map_objects,
+            "session_obj": session_obj,
+            "scenario_obj": scenario_obj,
+            "peaks": peaks,
+            "current_tick": current_tick,
+        }
+
     async def _build_unit_situation(
         self,
         unit_dict: dict,
@@ -2304,6 +2417,7 @@ class OrderService:
         all_units: list[dict],
         db: AsyncSession,
         grid_service: Any = None,
+        preloaded: dict | None = None,
     ) -> dict:
         """
         Build a rich situational awareness context dict for a unit.
@@ -2417,61 +2531,39 @@ class OrderService:
         # ── Terrain at position ───────────────────────────
         if unit_lat and unit_lon:
             try:
-                from backend.models.terrain_cell import TerrainCell
-                from backend.models.elevation_cell import ElevationCell
+                _tc_map = preloaded.get("terrain_cells", {}) if preloaded else {}
+                _ec_map = preloaded.get("elevation_cells", {}) if preloaded else {}
 
-                # Find terrain cell by snail path
+                # Find terrain cell by snail path (in-memory lookup)
                 if situation.get("grid_ref"):
-                    # Try exact match first, then parent paths
                     snail_path = situation["grid_ref"]
-                    tc = None
-                    while snail_path and not tc:
-                        tc_result = await db.execute(
-                            select(TerrainCell).where(
-                                TerrainCell.session_id == session_id,
-                                TerrainCell.snail_path == snail_path,
-                            )
-                        )
-                        tc = tc_result.scalar_one_or_none()
-                        if not tc and "-" in snail_path:
-                            snail_path = snail_path.rsplit("-", 1)[0]
+                    tc_row = None
+                    # Walk up the path hierarchy
+                    sp = snail_path
+                    while sp and not tc_row:
+                        tc_row = _tc_map.get(sp)
+                        if not tc_row and "-" in sp:
+                            sp = sp.rsplit("-", 1)[0]
                         else:
                             break
 
-                    # Fallback: use the most specific descendant terrain cells under the
-                    # current grid and infer the majority terrain if parent cells are absent.
-                    if not tc:
-                        child_result = await db.execute(
-                            select(
-                                TerrainCell.terrain_type,
-                                TerrainCell.depth,
-                                TerrainCell.elevation_m,
-                                TerrainCell.slope_deg,
-                            ).where(
-                                TerrainCell.session_id == session_id,
-                                TerrainCell.snail_path.like(f"{situation['grid_ref']}-%"),
-                            )
-                        )
-                        child_rows = child_result.all()
+                    # Fallback: infer from child cells in preloaded map
+                    if not tc_row:
+                        prefix = situation["grid_ref"] + "-"
+                        child_rows = [v for k, v in _tc_map.items() if k.startswith(prefix)]
                         if child_rows:
                             terrain_counts: dict[str, int] = {}
                             elev_samples: list[float] = []
                             slope_samples: list[float] = []
-                            for terrain_type, _depth, elevation_m, slope_deg in child_rows:
-                                terrain_counts[terrain_type] = terrain_counts.get(terrain_type, 0) + 1
-                                if elevation_m is not None:
-                                    elev_samples.append(float(elevation_m))
-                                if slope_deg is not None:
-                                    slope_samples.append(float(slope_deg))
-
-                            dominant = max(
-                                terrain_counts.items(),
-                                key=lambda item: (item[1], item[0]),
-                            )[0]
-                            terrain_info = {
-                                "type": dominant,
-                                "modifiers": {},
-                            }
+                            for row in child_rows:
+                                tt = row[1]
+                                terrain_counts[tt] = terrain_counts.get(tt, 0) + 1
+                                if row[3] is not None:
+                                    elev_samples.append(float(row[3]))
+                                if row[4] is not None:
+                                    slope_samples.append(float(row[4]))
+                            dominant = max(terrain_counts.items(), key=lambda item: (item[1], item[0]))[0]
+                            terrain_info = {"type": dominant, "modifiers": {}}
                             if elev_samples:
                                 terrain_info["elevation_m"] = round(sum(elev_samples) / len(elev_samples), 1)
                             if slope_samples:
@@ -2479,33 +2571,28 @@ class OrderService:
                             terrain_info["inferred"] = True
                             situation["terrain"] = terrain_info
 
-                    if tc:
+                    if tc_row and "terrain" not in situation:
+                        # tc_row = (snail_path, terrain_type, modifiers, elevation_m, slope_deg, depth)
                         terrain_info = {
-                            "type": tc.terrain_type,
-                            "modifiers": tc.modifiers or {},
+                            "type": tc_row[1],
+                            "modifiers": tc_row[2] or {},
                         }
-                        if tc.elevation_m is not None:
-                            terrain_info["elevation_m"] = round(tc.elevation_m, 1)
-                        if tc.slope_deg is not None:
-                            terrain_info["slope_deg"] = round(tc.slope_deg, 1)
+                        if tc_row[3] is not None:
+                            terrain_info["elevation_m"] = round(float(tc_row[3]), 1)
+                        if tc_row[4] is not None:
+                            terrain_info["slope_deg"] = round(float(tc_row[4]), 1)
                         situation["terrain"] = terrain_info
 
-                    # Elevation data
-                    ec_result = await db.execute(
-                        select(ElevationCell).where(
-                            ElevationCell.session_id == session_id,
-                            ElevationCell.snail_path == situation["grid_ref"],
-                        )
-                    )
-                    ec = ec_result.scalar_one_or_none()
-                    if ec:
-                        elev_info = {"elevation_m": round(ec.elevation_m, 1)}
-                        if ec.slope_deg is not None:
-                            elev_info["slope_deg"] = round(ec.slope_deg, 1)
-                        if ec.aspect_deg is not None:
-                            elev_info["aspect_deg"] = round(ec.aspect_deg, 1)
+                    # Elevation data from preloaded
+                    ec_row = _ec_map.get(situation["grid_ref"])
+                    if ec_row:
+                        # ec_row = (snail_path, elevation_m, slope_deg, aspect_deg)
+                        elev_info = {"elevation_m": round(float(ec_row[1]), 1)}
+                        if ec_row[2] is not None:
+                            elev_info["slope_deg"] = round(float(ec_row[2]), 1)
+                        if ec_row[3] is not None:
+                            elev_info["aspect_deg"] = round(float(ec_row[3]), 1)
                         situation["elevation"] = elev_info
-                        # Also set in terrain if not already
                         if "terrain" in situation and "elevation_m" not in situation["terrain"]:
                             situation["terrain"]["elevation_m"] = elev_info["elevation_m"]
             except Exception:
@@ -2522,70 +2609,31 @@ class OrderService:
         # ── Surrounding terrain (adjacent cells) ──────────
         if situation.get("grid_ref") and grid_service:
             try:
-                from backend.models.terrain_cell import TerrainCell as TC2
-                from sqlalchemy import func
-
-                # Get the parent square of the current position
+                _tc_map = preloaded.get("terrain_cells", {}) if preloaded else {}
                 current_ref = situation["grid_ref"]
-                # Query nearby cells at the same depth level
                 depth = current_ref.count("-")
                 if depth > 0:
                     parent_path = current_ref.rsplit("-", 1)[0]
-                    # Get all sibling cells (same parent)
-                    sibs_result = await db.execute(
-                        select(TC2.terrain_type, func.count(TC2.id)).where(
-                            TC2.session_id == session_id,
-                            TC2.depth == depth,
-                            TC2.snail_path.like(f"{parent_path}-%"),
-                        ).group_by(TC2.terrain_type)
-                    )
-                    surrounding = {}
-                    for row in sibs_result.all():
-                        surrounding[row[0]] = row[1]
+                    prefix = parent_path + "-"
+                    surrounding: dict[str, int] = {}
+                    for k, v in _tc_map.items():
+                        if k.startswith(prefix) and v[5] == depth:  # v[5] = depth
+                            tt = v[1]
+                            surrounding[tt] = surrounding.get(tt, 0) + 1
                     if surrounding:
                         situation["surrounding_terrain"] = surrounding
             except Exception:
                 pass
 
         # ── Nearest road / route access ───────────────────
-        if unit_lat and unit_lon:
-            try:
-                from backend.models.terrain_cell import TerrainCell as RoadCell
-
-                road_result = await db.execute(
-                    select(
-                        RoadCell.centroid_lat,
-                        RoadCell.centroid_lon,
-                        RoadCell.snail_path,
-                    ).where(
-                        RoadCell.session_id == session_id,
-                        RoadCell.terrain_type.in_(("road", "bridge")),
-                    )
-                )
-                nearest_road = None
-                for road_lat, road_lon, road_snail in road_result.all():
-                    dlat = math.radians(road_lat - unit_lat)
-                    dlon = math.radians(road_lon - unit_lon)
-                    a = (math.sin(dlat / 2) ** 2 +
-                         math.cos(math.radians(unit_lat)) *
-                         math.cos(math.radians(road_lat)) *
-                         math.sin(dlon / 2) ** 2)
-                    dist_m = 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-                    if nearest_road is None or dist_m < nearest_road["distance_m"]:
-                        nearest_road = {
-                            "distance_m": round(dist_m),
-                            "snail_path": road_snail,
-                        }
-                if nearest_road:
-                    situation["nearest_road"] = nearest_road
-                    situation["nearest_road_distance_m"] = nearest_road["distance_m"]
-            except Exception:
-                pass
+        # Skip expensive road search — minor context value vs cost
 
         # ── Nearby height tops (elevation peaks) ───────────
         if unit_lat and unit_lon:
             try:
-                elevation_peaks = await self._load_elevation_peaks(session_id, db)
+                elevation_peaks = preloaded.get("peaks") if preloaded else None
+                if not elevation_peaks:
+                    elevation_peaks = await self._load_elevation_peaks(session_id, db)
                 if elevation_peaks:
                     nearby_heights = []
                     for peak in elevation_peaks:
@@ -2614,13 +2662,14 @@ class OrderService:
 
         # ── Weather / environment conditions ───────────────
         try:
-            from backend.models.session import Session
-            from backend.models.scenario import Scenario
-
-            sess_result = await db.execute(
-                select(Session).where(Session.id == session_id)
-            )
-            session_obj = sess_result.scalar_one_or_none()
+            session_obj = preloaded.get("session_obj") if preloaded else None
+            scenario_obj = preloaded.get("scenario_obj") if preloaded else None
+            if not session_obj:
+                from backend.models.session import Session
+                sess_result = await db.execute(
+                    select(Session).where(Session.id == session_id)
+                )
+                session_obj = sess_result.scalar_one_or_none()
             if session_obj:
                 # Game time
                 if session_obj.current_time:
@@ -2642,10 +2691,12 @@ class OrderService:
                         situation["game_time"]["period"] = "night"
 
                 # Environment / weather from scenario
-                scen_result = await db.execute(
-                    select(Scenario).where(Scenario.id == session_obj.scenario_id)
-                )
-                scenario_obj = scen_result.scalar_one_or_none()
+                if not scenario_obj:
+                    from backend.models.scenario import Scenario
+                    scen_result = await db.execute(
+                        select(Scenario).where(Scenario.id == session_obj.scenario_id)
+                    )
+                    scenario_obj = scen_result.scalar_one_or_none()
                 if scenario_obj and scenario_obj.environment:
                     env = scenario_obj.environment
                     weather_info = {}
@@ -2671,15 +2722,17 @@ class OrderService:
 
         # ── Known enemy contacts (this side) ──────────────
         try:
-            from backend.models.contact import Contact
-            contacts_result = await db.execute(
-                select(Contact).where(
-                    Contact.session_id == session_id,
-                    Contact.observing_side == issuer_side,
-                    Contact.is_stale == False,
-                ).limit(15)
-            )
-            contacts = contacts_result.scalars().all()
+            contacts = preloaded.get("contacts") if preloaded else None
+            if contacts is None:
+                from backend.models.contact import Contact
+                contacts_result = await db.execute(
+                    select(Contact).where(
+                        Contact.session_id == session_id,
+                        Contact.observing_side == issuer_side,
+                        Contact.is_stale == False,
+                    ).limit(15)
+                )
+                contacts = contacts_result.scalars().all()
 
             nearby_contacts = []
             for c in contacts:
@@ -2881,24 +2934,25 @@ class OrderService:
         # ── Nearby map objects (discovered by this side) ───
         if unit_lat and unit_lon:
             try:
-                from backend.models.map_object import MapObject
                 from geoalchemy2.shape import to_shape as to_shape_obj
-                from sqlalchemy import and_
 
-                # Filter by discovery status for this side
-                if issuer_side == "blue":
-                    discovery_filter = MapObject.discovered_by_blue == True
-                else:
-                    discovery_filter = MapObject.discovered_by_red == True
+                map_objs = preloaded.get("map_objects") if preloaded else None
+                if map_objs is None:
+                    from backend.models.map_object import MapObject
 
-                map_objs_result = await db.execute(
-                    select(MapObject).where(
-                        MapObject.session_id == session_id,
-                        MapObject.is_active == True,
-                        discovery_filter,
+                    if issuer_side == "blue":
+                        discovery_filter = MapObject.discovered_by_blue == True
+                    else:
+                        discovery_filter = MapObject.discovered_by_red == True
+
+                    map_objs_result = await db.execute(
+                        select(MapObject).where(
+                            MapObject.session_id == session_id,
+                            MapObject.is_active == True,
+                            discovery_filter,
+                        )
                     )
-                )
-                map_objs = map_objs_result.scalars().all()
+                    map_objs = map_objs_result.scalars().all()
 
                 nearby_objects = []
                 for obj in map_objs:
@@ -2951,14 +3005,15 @@ class OrderService:
         if unit_id:
             try:
                 from backend.models.event import Event
-                from backend.models.session import Session as Sess2
 
-                # Get current tick
-                tick_result = await db.execute(
-                    select(Sess2.tick).where(Sess2.id == session_id)
-                )
-                tick_row = tick_result.first()
-                current_tick = tick_row[0] if tick_row else 0
+                current_tick = preloaded.get("current_tick", 0) if preloaded else 0
+                if not current_tick:
+                    from backend.models.session import Session as Sess2
+                    tick_result = await db.execute(
+                        select(Sess2.tick).where(Sess2.id == session_id)
+                    )
+                    tick_row = tick_result.first()
+                    current_tick = tick_row[0] if tick_row else 0
 
                 events_result = await db.execute(
                     select(Event).where(
@@ -3008,16 +3063,18 @@ class OrderService:
         # ── Nearby planning overlays (markers, arrows, labels) ───
         if unit_lat and unit_lon:
             try:
-                from backend.models.overlay import PlanningOverlay
                 from geoalchemy2.shape import to_shape as to_shape_ovl
 
-                ovl_result = await db.execute(
-                    select(PlanningOverlay).where(
-                        PlanningOverlay.session_id == session_id,
-                        PlanningOverlay.side == issuer_side,
+                overlays = preloaded.get("overlays", []) if preloaded else None
+                if overlays is None:
+                    from backend.models.overlay import PlanningOverlay
+                    ovl_result = await db.execute(
+                        select(PlanningOverlay).where(
+                            PlanningOverlay.session_id == session_id,
+                            PlanningOverlay.side == issuer_side,
+                        )
                     )
-                )
-                overlays = ovl_result.scalars().all()
+                    overlays = ovl_result.scalars().all()
                 nearby_overlays = []
                 for ovl in overlays:
                     if not ovl.geometry:
@@ -3256,12 +3313,12 @@ class OrderService:
         except Exception:
             return "No known enemy contacts."
 
-    async def _build_objectives_context(
+    async def _load_session_and_scenario(
         self,
         session_id: uuid.UUID,
         db: AsyncSession,
-    ) -> str:
-        """Build mission objectives description for LLM context."""
+    ) -> tuple:
+        """Load session + scenario in one pass. Returns (session_obj, scenario_obj)."""
         try:
             from backend.models.session import Session as Sess
             from backend.models.scenario import Scenario
@@ -3270,13 +3327,41 @@ class OrderService:
                 select(Sess).where(Sess.id == session_id)
             )
             session_obj = sess_result.scalar_one_or_none()
-            if not session_obj:
-                return "No objectives defined."
+            scenario_obj = None
+            if session_obj:
+                scen_result = await db.execute(
+                    select(Scenario).where(Scenario.id == session_obj.scenario_id)
+                )
+                scenario_obj = scen_result.scalar_one_or_none()
+            return (session_obj, scenario_obj)
+        except Exception:
+            return (None, None)
 
-            scen_result = await db.execute(
-                select(Scenario).where(Scenario.id == session_obj.scenario_id)
-            )
-            scenario = scen_result.scalar_one_or_none()
+    async def _build_objectives_context(
+        self,
+        session_id: uuid.UUID,
+        db: AsyncSession,
+        _cached: tuple | None = None,
+    ) -> str:
+        """Build mission objectives description for LLM context."""
+        try:
+            if _cached:
+                session_obj, scenario = _cached
+            else:
+                from backend.models.session import Session as Sess
+                from backend.models.scenario import Scenario
+
+                sess_result = await db.execute(
+                    select(Sess).where(Sess.id == session_id)
+                )
+                session_obj = sess_result.scalar_one_or_none()
+                if not session_obj:
+                    return "No objectives defined."
+                scen_result = await db.execute(
+                    select(Scenario).where(Scenario.id == session_obj.scenario_id)
+                )
+                scenario = scen_result.scalar_one_or_none()
+
             if not scenario:
                 return "No objectives defined."
 
@@ -3312,16 +3397,27 @@ class OrderService:
         self,
         session_id: uuid.UUID,
         db: AsyncSession,
+        _cached: tuple | None = None,
     ) -> str:
         """Build weather/conditions/time context for the parser prompt."""
         try:
-            from backend.models.session import Session as Sess
-            from backend.models.scenario import Scenario
+            if _cached:
+                session_obj, scenario = _cached
+            else:
+                from backend.models.session import Session as Sess
+                from backend.models.scenario import Scenario
 
-            sess_result = await db.execute(
-                select(Sess).where(Sess.id == session_id)
-            )
-            session_obj = sess_result.scalar_one_or_none()
+                sess_result = await db.execute(
+                    select(Sess).where(Sess.id == session_id)
+                )
+                session_obj = sess_result.scalar_one_or_none()
+                scenario = None
+                if session_obj:
+                    scen_result = await db.execute(
+                        select(Scenario).where(Scenario.id == session_obj.scenario_id)
+                    )
+                    scenario = scen_result.scalar_one_or_none()
+
             if not session_obj:
                 return "No environment data available."
 
@@ -3344,10 +3440,6 @@ class OrderService:
                 if speed is not None:
                     lines.append(f"Session speed setting: {speed}")
 
-            scen_result = await db.execute(
-                select(Scenario).where(Scenario.id == session_obj.scenario_id)
-            )
-            scenario = scen_result.scalar_one_or_none()
             if scenario and scenario.environment:
                 env = scenario.environment
                 weather_parts = []

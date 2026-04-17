@@ -50,7 +50,10 @@ def get_llm_client() -> LLMClientInfo | None:
     # ── Cloud (OpenAI) ────────────────────────────────
     if settings.OPENAI_API_KEY:
         if _cloud_client is None:
-            _cloud_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            _cloud_client = AsyncOpenAI(
+                api_key=settings.OPENAI_API_KEY,
+                timeout=15.0,
+            )
             logger.info("LLM client: OpenAI cloud (%s)", settings.OPENAI_MODEL)
         cloud = _cloud_client
         return LLMClientInfo(
