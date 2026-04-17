@@ -2250,8 +2250,18 @@ async def _evaluate_victory_conditions(
     import logging
     logger = logging.getLogger(__name__)
 
-    # Only evaluate every 5 ticks, starting after tick 10 (let game develop first)
-    if tick < 10 or tick % 5 != 0:
+    # Only evaluate every 5 ticks (10 for local models), starting after tick 10
+    if tick < 10:
+        return None
+    eval_interval = 5
+    try:
+        from backend.services.llm_client import get_llm_client as _glc
+        _li = _glc()
+        if _li and _li.is_local:
+            eval_interval = 10  # reduce LLM calls for local CPU inference
+    except Exception:
+        pass
+    if tick % eval_interval != 0:
         return None
 
     # Build game state summary for the AI referee

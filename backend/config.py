@@ -36,15 +36,18 @@ class Settings(BaseSettings):
     OPENAI_MODEL_MINI: str = "gpt-4.1-mini"       # mid-tier (intent, reports)
     OPENAI_MODEL_NANO: str = "gpt-4o-mini"        # cheapest cloud tier (clear-cut orders)
 
-    # ── Local LLM (air-gapped / offline fallback) ────
-    # When OPENAI_API_KEY is empty but LOCAL_MODEL_URL is set,
-    # the parser sends to a local OpenAI-compatible endpoint (e.g. llama.cpp, vLLM, Ollama).
+    # ── Local LLM (triage classifier / air-gapped fallback) ────
+    # Local model handles ONLY simple classification tasks (command vs ack vs report).
+    # Full order parsing always goes to cloud LLM.
+    # When OPENAI_API_KEY is empty, local model is used as fallback for everything.
     LOCAL_MODEL_URL: str = ""                     # e.g. "http://localhost:8080/v1"
     LOCAL_MODEL_NAME: str = "local"               # model name to send in API requests
+    LOCAL_TRIAGE_ENABLED: bool = True             # use local LLM for cheap classification
+    LOCAL_TRIAGE_TIMEOUT: float = 2.0             # aggressive timeout — skip if slow
 
     # ── LLM Parsing Mode ────────────────────────────────
     # Controls how radio messages are routed through the parsing pipeline:
-    #   "llm_first"    — always call LLM first; keyword fallback only when no API key (default)
+    #   "llm_first"    — cloud LLM primary; local triage for classification hints (default)
     #   "keyword_first" — keyword parser runs first; LLM only for low-confidence (legacy)
     #   "keyword_only"  — no LLM calls at all; pure keyword parsing (for offline/testing)
     LLM_PARSING_MODE: str = "llm_first"

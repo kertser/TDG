@@ -21,6 +21,8 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Admin Panel** — Floating admin window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, area effects placement
 - **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with tactical assessment, smart formation suggestion, height/coordinate/snail location resolution, immediate task assignment, map-object-aware engineer/logistics handling, and doctrinal parsing of split/merge and support-unit commands
 - **Doctrine-Aware Prompting** — Tactical doctrine is loaded from `FIELD_MANUAL.md` and injected by topic so prompts receive only relevant slices such as fires, recon, engineers, logistics, aviation, map objects, or split/merge
+- **Prompt Compression & Retrieval** — 4-layer context packing for local/cloud LLM: task frame, state deltas (not full history), topic-scoped doctrine cards (BM25-like retrieval), dynamically selected few-shot exemplars. Negative context suppression omits empty sections. Deterministic continuity resolution ("same target", "the bridge"). Prompt-result cache with 5min TTL. Static system prefix for llama.cpp KV cache reuse. Typical prompt size: 1292–1648 tokens.
+- **Local LLM Support** — Air-gapped deployment via llama.cpp (OpenAI-compatible API). Docker Compose profile `llm` with CPU-tuned settings: ctx=4096, reasoning off, Q4_K_M quantization, KV cache reuse. Configurable via `LOCAL_MODEL_URL` / `LOCAL_MODEL_NAME` in `.env`. Three parsing modes: `llm_first` (default), `keyword_first` (legacy), `keyword_only` (offline).
 - **Radio Chat** — Tactical radio channel between session commanders with recipient selection, three channel filters (All / 💬 Chat / 📡 Units), and unread indicator. Auto-generated unit radio chatter: idle reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance halt/resume
 - **Reports** — Five auto-generated report types: SPOTREP (enemy contacts), SHELREP (under fire), CASREP (unit destroyed), SITREP (periodic status), INTSUM (intelligence summary). Bilingual RU/EN. Unread badge on sidebar tab.
 - **AI Victory Referee** — LLM-based victory evaluation every 5 ticks against scenario objectives. Game turn limit support. Auto-finish on victory or turn limit.
@@ -68,6 +70,27 @@ uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 7. Open the frontend
 Navigate to `http://localhost:8000` in your browser.
+
+### Local LLM (Optional — Air-Gapped Deployment)
+If no `OPENAI_API_KEY` is set, the parser falls back to a local model via llama.cpp:
+
+```powershell
+# Download model (default: Gemma 3 1B Instruct Q4_K_M, ~800MB)
+.\scripts\download_model.ps1
+
+# Start llama.cpp via Docker
+docker compose --profile llm up -d
+
+# Or run native (faster on Windows):
+.\tools\llama-cpp\llama-server.exe --model models\model.gguf --alias local --host 127.0.0.1 --port 8081 --ctx-size 4096 --threads 8 --reasoning off --no-webui --mlock
+```
+
+Configure in `.env`:
+```ini
+LOCAL_MODEL_URL=http://localhost:8081/v1
+LOCAL_MODEL_NAME=local
+LLM_PARSING_MODE=llm_first   # or keyword_first, keyword_only
+```
 
 ## Doctrine Loading
 
@@ -247,6 +270,6 @@ See `AGENTS.MD` for full architecture, domain model, and implementation roadmap.
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, GeoAlchemy2 |
 | Database | PostgreSQL 16 + PostGIS 3.4 |
 | Cache/PubSub | Redis 7 |
-| AI | OpenAI GPT-4.1 (order parsing, Red AI decisions, unit responses) |
+| AI | OpenAI GPT-4.1 (order parsing, Red AI decisions, unit responses); local llama.cpp fallback (Gemma/Qwen GGUF) |
 | Geospatial | Shapely, pyproj, PostGIS spatial queries |
 | Terrain Data | OSM Overpass API, ESA WorldCover 2021, Open-Elevation API |

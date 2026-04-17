@@ -184,3 +184,100 @@ def get_tactical_doctrine(level: str = "full", topics: list[str] | None = None) 
 def available_doctrine_topics() -> list[str]:
     """Return the available topic keys from FIELD_MANUAL.md."""
     return sorted(_TOPIC_MAP.keys())
+
+
+_DOCTRINE_STOP_WORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "your", "have",
+    "will", "they", "them", "their", "then", "than", "when", "what", "where",
+    "which", "при", "для", "как", "что", "это", "эти", "или", "через", "после",
+    "перед", "если", "если", "будет", "нужно", "надо", "под", "над", "also",
+    "only", "over", "into", "onto", "move", "order", "unit", "units", "radio",
+}
+
+
+def _tokenize_query(text: str) -> list[str]:
+    tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9_/-]+", (text or "").lower())
+    return [
+        t for t in tokens
+        if len(t) >= 2 and t not in _DOCTRINE_STOP_WORDS
+    ]
+
+
+def _split_doctrine_passages(text: str) -> list[str]:
+    passages: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current:
+                passages.append("\n".join(current).strip())
+                current = []
+            continue
+        if line.startswith("### Topic:"):
+            if current:
+                passages.append("\n".join(current).strip())
+            current = [line]
+            continue
+        current.append(line)
+    if current:
+        passages.append("\n".join(current).strip())
+    return [p for p in passages if p]
+
+
+def get_tactical_doctrine_excerpt(
+    *,
+    level: str = "brief",
+    topics: list[str] | None = None,
+    query: str = "",
+    max_passages: int = 4,
+    max_chars: int = 1600,
+) -> str:
+    """
+    Retrieve a compact doctrine excerpt relevant to the current message.
+
+    This is cheaper than injecting the full composed doctrine block and helps
+    both local and cloud models focus on only the applicable doctrinal rules.
+    """
+    doctrine = get_tactical_doctrine(level=level, topics=topics)
+    passages = _split_doctrine_passages(doctrine)
+    if not passages:
+        return doctrine[:max_chars]
+
+    query_tokens = set(_tokenize_query(query))
+    topic_tokens = {
+        tok
+        for topic in (topics or [])
+        for tok in _tokenize_query(topic.replace("_", " "))
+    }
+
+    scored: list[tuple[float, int, str]] = []
+    for idx, passage in enumerate(passages):
+        lowered = passage.lower()
+        score = 0.0
+        overlap = sum(1 for tok in query_tokens if tok in lowered)
+        topic_overlap = sum(1 for tok in topic_tokens if tok in lowered)
+        score += overlap * 3.0
+        score += topic_overlap * 2.0
+        if "### topic: general" in lowered:
+            score += 1.0
+        if idx == 0:
+            score += 0.5
+        scored.append((score, idx, passage))
+
+    top = sorted(scored, key=lambda item: (-item[0], item[1]))[:max_passages]
+    top_sorted = sorted(top, key=lambda item: item[1])
+
+    selected: list[str] = []
+    total_chars = 0
+    for _, _, passage in top_sorted:
+        if total_chars >= max_chars:
+            break
+        remaining = max_chars - total_chars
+        clipped = passage if len(passage) <= remaining else passage[: max(0, remaining - 3)].rstrip() + "..."
+        if clipped:
+            selected.append(clipped)
+            total_chars += len(clipped) + 2
+
+    if not selected:
+        return doctrine[:max_chars]
+    return "\n\n".join(selected)

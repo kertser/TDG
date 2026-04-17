@@ -23,21 +23,29 @@ def build_red_commander_prompt(
     mission: dict,
     knowledge: dict,
     tick: int,
+    is_local: bool = False,
 ) -> tuple[str, str]:
     """
     Build system prompt and user message for a Red AI commander LLM call.
 
+    Args:
+        is_local: If True, build a compact prompt for local 1-3B models.
+                  Skips full doctrine, reduces operational rules, trims unit descriptions.
+
     Returns:
         (system_prompt, user_message) tuple
     """
-    # Load tactical doctrine reference
-    tactical_doctrine = get_tactical_doctrine(
-        "full",
-        topics=[
-            "general", "offense", "defense", "fires", "recon",
-            "engineers", "logistics", "map_objects", "aviation",
-        ],
-    )
+    # Load tactical doctrine reference — brief for local, full for cloud
+    if is_local:
+        tactical_doctrine = get_tactical_doctrine("brief", topics=["general", "offense", "defense"])
+    else:
+        tactical_doctrine = get_tactical_doctrine(
+            "full",
+            topics=[
+                "general", "offense", "defense", "fires", "recon",
+                "engineers", "logistics", "map_objects", "aviation",
+            ],
+        )
 
     # ── System Prompt ─────────────────────────────────────
     system_prompt = f"""You are a Red force military commander in a tactical exercise.

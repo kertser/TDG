@@ -1367,9 +1367,9 @@ def process_artillery_support(
     # Keep linked support fire aligned with the supported unit's
     # current target or objective until cease-fire logic stops it.
     for arty in all_units:
-        if arty.is_destroyed or arty.unit_type not in ARTILLERY_TYPES:
+        if getattr(arty, "is_destroyed", False) or getattr(arty, "unit_type", None) not in ARTILLERY_TYPES:
             continue
-        arty_task = arty.current_task or {}
+        arty_task = getattr(arty, "current_task", None) or {}
         if arty_task.get("type") != "fire" or not arty_task.get("sustained_support"):
             continue
         if arty_task.get("ceasefire_requested_by"):
@@ -1427,9 +1427,9 @@ def process_artillery_support(
         preferred_artillery: list = []
         if req_coord_ids or req_support_ids or req_coord_refs:
             for candidate in all_units:
-                if candidate.is_destroyed:
+                if getattr(candidate, "is_destroyed", False):
                     continue
-                if candidate.unit_type not in ARTILLERY_TYPES:
+                if getattr(candidate, "unit_type", None) not in ARTILLERY_TYPES:
                     continue
                 cand_side = candidate.side.value if hasattr(candidate.side, 'value') else str(candidate.side)
                 if cand_side != unit_side:
@@ -1472,12 +1472,12 @@ def process_artillery_support(
             for sib in siblings:
                 if str(sib.id) in tasked_artillery:
                     continue
-                if sib.unit_type not in ARTILLERY_TYPES:
+                if getattr(sib, "unit_type", None) not in ARTILLERY_TYPES:
                     continue
                 sib_side = sib.side.value if hasattr(sib.side, 'value') else str(sib.side)
                 if sib_side != unit_side:
                     continue
-                if sib.is_destroyed:
+                if getattr(sib, "is_destroyed", False):
                     continue
                 if (sib.ammo or 0) <= 0:
                     continue
@@ -1498,8 +1498,7 @@ def process_artillery_support(
                     continue
                 weapon_range = WEAPON_RANGE.get(sib.unit_type, 5000)
                 dist = _distance_m(sib_pos[0], sib_pos[1], req_target_loc["lat"], req_target_loc["lon"])
-                if dist > weapon_range:
-                    continue
+                needs_movement_to_range = dist > weapon_range
 
                 # Danger-close applies to lethal fire, not smoke masking.
                 if req_fire_effect_type != "smoke":
@@ -1530,6 +1529,8 @@ def process_artillery_support(
                     "sustained_support": req_fire_effect_type != "smoke",
                     "salvos_remaining": 1 if req_fire_effect_type == "smoke" else DEFAULT_FIRE_SALVOS,
                 }
+                if needs_movement_to_range:
+                    sib.current_task["needs_movement_to_range"] = True
                 if req_fire_effect_type:
                     sib.current_task["fire_effect_type"] = req_fire_effect_type
                 if req_smoke_duration_ticks:

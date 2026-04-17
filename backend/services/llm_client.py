@@ -88,3 +88,33 @@ def get_llm_client() -> LLMClientInfo | None:
     return None
 
 
+def get_local_client() -> LLMClientInfo | None:
+    """
+    Return a local LLM client ONLY (for triage classification tasks).
+
+    Returns None if LOCAL_MODEL_URL is not configured.
+    Unlike get_llm_client(), this never falls back to cloud.
+    """
+    global _local_client
+
+    if not settings.LOCAL_MODEL_URL:
+        return None
+
+    if _local_client is None:
+        _local_client = AsyncOpenAI(
+            api_key="local",
+            base_url=settings.LOCAL_MODEL_URL,
+            timeout=settings.LOCAL_TRIAGE_TIMEOUT,
+        )
+        logger.info("Local triage client: %s (model=%s)",
+                     settings.LOCAL_MODEL_URL, settings.LOCAL_MODEL_NAME)
+
+    return LLMClientInfo(
+        client=_local_client,
+        model=settings.LOCAL_MODEL_NAME,
+        model_mini=settings.LOCAL_MODEL_NAME,
+        model_nano=settings.LOCAL_MODEL_NAME,
+        is_local=True,
+    )
+
+

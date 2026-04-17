@@ -180,8 +180,10 @@ def main():
     print("  1. Clear OPENAI_API_KEY in .env (or leave empty)")
     print("  2. Set LOCAL_MODEL_URL=http://localhost:8081/v1")
     print("  3. Restart the backend server")
-    print("\nNote: Small models (1B) may struggle with structured JSON.")
-    print("For best results, use a 3B+ model (see scripts/download_model.ps1).")
+    print("\nRecommended follow-up:")
+    print("  - Warm the parser prefixes: .\\venv\\Scripts\\python.exe scripts\\warm_local_llm.py")
+    print("  - Benchmark the real parser: .\\venv\\Scripts\\python.exe scripts\\benchmark_order_parser.py")
+    print("\nNote: Small models can work well for JSON if the prompt stays short and structured.")
 
 
 if __name__ == "__main__":

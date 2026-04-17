@@ -23,6 +23,11 @@ $PORT = 8081
 
 # ── Models to test ──
 $Models = [ordered]@{
+    "gemma1b" = @{
+        Name = "Gemma-3-1B-IT Q4_K_M"
+        Url  = "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF/resolve/main/google_gemma-3-1b-it-Q4_K_M.gguf"
+        Ctx  = 4096
+    }
     "qwen1.5b" = @{
         Name = "Qwen2.5-1.5B-Instruct Q4_K_M"
         Url  = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
@@ -132,11 +137,17 @@ function Start-LlamaServer {
         "--ctx-size", $CtxSize,
         "--threads", (Get-CimInstance Win32_Processor).NumberOfLogicalProcessors,
         "--threads-batch", (Get-CimInstance Win32_Processor).NumberOfLogicalProcessors,
+        "--threads-http", "2",
         "--parallel", "1",
-        "--batch-size", "512",
-        "--ubatch-size", "256",
+        "--batch-size", "256",
+        "--ubatch-size", "128",
         "--cache-type-k", "q4_0",
         "--cache-type-v", "q4_0",
+        "--cache-reuse", "64",
+        "--slot-prompt-similarity", "0.75",
+        "--reasoning", "off",
+        "--reasoning-format", "none",
+        "--no-webui",
         "--mlock"
     ) -PassThru -WindowStyle Hidden -RedirectStandardError (Join-Path $LLAMACPP_DIR "server.log")
 

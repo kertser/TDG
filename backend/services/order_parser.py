@@ -16,6 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from hashlib import sha256
 
 from openai import AsyncOpenAI
 from pydantic import ValidationError
@@ -27,22 +32,12 @@ from backend.prompts.order_parser import (
     build_user_message,
     build_unit_roster,
     build_grid_info,
+    build_optimized_local_prompt,
 )
-from backend.prompts.tactical_doctrine import get_tactical_doctrine
+from backend.services.retrieval_context import build_order_parser_context
+from backend.services.local_triage import local_triage
 
 logger = logging.getLogger(__name__)
-
-def _build_height_tops_context(grid_info: dict | None) -> str:
-    """Build a text description of available height tops for the LLM prompt."""
-    if not grid_info or "height_tops" not in grid_info:
-        return ""
-    peaks = grid_info["height_tops"]
-    if not peaks:
-        return ""
-    lines = ["Available named height tops on the map:"]
-    for p in peaks[:20]:
-        lines.append(f"  - {p['label']} ({p['label_ru']}) at grid {p.get('snail_path', '?')}")
-    return "\n".join(lines)
 
 # Max retries on LLM parse failure (all models get MAX_RETRIES + 1 attempts)
 MAX_RETRIES = 2
@@ -51,6 +46,152 @@ MAX_RETRIES = 2
 CONF_SKIP_LLM = 0.95    # only non-commands (acks, reports) can skip LLM
 CONF_USE_NANO = 0.50     # partial match, use cheap model
 # Below CONF_USE_NANO → use full model
+
+
+# ── JSON fixups for local model output ────────────────────────
+# Small models often return strings instead of lists, dicts instead of lists, etc.
+_LIST_FIELDS = {
+    "status_request_focus", "target_unit_refs", "location_refs",
+    "coordination_unit_refs", "ambiguities",
+}
+_NULLABLE_STR_FIELDS = {
+    "sender_ref", "order_type", "speed", "formation", "engagement_rules",
+    "urgency", "purpose", "support_target_ref", "coordination_kind",
+    "maneuver_kind", "maneuver_side", "map_object_type", "merge_target_ref",
+    "split_ratio", "report_text",
+}
+
+
+def _fixup_llm_json(d: dict) -> None:
+    """Coerce common local-model type mistakes in-place."""
+    for k in _LIST_FIELDS:
+        v = d.get(k)
+        if v is None:
+            continue
+        if isinstance(v, str):
+            d[k] = [v] if v else []
+        elif isinstance(v, dict):
+            d[k] = list(v.values()) if v else []
+    for k in _NULLABLE_STR_FIELDS:
+        v = d.get(k)
+        if isinstance(v, list):
+            d[k] = v[0] if v else None
+        elif isinstance(v, dict):
+            d[k] = None
+    # Drop location_refs with invalid ref_type
+    _VALID_REF_TYPES = {"snail", "grid", "coordinate", "relative", "height", "terrain"}
+    locs = d.get("location_refs")
+    if isinstance(locs, list):
+        d["location_refs"] = [
+            lr for lr in locs
+            if isinstance(lr, dict) and lr.get("ref_type") in _VALID_REF_TYPES
+        ]
+
+
+def _repair_json(text: str) -> str:
+    """
+    Attempt to repair truncated / malformed JSON from local models.
+
+    Handles:
+    - Truncated output (unmatched braces/brackets)
+    - Trailing commas before } or ]
+    - Unquoted string values cut mid-token
+    """
+    # Find the first '{' — skip any preamble text
+    start = text.find("{")
+    if start == -1:
+        return text
+    s = text[start:]
+
+    # Try parsing as-is first
+    try:
+        json.loads(s)
+        return s
+    except json.JSONDecodeError:
+        pass
+
+    # Remove trailing incomplete key-value pairs after last complete value
+    # Strategy: close all open brackets/braces
+    # First, strip any trailing incomplete string (unmatched quote)
+    in_string = False
+    escape = False
+    last_good = 0
+    depth_brace = 0
+    depth_bracket = 0
+    for i, ch in enumerate(s):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            if not in_string:
+                last_good = i
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth_brace += 1
+        elif ch == '}':
+            depth_brace -= 1
+            last_good = i
+        elif ch == '[':
+            depth_bracket += 1
+        elif ch == ']':
+            depth_bracket -= 1
+            last_good = i
+        elif ch in (',', ':'):
+            last_good = i
+
+    # Truncate at last structurally valid position
+    if depth_brace > 0 or depth_bracket > 0 or in_string:
+        # Cut back to last complete value
+        s = s[:last_good + 1]
+        # Remove trailing comma
+        s = s.rstrip().rstrip(',')
+        # Close remaining open structures
+        # Recount
+        depth_brace = 0
+        depth_bracket = 0
+        in_string = False
+        escape = False
+        for ch in s:
+            if escape:
+                escape = False
+                continue
+            if ch == '\\' and in_string:
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                depth_brace += 1
+            elif ch == '}':
+                depth_brace -= 1
+            elif ch == '[':
+                depth_bracket += 1
+            elif ch == ']':
+                depth_bracket -= 1
+        s += ']' * depth_bracket + '}' * depth_brace
+
+    # Remove trailing commas before } or ]
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+
+    return s
+
+
+@dataclass(frozen=True)
+class PromptBundle:
+    system: str
+    user: str
+    is_local: bool
+    retrieved: object
+    cache_key: str
 
 
 class OrderParser:
@@ -68,6 +209,9 @@ class OrderParser:
     def __init__(self):
         self._client: AsyncOpenAI | None = None
         self._local_client: AsyncOpenAI | None = None
+        self._prompt_result_cache: OrderedDict[str, tuple[float, ParsedOrderData]] = OrderedDict()
+        self._prompt_result_cache_ttl_s = 300.0
+        self._prompt_result_cache_max = 256
 
     def _get_client(self) -> AsyncOpenAI:
         if self._client is None:
@@ -269,6 +413,149 @@ class OrderParser:
 
         return llm_result
 
+    def _make_prompt_cache_key(self, *, model: str, system: str, user: str) -> str:
+        digest = sha256()
+        digest.update(model.encode("utf-8"))
+        digest.update(b"\n<system>\n")
+        digest.update(system.encode("utf-8"))
+        digest.update(b"\n<user>\n")
+        digest.update(user.encode("utf-8"))
+        return digest.hexdigest()
+
+    def _get_cached_prompt_result(self, cache_key: str) -> ParsedOrderData | None:
+        cached = self._prompt_result_cache.get(cache_key)
+        if not cached:
+            return None
+        timestamp, parsed = cached
+        if (time.monotonic() - timestamp) > self._prompt_result_cache_ttl_s:
+            self._prompt_result_cache.pop(cache_key, None)
+            return None
+        self._prompt_result_cache.move_to_end(cache_key)
+        return parsed.model_copy(deep=True)
+
+    def _store_cached_prompt_result(self, cache_key: str, parsed: ParsedOrderData) -> None:
+        self._prompt_result_cache[cache_key] = (time.monotonic(), parsed.model_copy(deep=True))
+        self._prompt_result_cache.move_to_end(cache_key)
+        while len(self._prompt_result_cache) > self._prompt_result_cache_max:
+            self._prompt_result_cache.popitem(last=False)
+
+    def _build_prompt_bundle(
+        self,
+        *,
+        original_text: str,
+        units: list[dict],
+        grid_info: dict | None,
+        game_time: str,
+        model: str,
+        issuer_side: str | None = None,
+        terrain_context: str = "",
+        contacts_context: str = "",
+        objectives_context: str = "",
+        friendly_status_context: str = "",
+        environment_context: str = "",
+        orders_context: str = "",
+        radio_context: str = "",
+        reports_context: str = "",
+        map_objects_context: str = "",
+        keyword_hint: ParsedOrderData | None = None,
+    ) -> PromptBundle:
+        """Build the exact prompt pair used for an LLM call, plus cache key."""
+        if issuer_side:
+            filtered_units = [
+                u for u in units
+                if u.get("side") == issuer_side and not u.get("is_destroyed")
+            ]
+        else:
+            filtered_units = [u for u in units if not u.get("is_destroyed")]
+
+        if keyword_hint is None:
+            keyword_hint = self._fallback_parse(original_text)
+
+        doctrine_topics = self._infer_doctrine_topics(original_text)
+        is_local = model == settings.LOCAL_MODEL_NAME
+        context_profile = "local" if is_local else "cloud"
+
+        retrieved = build_order_parser_context(
+            original_text=original_text,
+            parsed_hint=keyword_hint,
+            doctrine_topics=doctrine_topics,
+            units=filtered_units,
+            grid_info=grid_info,
+            terrain_context=terrain_context or "",
+            contacts_context=contacts_context or "",
+            objectives_context=objectives_context or "",
+            friendly_status_context=friendly_status_context or "",
+            environment_context=environment_context or "",
+            orders_context=orders_context or "",
+            radio_context=radio_context or "",
+            reports_context=reports_context or "",
+            map_objects_context=map_objects_context or "",
+            profile=context_profile,
+        )
+
+        if is_local:
+            system, user_context = build_optimized_local_prompt(
+                units=retrieved.units_for_prompt,
+                order_type_hint=keyword_hint.order_type.value if keyword_hint.order_type else None,
+                language_hint=keyword_hint.language.value if keyword_hint.language else None,
+                grid_info=grid_info,
+                doctrine_excerpt=retrieved.doctrine_text,
+                state_packet=retrieved.state_packet,
+                continuity_hints=retrieved.continuity_hints,
+                contacts_summary=retrieved.contacts_context,
+                objectives_summary=retrieved.objectives_context,
+                terrain_summary=retrieved.terrain_context,
+                history_summary=retrieved.history_digest,
+                map_objects_summary=retrieved.map_objects_context,
+                environment_summary=retrieved.environment_context,
+                friendly_status_summary=retrieved.friendly_status_context,
+                height_tops_context=retrieved.height_tops_context,
+                game_time=game_time or "",
+            )
+            user_msg = build_user_message(
+                original_text,
+                order_type_hint=keyword_hint.order_type.value if keyword_hint.order_type else None,
+                language_hint=keyword_hint.language.value if keyword_hint.language else None,
+                context_block=user_context,
+                include_examples=False,
+            )
+        else:
+            system = build_system_prompt(
+                retrieved.doctrine_text
+            ).format(
+                unit_roster=build_unit_roster(retrieved.units_for_prompt),
+                grid_info=build_grid_info(grid_info),
+                game_time=game_time or "Unknown",
+                height_tops_context=retrieved.height_tops_context or "No relevant height-top context retrieved.",
+                terrain_context=retrieved.terrain_context,
+                contacts_context=retrieved.contacts_context,
+                objectives_context=retrieved.objectives_context,
+                friendly_status_context=retrieved.friendly_status_context,
+                environment_context=retrieved.environment_context,
+                orders_context=retrieved.orders_context,
+                radio_context=retrieved.radio_context,
+                reports_context=retrieved.reports_context,
+                map_objects_context=retrieved.map_objects_context,
+            )
+            user_msg = build_user_message(
+                original_text,
+                order_type_hint=keyword_hint.order_type.value if keyword_hint.order_type else None,
+                language_hint=keyword_hint.language.value if keyword_hint.language else None,
+                context_block="\n".join(
+                    part for part in [retrieved.state_packet, retrieved.continuity_hints] if part
+                ),
+                max_examples=4,
+            )
+
+        cache_key = self._make_prompt_cache_key(model=model, system=system, user=user_msg)
+        return PromptBundle(
+            system=system,
+            user=user_msg,
+            is_local=is_local,
+            retrieved=retrieved,
+            cache_key=cache_key,
+        )
+
     async def parse(
         self,
         original_text: str,
@@ -321,6 +608,7 @@ class OrderParser:
                     radio_context=radio_context,
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
+                    keyword_hint=keyword_result,
                 )
                 result = self._reconcile_llm_result(original_text, result, keyword_result)
                 return result if result else keyword_result
@@ -343,6 +631,7 @@ class OrderParser:
                     radio_context=radio_context,
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
+                    keyword_hint=keyword_result,
                 )
                 result = self._reconcile_llm_result(original_text, result, keyword_result)
                 return result if result else keyword_result
@@ -360,7 +649,7 @@ class OrderParser:
         if not settings.OPENAI_API_KEY:
             local_client = self._get_local_client()
             if local_client:
-                logger.info("OrderParser: no API key, using local model at %s",
+                logger.info("OrderParser: no API key, using local model as full parser at %s",
                             settings.LOCAL_MODEL_URL)
                 result = await self._call_llm(
                     original_text, units, grid_info, game_time,
@@ -376,6 +665,7 @@ class OrderParser:
                     radio_context=radio_context,
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
+                    keyword_hint=keyword_result,
                 )
                 result = self._reconcile_llm_result(original_text, result, keyword_result)
                 return result if result else keyword_result
@@ -383,14 +673,62 @@ class OrderParser:
                 logger.warning("OrderParser: no API key and no local model — using keyword result")
                 return keyword_result
 
-        # ── Step 5: LLM-first mode (default) ──
+        # ── Step 5: LLM-first mode (default) — cloud primary with optional local triage ──
         if parsing_mode == "llm_first":
-            # Use keyword hints to pick model tier — or skip LLM entirely
             kw_conf = keyword_result.confidence
             kw_class = keyword_result.classification
 
-            # Skip LLM ONLY for non-command classifications that are clearly identified.
-            # Commands ALWAYS go to LLM regardless of keyword confidence.
+            # ── 5a: Run local triage to get a cheap classification hint ──
+            triage_result = await local_triage.classify(original_text)
+            if triage_result is not None:
+                # Merge triage into classification decision:
+                # If keyword and triage AGREE on non-command → higher confidence to skip LLM
+                # If they DISAGREE → lower confidence to force LLM
+                triage_class = triage_result.classification
+                _is_non_command_kw = kw_class in (
+                    MessageClassification.acknowledgment,
+                    MessageClassification.status_report,
+                    MessageClassification.status_request,
+                )
+                _is_non_command_triage = triage_class in (
+                    MessageClassification.acknowledgment,
+                    MessageClassification.status_report,
+                    MessageClassification.status_request,
+                )
+
+                if _is_non_command_kw and _is_non_command_triage and kw_class == triage_class:
+                    # Both agree it's non-command → boost confidence
+                    kw_conf = min(kw_conf + 0.10, 0.98)
+                    logger.info(
+                        "OrderParser[triage]: keyword+local agree on %s → boosted conf=%.2f",
+                        kw_class.value, kw_conf,
+                    )
+                elif kw_class == MessageClassification.command and triage_class != MessageClassification.command:
+                    # Keyword says command, triage disagrees → reduce confidence to force full model
+                    kw_conf = min(kw_conf, 0.45)
+                    logger.info(
+                        "OrderParser[triage]: keyword=command but local=%s → reduced conf=%.2f",
+                        triage_class.value, kw_conf,
+                    )
+                elif kw_class != MessageClassification.command and triage_class == MessageClassification.command:
+                    # Triage says command, keyword missed it → override to command, force LLM
+                    kw_class = MessageClassification.command
+                    kw_conf = 0.50
+                    keyword_result = keyword_result.model_copy(
+                        update={"classification": MessageClassification.command, "confidence": 0.50}
+                    )
+                    logger.info(
+                        "OrderParser[triage]: local overrides to command (keyword was %s)",
+                        keyword_result.classification.value,
+                    )
+
+                # Use triage language if keyword didn't detect cyrillic well
+                if triage_result.language != keyword_result.language:
+                    keyword_result = keyword_result.model_copy(
+                        update={"language": triage_result.language}
+                    )
+
+            # ── 5b: Skip LLM for clear non-command classifications ──
             _is_non_command = kw_class in (
                 MessageClassification.acknowledgment,
                 MessageClassification.status_report,
@@ -403,6 +741,7 @@ class OrderParser:
                 )
                 return keyword_result
 
+            # ── 5c: Choose cloud model tier ──
             if kw_conf >= 0.70 and kw_class != MessageClassification.unclear:
                 model = settings.OPENAI_MODEL_NANO
                 tier = "nano"
@@ -429,6 +768,7 @@ class OrderParser:
                 radio_context=radio_context,
                 reports_context=reports_context,
                 map_objects_context=map_objects_context,
+                keyword_hint=keyword_result,
             )
             result = self._reconcile_llm_result(original_text, result, keyword_result)
 
@@ -452,6 +792,7 @@ class OrderParser:
                     radio_context=radio_context,
                     reports_context=reports_context,
                     map_objects_context=map_objects_context,
+                    keyword_hint=keyword_result,
                 )
                 full_result = self._reconcile_llm_result(original_text, full_result, keyword_result)
                 if full_result and full_result.classification != MessageClassification.unclear:
@@ -503,6 +844,7 @@ class OrderParser:
             radio_context=radio_context,
             reports_context=reports_context,
             map_objects_context=map_objects_context,
+            keyword_hint=keyword_result,
         )
         result = self._reconcile_llm_result(original_text, result, keyword_result)
 
@@ -526,6 +868,7 @@ class OrderParser:
                 radio_context=radio_context,
                 reports_context=reports_context,
                 map_objects_context=map_objects_context,
+                keyword_hint=keyword_result,
             )
             full_result = self._reconcile_llm_result(original_text, full_result, keyword_result)
             if full_result and full_result.classification != MessageClassification.unclear:
@@ -553,36 +896,43 @@ class OrderParser:
         radio_context: str = "",
         reports_context: str = "",
         map_objects_context: str = "",
+        keyword_hint: ParsedOrderData | None = None,
     ) -> ParsedOrderData | None:
         """Call LLM and return parsed result, or None on failure."""
-        # Filter units to issuer's side only (reduce prompt tokens)
-        if issuer_side:
-            filtered_units = [
-                u for u in units
-                if u.get("side") == issuer_side and not u.get("is_destroyed")
-            ]
-        else:
-            filtered_units = [u for u in units if not u.get("is_destroyed")]
+        if keyword_hint is None:
+            keyword_hint = self._fallback_parse(original_text)
 
-        doctrine_topics = self._infer_doctrine_topics(original_text)
-        system = build_system_prompt(
-            get_tactical_doctrine("brief", topics=doctrine_topics)
-        ).format(
-            unit_roster=build_unit_roster(filtered_units),
-            grid_info=build_grid_info(grid_info),
-            game_time=game_time or "Unknown",
-            height_tops_context=_build_height_tops_context(grid_info),
-            terrain_context=terrain_context or "No terrain data available.",
-            contacts_context=contacts_context or "No known enemy contacts.",
-            objectives_context=objectives_context or "No specific objectives defined.",
-            friendly_status_context=friendly_status_context or "No detailed status available.",
-            environment_context=environment_context or "No environment data available.",
-            orders_context=orders_context or "No prior own-side orders.",
-            radio_context=radio_context or "No recent radio/chat traffic.",
-            reports_context=reports_context or "No recent operational reports.",
-            map_objects_context=map_objects_context or "No known map objects.",
+        prompt_bundle = self._build_prompt_bundle(
+            original_text=original_text,
+            units=units,
+            grid_info=grid_info,
+            game_time=game_time,
+            model=model,
+            issuer_side=issuer_side,
+            terrain_context=terrain_context,
+            contacts_context=contacts_context,
+            objectives_context=objectives_context,
+            friendly_status_context=friendly_status_context,
+            environment_context=environment_context,
+            orders_context=orders_context,
+            radio_context=radio_context,
+            reports_context=reports_context,
+            map_objects_context=map_objects_context,
+            keyword_hint=keyword_hint,
         )
-        user_msg = build_user_message(original_text)
+        system = prompt_bundle.system
+        user_msg = prompt_bundle.user
+        _is_local = prompt_bundle.is_local
+
+        cached_result = self._get_cached_prompt_result(prompt_bundle.cache_key)
+        if cached_result is not None:
+            logger.info(
+                "OrderParser[%s]: prompt-result cache hit (system=%d chars, user=%d chars)",
+                model,
+                len(system),
+                len(user_msg),
+            )
+            return cached_result
 
         last_error = None
         raw_content = None
@@ -606,8 +956,11 @@ class OrderParser:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.1,
-                    max_completion_tokens=16384 if _is_reasoning else 2048,
+                    max_completion_tokens=16384 if _is_reasoning else (1024 if _is_local else 2048),
                 )
+                # Local models: skip response_format (not always supported)
+                if _is_local:
+                    create_kwargs.pop("response_format", None)
                 # Reasoning models don't support temperature
                 if _is_reasoning:
                     del create_kwargs["temperature"]
@@ -670,7 +1023,9 @@ class OrderParser:
                     if _content.endswith("```"):
                         _content = _content[:-3].strip()
 
-                raw_json = json.loads(_content)
+                raw_json = json.loads(_repair_json(_content))
+                # ── Fix common local-model type mistakes ──
+                _fixup_llm_json(raw_json)
                 parsed = ParsedOrderData.model_validate(raw_json)
 
                 # Normalize formation values (LLM may return non-canonical names)
@@ -686,6 +1041,7 @@ class OrderParser:
                     model, parsed.classification.value,
                     parsed.language.value, parsed.confidence, attempt + 1,
                 )
+                self._store_cached_prompt_result(prompt_bundle.cache_key, parsed)
                 return parsed
 
             except json.JSONDecodeError as e:
@@ -736,14 +1092,17 @@ class OrderParser:
                          "lay mines", "mine the", "emplace mines", "deploy bridge",
                          "bridge the", "construct", "build", "dig in", "entrench",
                          "fortify", "establish command post", "set up aid station",
-                         "airlift", "insert", "extract", "landing zone", "lz"]
+                         "resupply", "re-supply", "rearm", "reload", "replenish",
+                         "put smoke", "lay smoke", "deploy smoke", "smoke the", "set smoke",
+                         "airlift", "insert", "extract", "landing zone", "lz",
+                         "screen", "recon"]
         command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
                          "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
                          "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
                          "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение",
                          "поразить", "бей по", "удар по", "подавить", "подавляющ",
                          "захвати", "захват", "овладе", "занять", "займ",
-                         "продолжай", "будьте готовы", "координируй", "организуй",
+                         "продолжай", "будьте готовы", "координируй", "организуй", "прикрой",
                          "откройте огонь", "открывай", "выдвину", "приказываю",
                          "наведите", "наведи", "наводите", "наводи",
                          "вызовите огонь", "вызови огонь", "запросите огонь", "запроси огонь",
@@ -753,7 +1112,9 @@ class OrderParser:
                          "сними заграждение", "минируй", "заминируй", "ставь мины",
                          "установи мины", "навести мост", "разверни мост", "оборудуй",
                          "окопай", "укрепи", "построй", "возведи", "подвези",
-                         "снабди", "эвакуируй", "десант", "высад", "погруз", "выгруз"]
+                         "поставь дым", "поставьте дым", "накрой дымом", "прикрой дымом",
+                          "снабди", "эвакуируй", "десант", "высад", "погруз", "выгруз",
+                         "свяжись", "свяжитесь", "следуй за", "следовать за"]
         status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
         status_req_focus_map = {
             "nearby_friendlies": [
@@ -860,11 +1221,11 @@ class OrderParser:
             classification = MessageClassification.command
         elif has_ack_kw:
             classification = MessageClassification.acknowledgment
-        elif any(kw in text_lower for kw in status_req_kw):
+        elif any(kw in text_lower for kw in status_req_kw) and not has_command_kw:
             classification = MessageClassification.status_request
             order_type = "report_status"
             status_request_focus = _infer_status_request_focus(text)
-        elif has_status_request_frame and any(
+        elif has_status_request_frame and not has_command_kw and any(
             any(pat in text_lower for pat in patterns)
             for patterns in status_req_focus_map.values()
         ):
@@ -893,8 +1254,8 @@ class OrderParser:
                 "get ready", "stand by", "standby", "be ready", "on request",
                 "on call", "when called", "when requested", "prepare to support",
                 "ready to support", "prepare for support",
-                "готовность", "готовьтесь", "будьте готовы", "по запросу",
-                "по вызову", "по команде", "ожидайте", "ждите",
+                "готовность", "готовьтесь", "будьте готовы", "будь готов",
+                "по запросу", "по вызову", "по команде", "ожидайте", "ждите",
                 "приготовьтесь", "приготовиться", "в готовности",
             ]
             _is_standby = any(kw in text_lower for kw in _standby_kw)
@@ -917,6 +1278,7 @@ class OrderParser:
             # Unit should create a fire request to CoC artillery, not attack themselves
             _request_fire_kw = [
                 "request fire", "call for fire", "request artillery", "call artillery",
+                "request smoke", "call smoke", "request mortar smoke",
                 "direct artillery", "need fire support", "need artillery",
                 "наведите артиллерию", "наведи артиллерию",
                 "наводите артиллерию", "наводи артиллерию",
@@ -927,6 +1289,7 @@ class OrderParser:
                 "наведите огонь", "наведи огонь",
                 "наводите огонь", "наводи огонь",
                 "запросите огонь", "запроси огонь",
+                "запросите дым", "запроси дым",
                 "вызовите огонь", "вызови огонь",
                 "артиллерию на цель", "миномёт на цель", "миномет на цель",
                 "артиллерию на противника", "миномёт на противника",
@@ -945,7 +1308,7 @@ class OrderParser:
             if _liaison_only:
                 _is_request_fire = False
             # Also detect "наведите ... на цель" / "наводите ... на цель" patterns
-            # even if "артиллерию/миномёт" is not right after
+            # even if "артиллерию/миномёт" is not right после
             if not _is_request_fire:
                 _navedi_pattern = any(kw in text_lower for kw in [
                     "наведите", "наведи", "наводите", "наводи",
@@ -984,8 +1347,11 @@ class OrderParser:
             ])
             _has_screen_mission = any(kw in text_lower for kw in [
                 "screen the flank", "screen left flank", "screen right flank",
+                "screen the left flank", "screen the right flank",
                 "screen forward", "screen this axis",
                 "прикрой фланг наблюдением", "прикрыть фланг наблюдением",
+                "прикрой левый фланг", "прикрой правый фланг",
+                "прикрой левый фланг наблюдением", "прикрой правый фланг наблюдением",
                 "экранируй", "screen and report",
             ])
             _has_breach_order = any(kw in text_lower for kw in [
@@ -1100,6 +1466,8 @@ class OrderParser:
                 engagement_rules = "fire_at_will"
             elif _is_coordination and coordination_unit_refs:
                 order_type = "support"
+            elif _has_screen_mission:
+                order_type = "observe"
             elif _has_flank_maneuver and _has_enemy_reference:
                 order_type = "attack"
                 maneuver_kind = "flank"
@@ -1114,8 +1482,13 @@ class OrderParser:
                 order_type = "attack"
             elif _has_air_mobility_order:
                 order_type = "move"
-            elif any(kw in text_lower for kw in ["move", "advance", "form ", "выдвигай", "двигай",
-                                                     "движен", "марш", "обход", "перестрои", "построение"]):
+            elif _has_screen_mission or any(kw in text_lower for kw in ["observe", "наблюда", "наблюден", "recon", "развед"]):
+                order_type = "observe"
+            elif (
+                re.search(r"\bmove\b", text_lower) is not None
+                or any(kw in text_lower for kw in ["advance", "form ", "выдвигай", "двигай",
+                                                   "движен", "марш", "обход", "перестрои", "построение"])
+            ):
                 order_type = "move"
                 if _has_follow_maneuver:
                     maneuver_kind = "follow"
@@ -1123,8 +1496,6 @@ class OrderParser:
                     maneuver_kind = "bounding"
             elif any(kw in text_lower for kw in ["defend", "hold", "оборон", "удержи"]):
                 order_type = "defend"
-            elif _has_screen_mission or any(kw in text_lower for kw in ["observe", "наблюда", "recon", "развед"]):
-                order_type = "observe"
             elif any(kw in text_lower for kw in ["disengage", "break contact", "разорвать контакт",
                                                     "разорви контакт", "выйти из боя", "выйди из боя",
                                                     "отцепи"]):
@@ -1145,9 +1516,11 @@ class OrderParser:
                 "nearest supply", "supply cache",
             ]):
                 order_type = "resupply"
+            elif _has_follow_maneuver:
+                order_type = "move"
+                maneuver_kind = "follow"
 
         # Extract snail/grid references with regex
-        import re
         location_refs = []
         # Match patterns like B8-2-4, C7-8-3, A1-1
         snail_pattern = re.compile(r'[A-Za-z]\d+(?:-\d){1,3}')
@@ -1222,7 +1595,7 @@ class OrderParser:
 
         map_object_patterns = [
             ("at_minefield", ["anti-tank minefield", "at minefield", "противотанковое минное поле", "пт минное поле"]),
-            ("minefield", ["minefield", "минное поле", "мины"]),
+            ("minefield", ["minefield", "mines", "минное поле", "минном поле", "минного поля", "минному полю", "мины"]),
             ("barbed_wire", ["barbed wire", "wire obstacle", "колючая проволока", "проволочное заграждение"]),
             ("concertina_wire", ["concertina", "razor wire", "спираль бруно", "егоза"]),
             ("roadblock", ["roadblock", "checkpoint", "блокпост", "дорожное заграждение"]),
@@ -1231,11 +1604,11 @@ class OrderParser:
             ("entrenchment", ["entrenchment", "trench", "foxhole", "окоп", "траншея", "укреплен"]),
             ("observation_tower", ["observation tower", "watchtower", "вышка", "наблюдательный пост"]),
             ("field_hospital", ["field hospital", "aid station", "медпункт", "полевой госпиталь"]),
+            ("smoke", ["smoke", "smokescreen", "дым", "дымовая завеса"]),
             ("command_post_structure", ["command post", "hq post", "командный пункт", "кп"]),
             ("supply_cache", ["supply cache", "ammo dump", "supply point", "склад", "пункт снабжения"]),
             ("bridge_structure", ["bridge", "crossing", "мост", "переправа"]),
             ("pillbox", ["pillbox", "bunker", "дот", "дзот"]),
-            ("smoke", ["smoke", "smokescreen", "дым", "дымовая завеса"]),
         ]
         for candidate_type, patterns in map_object_patterns:
             if any(pattern in text_lower for pattern in patterns):
@@ -1489,7 +1862,7 @@ class OrderParser:
                              and any(kw in text_lower for kw in [
                                  "get ready", "stand by", "standby", "be ready", "on request",
                                  "on call", "ready to support", "prepare to support",
-                                 "готовность", "готовьтесь", "будьте готовы", "по запросу",
+                                  "готовность", "готовьтесь", "будьте готовы", "будь готов", "по запросу",
                                  "по вызову", "по команде", "в готовности",
                                  "support", "поддержать", "поддерж", "целям", "передаст",
                              ]))
@@ -1509,6 +1882,7 @@ class OrderParser:
                 r'escort\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
                 # RU: "поддержать X", "целям от X", "передаст X"
                 r'поддержать\s+(?:огнём\s+)?(?:по\s+)?(?:целям[,\s]*)?(?:которые\s+)?(?:вам\s+)?(?:передаст|укажет|назначит)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'поддержать\s+огнём\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)?)',
                 r'поддержать\s+([A-Za-zА-Яа-яё][\w-]+)',
                 r'снабд(?:и|ить|ите)\s+([A-Za-zА-Яа-яё][\w-]+)',
                 r'подвез(?:и|ите)\s+(?:боеприпасы|бк|снабжение)?\s*(?:к|для)?\s*([A-Za-zА-Яа-яё][\w-]+)',
@@ -1541,7 +1915,12 @@ class OrderParser:
             for pat in merge_patterns:
                 match = _re_merge.search(pat, text, _re_merge.IGNORECASE)
                 if match:
-                    merge_target_ref = match.group(1).strip().rstrip(".,;!")
+                    raw_ref = match.group(1).strip().rstrip(".,;!")
+                    # Truncate at conjunctions: "C-squad and continue..." → "C-squad"
+                    raw_ref = _re_merge.split(
+                        r'\b(?:and|и|then|чтобы)\b', raw_ref, maxsplit=1, flags=_re_merge.IGNORECASE
+                    )[0].strip().rstrip(".,;!")
+                    merge_target_ref = raw_ref
                     break
 
         if order_type == "split":
@@ -1608,14 +1987,6 @@ class OrderParser:
                         coordination_unit_refs.append(candidate)
                         maneuver_kind = maneuver_kind or "follow"
 
-            # If the text refers to "the mortars"/"artillery" generically, keep that context
-            if any(kw in text_lower for kw in ["миномёт", "миномет", "mortar"]):
-                if not any("мином" in ref.lower() or "mortar" in ref.lower() for ref in coordination_unit_refs):
-                    coordination_unit_refs.append("Mortar")
-            elif any(kw in text_lower for kw in ["артиллер", "artillery"]):
-                if not any("артилл" in ref.lower() or "artillery" in ref.lower() for ref in coordination_unit_refs):
-                    coordination_unit_refs.append("Artillery")
-
             # Do not confuse the addressed unit with the coordination partner.
             addressed_refs = {ref.lower() for ref in target_unit_refs}
             coordination_unit_refs = [
@@ -1623,8 +1994,19 @@ class OrderParser:
                 if ref.lower() not in addressed_refs
             ]
 
+            # If the text refers to "the mortars"/"artillery" generically, ensure
+            # a canonical ref survives the addressed-refs filter above.
+            if any(kw in text_lower for kw in ["миномёт", "миномет", "mortar"]):
+                if not any("мином" in ref.lower() or "mortar" in ref.lower() for ref in coordination_unit_refs):
+                    coordination_unit_refs.append("Mortar")
+            elif any(kw in text_lower for kw in ["артиллер", "artillery"]):
+                if not any("артилл" in ref.lower() or "artillery" in ref.lower() for ref in coordination_unit_refs):
+                    coordination_unit_refs.append("Artillery")
+
+
             if any(kw in text_lower for kw in [
                 "прикры", "covering fire", "cover me", "cover your movement",
+                "covers your", "cover your", "covers my",
                 "огневое прикрытие", "прикроют", "поддержат огн",
             ]):
                 coordination_kind = "covering_fire"

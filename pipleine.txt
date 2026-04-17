@@ -1,0 +1,104 @@
+Player types radio message
+         │
+         ▼
+┌─────────────────────────────┐
+│  1. KEYWORD PARSER (~0ms)   │  Always runs first. Deterministic regex/keyword
+│     _fallback_parse()       │  matching. Extracts: classification, order_type,
+│                             │  locations, units, speed, formation, engagement.
+│     Returns: ParsedOrderData│  Confidence 0.15–0.90 based on extraction quality.
+│     + confidence score      │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  2. LOCAL TRIAGE (optional) │  If LOCAL_TRIAGE_ENABLED && local LLM available.
+│     ~200 token prompt       │  Asks ONLY: "command/ack/report/request/unclear?"
+│     2s timeout, 30s backoff │  + language "en/ru".
+│                             │
+│     Three outcomes:         │  No doctrine, no context, no few-shot.
+│     a) Agrees with keyword  │  → boost confidence (+0.10)
+│        on non-command       │
+│     b) Disagrees            │  → reduce confidence → force full cloud model
+│     c) Unavailable          │  → skip, use keyword confidence as-is
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  3. ROUTING DECISION        │
+│                             │
+│  Non-command + conf ≥ 0.95  │──→ SKIP LLM entirely, return keyword result
+│                             │
+│  Command + conf ≥ 0.70      │──→ Cloud NANO model (gpt-5-nano / gpt-4o-mini)
+│                             │
+│  Command + conf < 0.70      │──→ Cloud FULL model (gpt-5.4 / gpt-4.1)
+│  or unclear                 │
+└──────────┬──────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  4. CONTEXT BUILDING (retrieval_context.py)                 │
+│     profile="cloud"                                         │
+│                                                             │
+│  ┌─ Doctrine (RAG-like) ─────────────────────────────────┐  │
+│  │ • Infer topics from order text (offense/fires/recon…) │  │
+│  │ • Extract matching topic sections from FIELD_MANUAL   │  │
+│  │ • BM25-like scoring of passages vs query tokens       │  │
+│  │ • Top 6 passages, ≤2000 chars                         │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌─ Unit Roster ─────────────────────────────────────────┐  │
+│  │ • Rank units by relevance to order (target refs,      │  │
+│  │   coordination refs, unit type match). Top 18.        │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌─ Section Selection (9 sections) ──────────────────────┐  │
+│  │ • terrain (6 lines), contacts (8), friendly_status (8)│  │
+│  │   objectives (4), environment (3), orders (8),        │  │
+│  │   radio (5), reports (5), map_objects (8)             │  │
+│  │ • Each section: score lines by query-token overlap,   │  │
+│  │   order-family keywords, recency. Pick top N.         │  │
+│  │ • Empty sections suppressed entirely.                 │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌─ State Packet (user message supplement) ──────────────┐  │
+│  │ • task frame: class/lang/order_hint/targets/locations │  │
+│  │ • compact unit atoms (4 units, 1-line each)           │  │
+│  │ • compact section summaries (3 lines each, 6 sections)│  │
+│  │ • history digest (last order/radio/report)            │  │
+│  │ • continuity hints ("same target"→resolved ref)       │  │
+│  │ • height tops if height ref in text                   │  │
+│  │ • Truncated to ≤2400 chars                            │  │
+│  └───────────────────────────────────────────────────────┘  │
+└──────────┬──────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│  5. CLOUD LLM CALL                                          │
+│                                                             │
+│  SYSTEM message (~3000-5000 tokens):                        │
+│  • Static parsing instructions (classification, extraction) │
+│  • Doctrine excerpt (topic-scoped, ≤2000 chars)             │
+│  • Grid reference format explanation                        │
+│  • Unit roster (up to 18 units with stats)                  │
+│  • 9 context sections (terrain, contacts, status…)          │
+│  • Russian radio conventions                                │
+│                                                             │
+│  USER message (~500-1500 tokens):                           │
+│  • The actual radio message text                            │
+│  • State packet (compact machine-readable supplement)       │
+│  • Continuity hints (resolved "same target" etc.)           │
+│  • 1-4 few-shot examples (matched by order type + lang)     │
+│                                                             │
+│  Response: JSON → Pydantic validation → ParsedOrderData     │
+└──────────┬──────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────┐
+│  6. RECONCILIATION          │  Merge LLM result with keyword hints:
+│     _reconcile_llm_result() │  • Strong command frame → prevent LLM downgrade
+│                             │  • Fire-request signals → preserve order_type
+│                             │  • If nano returns "unclear" → escalate to full
+└──────────┬──────────────────┘
+           │
+           ▼
+       ParsedOrderData → IntentInterpreter (deterministic) → LocationResolver → OrderService

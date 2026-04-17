@@ -883,7 +883,7 @@ class OrderService:
                                        "flank", "assault", "withdraw", "retreat", "regroup")
                     # Defense/observe/halt orders — report position only
                     _static_types = ("defend", "observe", "halt", "regroup")
-                    coord_refs = (task or {}).get("coordination_unit_refs") or []
+                    coord_refs = [r for r in ((task or {}).get("coordination_unit_refs") or []) if r]
                     coord_kind = (task or {}).get("coordination_kind")
                     maneuver_kind = (task or {}).get("maneuver_kind")
                     maneuver_side = (task or {}).get("maneuver_side")
@@ -1454,7 +1454,7 @@ class OrderService:
                 task["smoke_duration_ticks"] = 3
                 task["salvos_remaining"] = 1
         if getattr(parsed, "coordination_unit_refs", None):
-            task["coordination_unit_refs"] = list(parsed.coordination_unit_refs)
+            task["coordination_unit_refs"] = [r for r in parsed.coordination_unit_refs if r]
         if getattr(parsed, "coordination_kind", None):
             task["coordination_kind"] = parsed.coordination_kind
         if getattr(parsed, "maneuver_kind", None):
