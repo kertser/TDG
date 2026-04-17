@@ -1,0 +1,70 @@
+TDG Local LLM Benchmark Results — 2026-04-17
+================================================
+
+Hardware: Intel i7-2600 @ 3.40GHz (Sandy Bridge, SSE4 only, no AVX2)
+Runtime: llama.cpp native Windows (b8829), 6 threads
+Flags: --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --cache-reuse 256
+
+BENCHMARK RESULTS (Windows dev machine — SSE4 only):
+┌──────────────────────────────┬──────┬────────┬───────┬───────┬────────┐
+│ Model                        │ Size │ Cached │ Tok/s │ JSON% │ Class% │
+├──────────────────────────────┼──────┼────────┼───────┼───────┼────────┤
+│ Gemma-3-1B-it Q4_K_M ★BEST  │ 769M │ 5-9s   │ 7-9   │ 100%  │  80%   │
+│ Llama-3.2-1B Q4_K_M         │ 770M │ 5-8s   │ 6-10  │ 100%  │  60%   │
+│ Phi-3.5-mini Q4_K_M         │2282M │ ~20s   │  2.9  │ 100%  │ 100%   │
+│ Qwen2.5-3B Q4_K_M           │2007M │ ~15s   │  3.3  │   0%  │   0%   │
+└──────────────────────────────┴──────┴────────┴───────┴───────┴────────┘
+
+★ WINNER: Gemma 3 1B Instruct Q4_K_M
+  - 769MB, 32K context, best accuracy of all 1B models
+  - 100% valid JSON, 80% correct classification (4/5)
+  - Prompt caching: 1st call ~34s (cold), subsequent ~6-9s (cached system prompt)
+  - Correctly classifies EN/RU commands, acks, status reports
+  - Only miss: complex multi-verb order ("Advance + Eliminate") → move instead of attack
+
+Gemma 3 1B detailed results (5 tests, SSE4 CPU, flash-attn + prompt cache):
+  EN command "move to B8-2-4 fast" → command/move   ✓ (34s cold, 8s cached)
+  RU command "атакуйте в E5-3"    → command/attack  ✓ (8s cached)
+  EN ack "Roger, moving out"      → acknowledgment  ✓ (6s cached)
+  RU report "На позиции"          → status_report   ✓ (6s cached)
+  Complex multi-verb              → command/move     ✗ (should be attack, 9s cached)
+
+PROMPT CACHING IMPACT:
+  The system prompt (tactical doctrine, unit roster, examples) is ~600-1000 tokens.
+  With --cache-reuse 256, llama.cpp caches the KV state for the shared prefix.
+  First request: full prompt processing (~34s on SSE4)
+  Subsequent requests: skip cached prefix → only process user message (~6-9s)
+  Speedup: ~4-5× on repeated calls with same system prompt.
+  On AVX2 Linux server: expect ~1-2s cached responses.
+
+CONFIGURATION:
+  llama-server flags:
+    --model models/model.gguf (Gemma 3 1B Q4_K_M)
+    --ctx-size 16384
+    --threads 6 --threads-batch 6
+    --flash-attn on
+    --cache-type-k q4_0 --cache-type-v q4_0
+    --cache-reuse 256
+    --parallel 1
+    --mlock
+
+  Memory usage (16K context, Q4 KV cache):
+    Model weights: ~769 MB
+    KV cache:      ~128 MB (Q4_0, 16K tokens)
+    Compute:       ~130 MB
+    Total:         ~1.0 GB
+
+EXPECTED LINUX SERVER PERFORMANCE (AVX2/AVX-512):
+┌──────────────────────────────┬──────┬────────┬───────┬────────┐
+│ Model                        │ Size │ Cached │~Tok/s │ Ctx    │
+├──────────────────────────────┼──────┼────────┼───────┼────────┤
+│ Gemma-3-1B Q4_K_M           │ 769M │  1-2s  │ 20-35 │  32K   │
+│ Llama-3.2-1B Q4_K_M         │ 770M │  1-2s  │ 20-35 │ 128K   │
+│ Phi-3.5-mini Q4_K_M         │2.2GB │  3-5s  │ 10-15 │ 128K   │
+└──────────────────────────────┴──────┴────────┴───────┴────────┘
+
+NOTE ON OPENVINO:
+  OpenVINO backend for llama.cpp targets Intel NPU/iGPU, not useful for
+  Sandy Bridge CPU-only. The standard CPU backend with flash attention
+  and Q4 KV cache is the optimal configuration for older Intel CPUs.
+

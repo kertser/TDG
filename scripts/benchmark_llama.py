@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from openai import OpenAI
 
-URL = os.environ.get("LOCAL_MODEL_URL", "http://localhost:8082/v1")
+URL = os.environ.get("LOCAL_MODEL_URL", "http://localhost:8081/v1")
 MODEL = os.environ.get("LOCAL_MODEL_NAME", "local")
 client = OpenAI(base_url=URL, api_key="local")
 

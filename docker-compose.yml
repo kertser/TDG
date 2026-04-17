@@ -29,43 +29,58 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Local LLM — Ollama (OpenAI-compatible API) ───────────────────
-  # Auto-detects CPU features (AVX2/AVX-512), manages models internally.
-  # Serves OpenAI-compatible API at http://localhost:11434/v1
+  # ── Local LLM — llama.cpp server (OpenAI-compatible API) ─────────
+  # CPU-only inference with flash attention and prompt caching.
+  # The prompt cache dramatically speeds up repeated system prompts
+  # (tactical doctrine, unit roster, etc.) — first call is slow,
+  # subsequent calls reuse cached KV state.
   #
-  # After starting:
-  #   docker exec tdg-ollama ollama pull llama3.2:1b-instruct-q4_K_M
+  # Model file must exist at ./models/model.gguf
+  #   Download: .\scripts\download_model.ps1
+  #   Default: Gemma 3 1B Instruct Q4_K_M (~800MB)
+  #
+  # Dev (Windows native, faster — avoids WSL2 SSE4 bottleneck):
+  #   .\tools\llama-cpp\llama-server.exe --model models\model.gguf --alias local --host 127.0.0.1 --port 8081 --ctx-size 16384 --threads 6 --threads-batch 6 --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --cache-reuse 256 --mlock
   #
   # Backend .env config:
-  #   LOCAL_MODEL_URL=http://localhost:11434/v1
-  #   LOCAL_MODEL_NAME=llama3.2:1b-instruct-q4_K_M
-  #
-  # Recommended models:
-  #   llama3.2:1b-instruct-q4_K_M — 770MB, 128K ctx, fastest, 4-bit quantized
-  #   llama3.2:1b                 — 1.3GB, 128K ctx, 8-bit (default tag)
-  #   llama3.2:3b                 — 2GB, 128K ctx, better accuracy
-  ollama:
-    image: ollama/ollama:latest
-    container_name: tdg-ollama
-    ports:
-      - "11434:11434"
+  #   LOCAL_MODEL_URL=http://localhost:8081/v1
+  #   LOCAL_MODEL_NAME=local
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: tdg-llm
+    profiles: ["llm"]
     volumes:
-      - ollama_data:/root/.ollama
+      - ./models:/models:ro
+    ports:
+      - "8081:8080"
+    cap_add:
+      - IPC_LOCK
+    shm_size: "2g"
     environment:
-      OLLAMA_NUM_PARALLEL: "1"
-      OLLAMA_MAX_LOADED_MODELS: "1"
-      # For Linux production server: raise OLLAMA_CONTEXT_LENGTH back to 32768 or higher
-      OLLAMA_CONTEXT_LENGTH: "8192"
-      OLLAMA_FLASH_ATTENTION: "true"
-      OLLAMA_KV_CACHE_TYPE: "q4_0"
+      OMP_NUM_THREADS: "6"
+    command: >
+      --model /models/model.gguf
+      --alias local
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 16384
+      --threads 6
+      --threads-batch 6
+      --parallel 1
+      --batch-size 512
+      --ubatch-size 256
+      --flash-attn on
+      --cache-type-k q4_0
+      --cache-type-v q4_0
+      --cache-reuse 256
+      --mlock
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 30s
+      start_period: 60s
 
 volumes:
   pgdata:
-  ollama_data:
