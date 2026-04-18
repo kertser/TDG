@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     LOCAL_MODEL_URL: str = ""                     # e.g. "http://localhost:8080/v1"
     LOCAL_MODEL_NAME: str = "local"               # model name to send in API requests
     LOCAL_TRIAGE_ENABLED: bool = True             # use local LLM for cheap classification
-    LOCAL_TRIAGE_TIMEOUT: float = 2.0             # aggressive timeout — skip if slow
+    LOCAL_TRIAGE_TIMEOUT: float = 5.0             # enough time for small local models to answer
 
     # ── LLM Parsing Mode ────────────────────────────────
     # Controls how radio messages are routed through the parsing pipeline:

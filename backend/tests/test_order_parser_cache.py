@@ -1,5 +1,7 @@
+import asyncio
+
 from backend.schemas.order import DetectedLanguage, MessageClassification, OrderType, ParsedOrderData
-from backend.services.order_parser import OrderParser
+from backend.services.order_parser import OrderParser, PromptBundle
 
 
 def _sample_units():
@@ -139,3 +141,79 @@ def test_prompt_result_cache_returns_detached_copy():
     cached_again = parser._get_cached_prompt_result("abc")
     assert cached_again is not None
     assert cached_again.target_unit_refs == ["B-squad"]
+
+
+def test_parsed_order_data_coerces_null_list_fields_to_empty_lists():
+    parsed = ParsedOrderData.model_validate(
+        {
+            "classification": "command",
+            "language": "ru",
+            "target_unit_refs": None,
+            "order_type": "move",
+            "location_refs": None,
+            "coordination_unit_refs": None,
+            "status_request_focus": None,
+            "ambiguities": None,
+            "confidence": 0.91,
+        }
+    )
+
+    assert parsed.target_unit_refs == []
+    assert parsed.location_refs == []
+    assert parsed.coordination_unit_refs == []
+    assert parsed.status_request_focus == []
+    assert parsed.ambiguities == []
+
+
+def test_call_llm_stops_retrying_nano_after_timeout(monkeypatch):
+    parser = OrderParser()
+    keyword_hint = ParsedOrderData(
+        classification=MessageClassification.command,
+        language=DetectedLanguage.ru,
+        target_unit_refs=["Bravo"],
+        order_type=OrderType.request_fire,
+        confidence=0.86,
+    )
+
+    monkeypatch.setattr(
+        parser,
+        "_build_prompt_bundle",
+        lambda **kwargs: PromptBundle(
+            system="system",
+            user="user",
+            is_local=False,
+            retrieved=None,
+            cache_key="timeout-test",
+        ),
+    )
+
+    class _DummyCompletions:
+        def __init__(self):
+            self.calls = 0
+
+        async def create(self, **kwargs):
+            self.calls += 1
+            raise Exception("Request timed out.")
+
+    completions = _DummyCompletions()
+    dummy_client = type(
+        "DummyClient",
+        (),
+        {"chat": type("DummyChat", (), {"completions": completions})()},
+    )()
+
+    result = asyncio.run(
+        parser._call_llm(
+            original_text="Bravo, оставайтесь на месте и наведите артиллерию.",
+            units=_sample_units(),
+            grid_info=None,
+            game_time="2026-04-17T12:00:00Z",
+            client=dummy_client,
+            model="gpt-5-nano",
+            issuer_side="blue",
+            keyword_hint=keyword_hint,
+        )
+    )
+
+    assert result is None
+    assert completions.calls == 1

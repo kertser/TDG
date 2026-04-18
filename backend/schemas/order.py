@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Enums ────────────────────────────────────────────────────────
@@ -195,6 +195,21 @@ class ParsedOrderData(BaseModel):
         default_factory=list,
         description="List of unclear/ambiguous elements in the order",
     )
+
+    @field_validator(
+        "target_unit_refs",
+        "location_refs",
+        "coordination_unit_refs",
+        "status_request_focus",
+        "ambiguities",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_null_list_fields(cls, value):
+        """LLMs occasionally emit explicit null for list fields; treat that as empty."""
+        if value is None:
+            return []
+        return value
 
 
 # ── Tactical intent (IntentInterpreter output) ──────────────────

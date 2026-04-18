@@ -88,6 +88,19 @@ def _fixup_llm_json(d: dict) -> None:
         ]
 
 
+def _is_timeout_error(err: Exception | str) -> bool:
+    """Best-effort timeout detection across OpenAI/httpx/client wrappers."""
+    text = str(err).lower()
+    timeout_markers = (
+        "request timed out",
+        "timed out",
+        "timeout",
+        "read timeout",
+        "connect timeout",
+    )
+    return any(marker in text for marker in timeout_markers)
+
+
 def _repair_json(text: str) -> str:
     """
     Attempt to repair truncated / malformed JSON from local models.
@@ -1058,6 +1071,15 @@ class OrderParser:
             except Exception as e:
                 last_error = str(e)
                 logger.warning("OrderParser[%s] attempt %d: %s", model, attempt + 1, last_error)
+                # For cheap nano-tier parsing, repeated timeouts are worse than
+                # falling back to the deterministic keyword parser immediately.
+                if _is_timeout_error(e) and model == settings.OPENAI_MODEL_NANO:
+                    logger.warning(
+                        "OrderParser[%s]: timeout on attempt %d — bailing out to keyword fallback",
+                        model,
+                        attempt + 1,
+                    )
+                    break
                 if "Empty LLM response" in last_error:
                     # finish_reason=length → reasoning model ran out of token budget
                     # Remove cap so next attempt gets unlimited tokens

@@ -404,11 +404,15 @@ class OrderService:
         # ── Resolve "contact_target" refs from known enemy contacts ──
         # "на цель" / "at the target" → nearest known enemy contact
         has_contact_target = any(loc.ref_type == "contact_target" for loc in resolved)
+        needs_request_fire_target = (
+            parsed.order_type is not None
+            and parsed.order_type.value == "request_fire"
+            and not any(loc.lat is not None and loc.lon is not None for loc in resolved)
+        )
         best_contact_uid = None
-        if has_contact_target and unit_pos:
+        if (has_contact_target or needs_request_fire_target) and unit_pos:
             try:
                 from backend.models.contact import Contact
-                from geoalchemy2.shape import to_shape as _to_shape
                 from sqlalchemy import select as _select
 
                 contacts_result = await db.execute(
@@ -419,42 +423,43 @@ class OrderService:
                     )
                 )
                 nearby_contacts = list(contacts_result.scalars().all())
-                best_dist = float('inf')
-                best_contact_lat = None
-                best_contact_lon = None
-                for c in nearby_contacts:
-                    if c.location_estimate is None:
-                        continue
-                    try:
-                        cpt = _to_shape(c.location_estimate)
-                        c_lat, c_lon = cpt.y, cpt.x
-                    except Exception:
-                        continue
-                    dlat = (c_lat - unit_pos[0]) * 111320.0
-                    dlon = (c_lon - unit_pos[1]) * 74000.0
-                    dist = (dlat**2 + dlon**2) ** 0.5
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_contact_lat = c_lat
-                        best_contact_lon = c_lon
-                        best_contact_uid = str(c.target_unit_id) if c.target_unit_id else None
+                best_contact = self._find_nearest_contact_target(
+                    unit_pos[0],
+                    unit_pos[1],
+                    nearby_contacts,
+                )
 
-                if best_contact_lat is not None:
-                    # Update the contact_target resolved location with actual coordinates
-                    for i, loc in enumerate(resolved):
-                        if loc.ref_type == "contact_target":
-                            resolved[i] = ResolvedLocation(
-                                source_text=loc.source_text,
+                if best_contact is not None:
+                    best_contact_lat = best_contact["lat"]
+                    best_contact_lon = best_contact["lon"]
+                    best_contact_uid = best_contact["target_unit_id"]
+                    if has_contact_target:
+                        # Update the contact_target resolved location with actual coordinates
+                        for i, loc in enumerate(resolved):
+                            if loc.ref_type == "contact_target":
+                                resolved[i] = ResolvedLocation(
+                                    source_text=loc.source_text,
+                                    ref_type="contact_target",
+                                    normalized_ref=f"contact@{best_contact_lat:.6f},{best_contact_lon:.6f}",
+                                    lat=best_contact_lat,
+                                    lon=best_contact_lon,
+                                    confidence=0.7,
+                                )
+                                break
+                    elif needs_request_fire_target:
+                        resolved.append(
+                            ResolvedLocation(
+                                source_text="current contact",
                                 ref_type="contact_target",
                                 normalized_ref=f"contact@{best_contact_lat:.6f},{best_contact_lon:.6f}",
                                 lat=best_contact_lat,
                                 lon=best_contact_lon,
                                 confidence=0.7,
                             )
-                            break
+                        )
                     logger.info(
                         "Resolved contact_target to (%f, %f) dist=%.0fm",
-                        best_contact_lat, best_contact_lon, best_dist,
+                        best_contact_lat, best_contact_lon, best_contact["distance_m"],
                     )
             except Exception as e:
                 logger.warning("Failed to resolve contact_target: %s", e)
@@ -1457,6 +1462,8 @@ class OrderService:
             task["coordination_unit_refs"] = [r for r in parsed.coordination_unit_refs if r]
         if getattr(parsed, "coordination_kind", None):
             task["coordination_kind"] = parsed.coordination_kind
+        elif parsed.order_type.value == "request_fire":
+            task["coordination_kind"] = "fire_support"
         if getattr(parsed, "maneuver_kind", None):
             task["maneuver_kind"] = parsed.maneuver_kind
         if getattr(parsed, "maneuver_side", None):
@@ -1564,6 +1571,43 @@ class OrderService:
             cand_lon = target_lon + flank_dist_m * math.sin(flank_bearing) / _M_PER_DEG_LON_48
             if best is None:
                 best = (cand_lat, cand_lon)
+        return best
+
+    @staticmethod
+    def _find_nearest_contact_target(
+        unit_lat: float,
+        unit_lon: float,
+        contacts: list[Any],
+    ) -> dict[str, Any] | None:
+        """Pick the nearest known contact for context-driven attack/fire orders."""
+        best: dict[str, Any] | None = None
+        best_dist = float("inf")
+
+        for contact in contacts:
+            geom = getattr(contact, "location_estimate", None)
+            if geom is None:
+                continue
+            try:
+                if hasattr(geom, "x") and hasattr(geom, "y"):
+                    c_lon, c_lat = geom.x, geom.y
+                else:
+                    cpt = to_shape(geom)
+                    c_lat, c_lon = cpt.y, cpt.x
+            except Exception:
+                continue
+
+            dlat = (c_lat - unit_lat) * _M_PER_DEG_LAT
+            dlon = (c_lon - unit_lon) * _M_PER_DEG_LON_48
+            dist = math.sqrt(dlat ** 2 + dlon ** 2)
+            if dist < best_dist:
+                best_dist = dist
+                best = {
+                    "lat": c_lat,
+                    "lon": c_lon,
+                    "distance_m": dist,
+                    "target_unit_id": str(contact.target_unit_id) if getattr(contact, "target_unit_id", None) else None,
+                }
+
         return best
 
     async def _append_coordination_partner_responses(

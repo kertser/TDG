@@ -462,3 +462,47 @@ def test_build_engine_task_lay_mines_sets_geometry_and_progress():
     assert task["mine_type"] == "at_minefield"
     assert task["build_progress"] == 0.0
     assert task["geometry"]["type"] == "Polygon"
+
+
+def test_find_nearest_contact_target_picks_closest_enemy():
+    contacts = [
+        SimpleNamespace(
+            location_estimate=SimpleNamespace(x=24.8200, y=48.2200),
+            target_unit_id=uuid.uuid4(),
+        ),
+        SimpleNamespace(
+            location_estimate=SimpleNamespace(x=24.8010, y=48.2010),
+            target_unit_id=uuid.uuid4(),
+        ),
+    ]
+
+    best = OrderService._find_nearest_contact_target(48.2000, 24.8000, contacts)
+
+    assert best is not None
+    assert round(best["lat"], 4) == 48.2010
+    assert round(best["lon"], 4) == 24.8010
+    assert best["distance_m"] > 0
+    assert best["target_unit_id"] == str(contacts[1].target_unit_id)
+
+
+def test_build_engine_task_request_fire_defaults_to_fire_support_coordination():
+    parsed = ParsedOrderData(
+        classification=MessageClassification.command,
+        language=DetectedLanguage.ru,
+        target_unit_refs=["Bravo"],
+        order_type=OrderType.request_fire,
+        location_refs=[],
+        coordination_unit_refs=["Artillery"],
+    )
+
+    task = OrderService()._build_engine_task(
+        order=type("OrderStub", (), {"id": "00000000-0000-0000-0000-000000000023"})(),
+        parsed=parsed,
+        resolved_locations=[],
+        intent=None,
+        grid_service=None,
+    )
+
+    assert task["type"] == "request_fire"
+    assert task["coordination_unit_refs"] == ["Artillery"]
+    assert task["coordination_kind"] == "fire_support"
