@@ -2,6 +2,7 @@ import asyncio
 
 from backend.schemas.order import DetectedLanguage, MessageClassification, OrderType, ParsedOrderData
 from backend.services.order_parser import OrderParser, PromptBundle
+from backend.services.local_triage import TriageResult
 
 
 def _sample_units():
@@ -217,3 +218,98 @@ def test_call_llm_stops_retrying_nano_after_timeout(monkeypatch):
 
     assert result is None
     assert completions.calls == 1
+
+
+def test_parse_fast_paths_strong_keyword_move_without_triage_or_cloud(monkeypatch):
+    parser = OrderParser()
+
+    move_parse = ParsedOrderData(
+        classification=MessageClassification.command,
+        language=DetectedLanguage.ru,
+        order_type=OrderType.move,
+        location_refs=[
+            {
+                "source_text": "F6-4-7",
+                "ref_type": "snail",
+                "normalized": "F6-4-7",
+            }
+        ],
+        speed="fast",
+        confidence=0.85,
+    )
+
+    monkeypatch.setattr(parser, "_fallback_parse", lambda text: move_parse)
+    monkeypatch.setattr("backend.services.order_parser.settings.OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("backend.services.order_parser.settings.LLM_PARSING_MODE", "llm_first")
+
+    async def _unexpected_triage(_text):
+        raise AssertionError("Local triage should not run for a strong simple move command")
+
+    async def _unexpected_llm(*args, **kwargs):
+        raise AssertionError("Cloud LLM should not run for a strong simple move command")
+
+    monkeypatch.setattr("backend.services.order_parser.local_triage.classify", _unexpected_triage)
+    monkeypatch.setattr(parser, "_call_llm", _unexpected_llm)
+
+    result = asyncio.run(
+        parser.parse(
+            original_text="Быстро двигайтесь в квадрат F6-4-7",
+            units=_sample_units(),
+            grid_info=None,
+            game_time="2026-04-17T12:00:00Z",
+            issuer_side="blue",
+        )
+    )
+
+    assert result.order_type == OrderType.move
+    assert result.speed.value == "fast"
+    assert result.location_refs[0].normalized == "F6-4-7"
+
+
+def test_confident_command_skips_local_triage_even_when_llm_still_needed(monkeypatch):
+    parser = OrderParser()
+
+    attack_parse = ParsedOrderData(
+        classification=MessageClassification.command,
+        language=DetectedLanguage.ru,
+        order_type=OrderType.attack,
+        confidence=0.82,
+    )
+
+    monkeypatch.setattr(parser, "_fallback_parse", lambda text: attack_parse)
+    monkeypatch.setattr("backend.services.order_parser.settings.OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("backend.services.order_parser.settings.LLM_PARSING_MODE", "llm_first")
+    monkeypatch.setattr("backend.services.order_parser.settings.OPENAI_MODEL_NANO", "gpt-5-nano")
+    monkeypatch.setattr("backend.services.order_parser.settings.OPENAI_MODEL", "gpt-5.4-mini")
+
+    triage_calls = {"count": 0}
+    llm_calls = {"count": 0}
+
+    async def _triage(_text):
+        triage_calls["count"] += 1
+        return TriageResult(
+            classification=MessageClassification.command,
+            language=DetectedLanguage.ru,
+            confidence=0.7,
+        )
+
+    async def _llm(*args, **kwargs):
+        llm_calls["count"] += 1
+        return attack_parse
+
+    monkeypatch.setattr("backend.services.order_parser.local_triage.classify", _triage)
+    monkeypatch.setattr(parser, "_call_llm", _llm)
+
+    result = asyncio.run(
+        parser.parse(
+            original_text="Атакуйте противника",
+            units=_sample_units(),
+            grid_info=None,
+            game_time="2026-04-17T12:00:00Z",
+            issuer_side="blue",
+        )
+    )
+
+    assert result.order_type == OrderType.attack
+    assert triage_calls["count"] == 0
+    assert llm_calls["count"] == 1

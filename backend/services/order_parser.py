@@ -26,7 +26,7 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from backend.config import settings
-from backend.schemas.order import ParsedOrderData, MessageClassification, DetectedLanguage
+from backend.schemas.order import ParsedOrderData, MessageClassification, DetectedLanguage, OrderType
 from backend.prompts.order_parser import (
     build_system_prompt,
     build_user_message,
@@ -34,6 +34,7 @@ from backend.prompts.order_parser import (
     build_grid_info,
     build_optimized_local_prompt,
 )
+from backend.services.order_phrasebook import get_order_parser_lexicon
 from backend.services.retrieval_context import build_order_parser_context
 from backend.services.local_triage import local_triage
 
@@ -426,6 +427,42 @@ class OrderParser:
 
         return llm_result
 
+    @staticmethod
+    def _can_fast_path_keyword_parse(parsed: ParsedOrderData) -> bool:
+        """
+        Allow a narrow, deterministic fast-path for trivial movement orders.
+
+        These are already parsed correctly by the keyword parser and do not
+        benefit much from a cloud round-trip, so skipping LLM avoids tens of
+        seconds of latency on obvious move commands.
+        """
+        if parsed.classification != MessageClassification.command:
+            return False
+        if parsed.confidence < 0.80:
+            return False
+        if parsed.order_type != OrderType.move:
+            return False
+        if not parsed.location_refs:
+            return False
+        if parsed.coordination_unit_refs:
+            return False
+        if parsed.merge_target_ref or parsed.split_ratio is not None:
+            return False
+        if parsed.map_object_type:
+            return False
+        return True
+
+    @staticmethod
+    def _should_run_local_triage(keyword_result: ParsedOrderData) -> bool:
+        """
+        Local triage is useful when classification is uncertain, but it adds
+        avoidable latency on already-obvious commands.
+        """
+        return not (
+            keyword_result.classification == MessageClassification.command
+            and keyword_result.confidence >= 0.75
+        )
+
     def _make_prompt_cache_key(self, *, model: str, system: str, user: str) -> str:
         digest = sha256()
         digest.update(model.encode("utf-8"))
@@ -658,6 +695,14 @@ class OrderParser:
             )
             return keyword_result
 
+        if self._can_fast_path_keyword_parse(keyword_result):
+            logger.info(
+                "OrderParser: strong keyword parse for %s (conf=%.2f) — skipping LLM",
+                keyword_result.order_type.value if keyword_result.order_type else "unknown",
+                keyword_result.confidence,
+            )
+            return keyword_result
+
         # ── Step 4: No API key → try local model → fall back to keyword ──
         if not settings.OPENAI_API_KEY:
             local_client = self._get_local_client()
@@ -692,7 +737,16 @@ class OrderParser:
             kw_class = keyword_result.classification
 
             # ── 5a: Run local triage to get a cheap classification hint ──
-            triage_result = await local_triage.classify(original_text)
+            triage_result = None
+            if self._should_run_local_triage(keyword_result):
+                triage_result = await local_triage.classify(original_text)
+            else:
+                logger.info(
+                    "OrderParser[triage]: skipping local triage for confident command "
+                    "class=%s conf=%.2f",
+                    kw_class.value,
+                    kw_conf,
+                )
             if triage_result is not None:
                 # Merge triage into classification decision:
                 # If keyword and triage AGREE on non-command → higher confidence to skip LLM
@@ -1101,85 +1155,22 @@ class OrderParser:
         has_cyrillic = any('\u0400' <= c <= '\u04ff' for c in text)
         lang = DetectedLanguage.ru if has_cyrillic else DetectedLanguage.en
 
+        lexicon = get_order_parser_lexicon()
+        classification_lexicon = lexicon["classification"]
+        question_lexicon = lexicon["question_markers"]
+        order_detection_lexicon = lexicon["order_detection"]
+        speed_lexicon = lexicon["speed"]
+        formation_lexicon = lexicon["formation"]
+        engagement_lexicon = lexicon["engagement"]
+        location_lexicon = lexicon["location"]
+
         # Classification keywords
-        command_kw_en = ["move", "advance", "attack", "defend", "hold", "observe", "withdraw",
-                         "retreat", "support", "halt", "stop", "flank", "engage", "fire at",
-                         "fire on", "fire mission", "shoot", "disengage", "break contact",
-                         "hit any", "hit enemy", "engage any", "open fire", "suppress",
-                         "capture", "seize", "take", "occupy",
-                         "eliminate", "destroy", "neutralize",
-                         "call for fire", "request fire", "direct artillery", "call artillery",
-                         "request artillery", "breach", "clear a lane", "clear lane",
-                         "split", "split off", "detach", "merge with", "join up with", "combine with",
-                         "lay mines", "mine the", "emplace mines", "deploy bridge",
-                         "bridge the", "construct", "build", "dig in", "entrench",
-                         "fortify", "establish command post", "set up aid station",
-                         "resupply", "re-supply", "rearm", "reload", "replenish",
-                         "put smoke", "lay smoke", "deploy smoke", "smoke the", "set smoke",
-                         "airlift", "insert", "extract", "landing zone", "lz",
-                         "screen", "recon"]
-        command_kw_ru = ["выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда", "отход",
-                         "отступ", "поддерж", "стой", "стоп", "обход", "огонь по", "огонь на",
-                         "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
-                         "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение",
-                         "поразить", "бей по", "удар по", "подавить", "подавляющ",
-                         "захвати", "захват", "овладе", "занять", "займ",
-                         "продолжай", "будьте готовы", "координируй", "организуй", "прикрой",
-                         "откройте огонь", "открывай", "выдвину", "приказываю",
-                         "наведите", "наведи", "наводите", "наводи",
-                         "вызовите огонь", "вызови огонь", "запросите огонь", "запроси огонь",
-                         "артиллерию на", "миномёт на", "минометн на",
-                         "раздел", "выдел", "отдели", "слей", "объедин", "соединись",
-                         "проделай проход", "проделайте проход", "разминир", "разминируй",
-                         "сними заграждение", "минируй", "заминируй", "ставь мины",
-                         "установи мины", "навести мост", "разверни мост", "оборудуй",
-                         "окопай", "укрепи", "построй", "возведи", "подвези",
-                         "поставь дым", "поставьте дым", "накрой дымом", "прикрой дымом",
-                          "снабди", "эвакуируй", "десант", "высад", "погруз", "выгруз",
-                         "свяжись", "свяжитесь", "следуй за", "следовать за"]
-        status_req_kw = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
-        status_req_focus_map = {
-            "nearby_friendlies": [
-                "кто рядом", "какие подразделения рядом", "какие части рядом",
-                "какие силы рядом", "свои рядом", "friendly nearby", "friendlies nearby",
-                "who is near you", "who's near you", "units near you", "nearby units",
-            ],
-            "terrain": [
-                "местност", "опиши местност", "terrain", "ground around you",
-                "describe terrain", "what terrain", "какая местность", "что за местность",
-                "cover around you", "укрыти", "ground nearby",
-            ],
-            "enemy": [
-                "противник", "enemy", "contact", "контакт", "кого видишь",
-                "видишь противника", "enemy seen", "any enemy", "spot anything",
-            ],
-            "position": [
-                "где ты", "где вы", "твоя позиция", "ваша позиция", "position",
-                "where are you", "your location", "your grid", "координаты",
-            ],
-            "task": [
-                "какая задача", "что делаешь", "что делаете", "чем занят",
-                "current task", "what are you doing", "mission now", "orders now",
-            ],
-            "condition": [
-                "состояни", "потери", "боеприпас", "бк", "мораль", "готовност",
-                "condition", "readiness", "casualties", "ammo", "morale", "combat ready",
-            ],
-            "weather": [
-                "погода", "видимость", "условия", "weather", "visibility", "conditions",
-            ],
-            "objects": [
-                "объект", "препятств", "загражден", "строени", "map object",
-                "obstacle", "structure", "bridge nearby",
-            ],
-            "road_distance": [
-                "дорог", "road", "distance to road", "nearest road", "сколько до дороги",
-                "дистанция до дороги", "как далеко до дороги",
-            ],
-        }
-        ack_kw = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
-        report_kw = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт",
-                     "находимся", "spotted", "taking fire", "casualties"]
+        command_kw_en = classification_lexicon["command_en"]
+        command_kw_ru = classification_lexicon["command_ru"]
+        status_req_kw = classification_lexicon["status_request_keywords"]
+        status_req_focus_map = lexicon["status_request_focus"]
+        ack_kw = classification_lexicon["acknowledgment"]
+        report_kw = classification_lexicon["report"]
 
         classification = MessageClassification.unclear
         order_type = None
@@ -1198,24 +1189,32 @@ class OrderParser:
                     inferred.append(focus_name)
             return inferred or ["full"]
 
+        def _has_any(phrases: list[str]) -> bool:
+            return any(phrase in text_lower for phrase in phrases)
+
         has_status_request_frame = self._has_status_request_frame(text)
 
         # ── Question detection ──────────────────────────────
         # Questions like "Почему не наводите?" / "Why aren't you..." are NOT commands.
         # They're either status requests or unclear messages that need LLM escalation.
-        _question_words_ru = ["почему", "зачем", "отчего", "разве", "неужели",
-                              "как так", "как же", "что за", "с какой стати"]
-        _question_words_en = ["why", "how come", "what the", "why aren't", "why isn't",
-                              "why don't", "why not"]
+        _question_words_ru = question_lexicon["ru"]
+        _question_words_en = question_lexicon["en"]
+        def _has_question_marker(raw_text: str, marker: str) -> bool:
+            return re.search(
+                rf"(^|\s){re.escape(marker)}(?=\s|\?|$)",
+                raw_text,
+                re.IGNORECASE,
+            ) is not None
+
         _is_question = (
-            any(text_lower.startswith(q) or f" {q} " in text_lower or f" {q}?" in text_lower
-                for q in _question_words_ru + _question_words_en)
+            any(_has_question_marker(text_lower, q) for q in _question_words_ru + _question_words_en)
             or (text.strip().endswith("?") and any(
-                q in text_lower for q in _question_words_ru + _question_words_en))
+                _has_question_marker(text_lower, q) for q in _question_words_ru + _question_words_en
+            ))
         )
 
         # Strong sender-identification signals → status report or ack
-        is_self_report = any(kw in text_lower for kw in ["здесь ", "this is "])
+        is_self_report = any(kw in text_lower for kw in classification_lexicon["self_report_markers"])
 
         # Pre-check: does the message contain any command keywords?
         has_command_kw = any(kw in text_lower for kw in command_kw_en + command_kw_ru)
@@ -1261,6 +1260,8 @@ class OrderParser:
             classification = MessageClassification.status_report
         elif has_command_kw:
             classification = MessageClassification.command
+        elif any(kw in text_lower for kw in classification_lexicon["command_inference"]):
+            classification = MessageClassification.command
 
         # Determine order type for all command-classified messages
         _has_enemy_reference = False
@@ -1272,153 +1273,52 @@ class OrderParser:
             # ── Standby / ready-for-support detection ──
             # "Get ready for fire support on request" / "Будьте готовы к огневой поддержке по запросу"
             # should NOT be an immediate fire order — unit should stand by (observe)
-            _standby_kw = [
-                "get ready", "stand by", "standby", "be ready", "on request",
-                "on call", "when called", "when requested", "prepare to support",
-                "ready to support", "prepare for support",
-                "готовность", "готовьтесь", "будьте готовы", "будь готов",
-                "по запросу", "по вызову", "по команде", "ожидайте", "ждите",
-                "приготовьтесь", "приготовиться", "в готовности",
-            ]
-            _is_standby = any(kw in text_lower for kw in _standby_kw)
+            _standby_kw = order_detection_lexicon["standby"]
+            _is_standby = _has_any(_standby_kw)
 
             # ── Coordination detection ──
             # "Lead the attack", "coordinate artillery support" — these are attack orders
             # with coordination intent, NOT fire orders for the receiving unit.
-            _coordination_kw = [
-                "coordinate", "lead the", "lead attack", "coordinate with",
-                "coordinate the", "organize the", "direct the", "command the",
-                "координируй", "возглав", "руковод", "организуй атаку",
-                "координируй огонь", "координируй поддержку",
-                "наведите", "наведи", "свяжитесь", "свяжись",
-                "запросите огонь", "запроси огонь", "вызовите огонь", "вызови огонь",
-            ]
-            _is_coordination = any(kw in text_lower for kw in _coordination_kw)
+            _coordination_kw = order_detection_lexicon["coordination"]
+            _is_coordination = _has_any(_coordination_kw)
             
             # ── Request fire detection ──
             # "Request fire support", "Call for fire", "Direct artillery at enemy"
             # Unit should create a fire request to CoC artillery, not attack themselves
-            _request_fire_kw = [
-                "request fire", "call for fire", "request artillery", "call artillery",
-                "request smoke", "call smoke", "request mortar smoke",
-                "direct artillery", "need fire support", "need artillery",
-                "наведите артиллерию", "наведи артиллерию",
-                "наводите артиллерию", "наводи артиллерию",
-                "наведите миномёт", "наведи миномёт",
-                "наводите миномёт", "наводи миномёт",
-                "наведите миномет", "наведи миномет",
-                "наводите миномет", "наводи миномет",
-                "наведите огонь", "наведи огонь",
-                "наводите огонь", "наводи огонь",
-                "запросите огонь", "запроси огонь",
-                "запросите дым", "запроси дым",
-                "вызовите огонь", "вызови огонь",
-                "артиллерию на цель", "миномёт на цель", "миномет на цель",
-                "артиллерию на противника", "миномёт на противника",
-            ]
-            _is_request_fire = any(kw in text_lower for kw in _request_fire_kw)
+            _request_fire_kw = order_detection_lexicon["request_fire"]
+            _is_request_fire = _has_any(_request_fire_kw)
             _liaison_only = (
-                any(kw in text_lower for kw in [
-                    "свяж", "координиру", "coordinate with", "link up with", "liaise with",
-                ])
-                and not any(kw in text_lower for kw in [
-                    "огонь", "fire support", "support fire", "артподдержк",
-                    "огневая поддержк", "на цель", "по цели", "противник", "enemy",
-                    "suppress", "подав",
-                ])
+                _has_any(order_detection_lexicon["liaison_only"])
+                and not _has_any(order_detection_lexicon["liaison_fire_exclusions"])
             )
             if _liaison_only:
                 _is_request_fire = False
             # Also detect "наведите ... на цель" / "наводите ... на цель" patterns
             # even if "артиллерию/миномёт" is not right после
             if not _is_request_fire:
-                _navedi_pattern = any(kw in text_lower for kw in [
-                    "наведите", "наведи", "наводите", "наводи",
-                ])
-                _on_target = any(kw in text_lower for kw in [
-                    "на цель", "на противника", "на врага", "на позиции",
-                    "на позицию противника", "at the target", "at target", "on target",
-                    "at the enemy", "at enemy", "on the enemy",
-                ])
+                _navedi_pattern = _has_any(order_detection_lexicon["navedi_verbs"])
+                _on_target = _has_any(order_detection_lexicon["navedi_targets"])
                 if _navedi_pattern and _on_target:
                     _is_request_fire = True
 
-            _has_enemy_reference = any(kw in text_lower for kw in [
-                "противник", "враг", "enemy", "contact", "contacts",
-            ])
-            _has_flank_maneuver = any(kw in text_lower for kw in [
-                "обход", "охват", "flank", "envelop", "заносите фланг",
-            ])
-            _has_follow_maneuver = any(kw in text_lower for kw in [
-                "follow ", "follow-", "trail ", "keep behind", "move behind",
-                "следуй за", "следовать за", "иди за", "двигайся за",
-                "держись за", "держаться за", "за ним", "за ними",
-            ])
-            _has_bounding_maneuver = any(kw in text_lower for kw in [
-                "bound forward", "bounding", "leapfrog", "bounds by",
-                "перебежк", "перекатами", "скачками", "bound by fire",
-            ])
-            _has_support_by_fire = any(kw in text_lower for kw in [
-                "support by fire", "supporting fire position",
-                "позиция поддержки огнем", "поддержка огнём", "поддержка огнем",
-                "огневая позиция поддержки",
-            ])
-            _has_delay_mission = any(kw in text_lower for kw in [
-                "delay them", "delay the enemy", "fighting withdrawal",
-                "задерживай", "задерживайте", "сдерживай", "сдерживайте",
-            ])
-            _has_screen_mission = any(kw in text_lower for kw in [
-                "screen the flank", "screen left flank", "screen right flank",
-                "screen the left flank", "screen the right flank",
-                "screen forward", "screen this axis",
-                "прикрой фланг наблюдением", "прикрыть фланг наблюдением",
-                "прикрой левый фланг", "прикрой правый фланг",
-                "прикрой левый фланг наблюдением", "прикрой правый фланг наблюдением",
-                "экранируй", "screen and report",
-            ])
-            _has_breach_order = any(kw in text_lower for kw in [
-                "breach", "clear a lane", "clear lane", "open a lane",
-                "проделай проход", "проделайте проход", "разминир", "разминируй",
-                "сними заграждение", "очисти проход",
-            ])
-            _has_lay_mines_order = any(kw in text_lower for kw in [
-                "lay mines", "mine the", "emplace mines", "set a minefield",
-                "минируй", "заминируй", "ставь мины", "установи мины",
-                "создай минное поле", "поставь минное поле",
-            ])
-            _has_deploy_bridge_order = any(kw in text_lower for kw in [
-                "deploy bridge", "bridge the", "lay bridge", "launch bridge",
-                "навести мост", "разверни мост", "развернуть мост",
-                "мостоукладчик", "на переправе мост",
-            ])
-            _has_construct_order = any(kw in text_lower for kw in [
-                "construct", "build", "dig in", "entrench", "fortify",
-                "set up command post", "establish command post",
-                "set up aid station", "set up supply point", "set up observation post",
-                "оборудуй", "окопай", "окопаться", "укрепи", "построй", "возведи",
-                "оборудуй позицию", "оборудуй окоп", "разверни кп", "разверни медпункт",
-                "разверни пункт снабжения", "пост наблюдения",
-            ])
-            _has_smoke_fire_order = any(kw in text_lower for kw in [
-                "fire smoke", "lay smoke", "deploy smoke", "screen with smoke",
-                "put smoke", "smoke the", "set smoke",
-                "поставь дым", "поставьте дым", "дымовую завесу", "прикрой дымом",
-                "накрой дымом", "отстреляй дымами",
-            ])
-            _has_split_order = any(kw in text_lower for kw in [
-                "split", "split off", "detach", "break into", "peel off",
-                "раздел", "разделись", "выдели", "выделите", "отдели", "отделите",
-            ])
-            _has_merge_order = any(kw in text_lower for kw in [
-                "merge with", "join up with", "combine with", "rejoin",
-                "merge back", "слий", "слейтесь", "объедин", "соединись", "соединитесь",
-            ])
-            _has_air_mobility_order = any(kw in text_lower for kw in [
-                "insert", "extract", "airlift", "landing zone", "lz",
-                "casevac", "medevac", "pickup zone", "drop zone",
-                "десант", "высад", "эвакуируй", "эвакуация", "забери раненых",
-                "посадочная площадка", "площадка посадки",
-            ])
+            _has_enemy_reference = _has_any(order_detection_lexicon["enemy_reference"])
+            _has_flank_maneuver = _has_any(order_detection_lexicon["flank_maneuver"])
+            _has_follow_maneuver = _has_any(order_detection_lexicon["follow_maneuver"])
+            _has_bounding_maneuver = _has_any(order_detection_lexicon["bounding_maneuver"])
+            _has_support_by_fire = _has_any(order_detection_lexicon["support_by_fire"])
+            _has_delay_mission = _has_any(order_detection_lexicon["delay_mission"])
+            _has_halt_order = _has_any(order_detection_lexicon["halt"])
+            _has_defend_order = _has_any(order_detection_lexicon["defend"])
+            _has_withdraw_order = _has_any(order_detection_lexicon["withdraw"])
+            _has_screen_mission = _has_any(order_detection_lexicon["screen"])
+            _has_breach_order = _has_any(order_detection_lexicon["breach"])
+            _has_lay_mines_order = _has_any(order_detection_lexicon["lay_mines"])
+            _has_deploy_bridge_order = _has_any(order_detection_lexicon["deploy_bridge"])
+            _has_construct_order = _has_any(order_detection_lexicon["construct"])
+            _has_smoke_fire_order = _has_any(order_detection_lexicon["smoke_fire"])
+            _has_split_order = _has_any(order_detection_lexicon["split"])
+            _has_merge_order = _has_any(order_detection_lexicon["merge"])
+            _has_air_mobility_order = _has_any(order_detection_lexicon["air_mobility"])
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
@@ -1428,11 +1328,7 @@ class OrderParser:
             # 5. Attack keywords → attack
             # 6. Move keywords → move
             # etc.
-            if _is_standby and any(kw in text_lower for kw in [
-                "fire support", "support fire", "artillery support",
-                "огневая поддержк", "артподдержк", "поддержк огн",
-                "fire", "огонь", "огневой"
-            ]):
+            if _is_standby and _has_any(order_detection_lexicon["standby_fire_support"]):
                 # Standby for fire support → observe/wait, NOT immediate fire
                 order_type = "observe"
             elif _has_split_order:
@@ -1458,31 +1354,19 @@ class OrderParser:
             elif _has_support_by_fire:
                 order_type = "support"
                 maneuver_kind = "support_by_fire"
-            elif _is_coordination and any(kw in text_lower for kw in ["attack", "assault", "engage",
-                                                                       "атак", "штурм", "наступ"]):
+            elif _is_coordination and _has_any(order_detection_lexicon["coordination_attack"]):
                 # "Lead the attack", "coordinate the attack" → attack with coordination
                 order_type = "attack"
-            elif any(kw in text_lower for kw in ["fire at", "fire on", "fire mission", "shoot at",
-                                                 "огонь по", "огонь на", "открыть огонь", "стреляй",
-                                                 "огонь по цели", "огонь по целям",
-                                                 "огонь на цель", "откройте огонь"]):
+            elif _has_any(order_detection_lexicon["direct_fire"]):
                 # Direct fire commands → fire
                 order_type = "fire"
-            elif any(kw in text_lower for kw in ["suppress", "подавить", "подавляющ",
-                                                 "suppressive", "подавляющий"]):
+            elif _has_any(order_detection_lexicon["suppression"]):
                 # Suppression orders → fire
                 order_type = "fire"
-            elif not _is_coordination and any(kw in text_lower for kw in [
-                "artillery support", "fire support", "support fire",
-                "need support on", "support on",
-                "артподдержк", "огневая поддержк", "поддержк огн"
-            ]):
+            elif not _is_coordination and _has_any(order_detection_lexicon["fire_support_general"]):
                 # "Request artillery support on grid X" → fire (but not if it's coordination)
                 order_type = "fire"
-            elif any(kw in text_lower for kw in ["hit any", "hit enemy", "engage any",
-                                                   "fire on any", "open fire",
-                                                   "бей по", "поразить", "удар по",
-                                                   "огонь по любым", "огонь по всем"]):
+            elif _has_any(order_detection_lexicon["fire_at_will_attack"]):
                 # "Hit any enemy target in your sight" → engage (fire at targets of opportunity)
                 order_type = "attack"
                 engagement_rules = "fire_at_will"
@@ -1495,48 +1379,37 @@ class OrderParser:
                 maneuver_kind = "flank"
             elif _has_delay_mission:
                 order_type = "disengage"
+            elif re.search(r"\bdisengage\b", text_lower):
+                order_type = "disengage"
+            elif _has_halt_order:
+                order_type = "halt"
+            elif _has_defend_order:
+                order_type = "defend"
             # Check attack/eliminate BEFORE move: "Move to X. Eliminate enemy" should be attack
-            elif any(kw in text_lower for kw in ["attack", "engage", "eliminate", "destroy", "neutralize",
-                                                    "атак",
-                                                    "capture", "seize", "take", "occupy",
-                                                    "уничтож", "ликвидир", "поразить", "поразите",
-                                                    "захвати", "захват", "овладе", "занять", "займ"]):
+            elif _has_any(order_detection_lexicon["attack"]):
                 order_type = "attack"
             elif _has_air_mobility_order:
                 order_type = "move"
-            elif _has_screen_mission or any(kw in text_lower for kw in ["observe", "наблюда", "наблюден", "recon", "развед"]):
+            elif _has_screen_mission or _has_any(order_detection_lexicon["observe"]):
                 order_type = "observe"
             elif (
                 re.search(r"\bmove\b", text_lower) is not None
-                or any(kw in text_lower for kw in ["advance", "form ", "выдвигай", "двигай",
-                                                   "движен", "марш", "обход", "перестрои", "построение"])
+                or _has_any(order_detection_lexicon["move"])
             ):
                 order_type = "move"
                 if _has_follow_maneuver:
                     maneuver_kind = "follow"
                 elif _has_bounding_maneuver:
                     maneuver_kind = "bounding"
-            elif any(kw in text_lower for kw in ["defend", "hold", "оборон", "удержи"]):
+            elif _has_any(order_detection_lexicon["simple_defend"]):
                 order_type = "defend"
-            elif any(kw in text_lower for kw in ["disengage", "break contact", "разорвать контакт",
-                                                    "разорви контакт", "выйти из боя", "выйди из боя",
-                                                    "отцепи"]):
+            elif _has_any(order_detection_lexicon["disengage"]):
                 order_type = "disengage"
-            elif any(kw in text_lower for kw in ["withdraw", "retreat", "pull back", "fall back",
-                                                    "отход", "отступ", "отойти", "отойд",
-                                                    "отвести", "отводи",
-                                                    "назад", "уходим", "уходи"]):
-                order_type = "disengage"  # treat withdraw/retreat same as disengage
-            elif any(kw in text_lower for kw in ["halt", "stop", "стой", "стоп"]):
+            elif _has_withdraw_order:
+                order_type = "withdraw"
+            elif _has_any(order_detection_lexicon["halt"]):
                 order_type = "halt"
-            elif any(kw in text_lower for kw in [
-                "resupply", "re-supply", "rearm", "reload", "replenish",
-                "пополн", "боеприпас", "снабж", "перезаряд", "дозаправ",
-                "боекомплект", "пополнить бк", "пополни бк",
-                "ammunition", "ammo", "supply point",
-                "к складу", "на склад", "ближайш снабж",
-                "nearest supply", "supply cache",
-            ]):
+            elif _has_any(order_detection_lexicon["resupply"]):
                 order_type = "resupply"
             elif _has_follow_maneuver:
                 order_type = "move"
@@ -1615,27 +1488,16 @@ class OrderParser:
                     "normalized": obj_text.lower(),
                 })
 
-        map_object_patterns = [
-            ("at_minefield", ["anti-tank minefield", "at minefield", "противотанковое минное поле", "пт минное поле"]),
-            ("minefield", ["minefield", "mines", "минное поле", "минном поле", "минного поля", "минному полю", "мины"]),
-            ("barbed_wire", ["barbed wire", "wire obstacle", "колючая проволока", "проволочное заграждение"]),
-            ("concertina_wire", ["concertina", "razor wire", "спираль бруно", "егоза"]),
-            ("roadblock", ["roadblock", "checkpoint", "блокпост", "дорожное заграждение"]),
-            ("anti_tank_ditch", ["anti-tank ditch", "tank ditch", "противотанковый ров"]),
-            ("dragons_teeth", ["dragon's teeth", "dragons teeth", "надолбы", "зубы дракона"]),
-            ("entrenchment", ["entrenchment", "trench", "foxhole", "окоп", "траншея", "укреплен"]),
-            ("observation_tower", ["observation tower", "watchtower", "вышка", "наблюдательный пост"]),
-            ("field_hospital", ["field hospital", "aid station", "медпункт", "полевой госпиталь"]),
-            ("smoke", ["smoke", "smokescreen", "дым", "дымовая завеса"]),
-            ("command_post_structure", ["command post", "hq post", "командный пункт", "кп"]),
-            ("supply_cache", ["supply cache", "ammo dump", "supply point", "склад", "пункт снабжения"]),
-            ("bridge_structure", ["bridge", "crossing", "мост", "переправа"]),
-            ("pillbox", ["pillbox", "bunker", "дот", "дзот"]),
-        ]
-        for candidate_type, patterns in map_object_patterns:
+        map_object_patterns = location_lexicon["map_object_patterns"]
+        for entry in map_object_patterns:
+            candidate_type = entry["name"]
+            patterns = entry["patterns"]
             if any(pattern in text_lower for pattern in patterns):
                 map_object_type = candidate_type
                 break
+
+        if order_type == "lay_mines" and map_object_type is None:
+            map_object_type = "minefield"
 
         has_resolved_location = any(
             lr["ref_type"] in {"snail", "grid", "coordinate", "height", "map_object"}
@@ -1643,9 +1505,7 @@ class OrderParser:
         )
         implied_contact_target = (
             _has_enemy_reference
-            or any(kw in text_lower for kw in [
-                "на цель", "по цели", "цель", "at the target", "on target", "target",
-            ])
+            or _has_any(order_detection_lexicon["implied_contact_target"])
         )
         if (
             classification == MessageClassification.command
@@ -1662,11 +1522,8 @@ class OrderParser:
         # ── Implicit target from "на цель" / "по цели" / "at the target" ──
         # When no explicit location is given but text says "at the target" / "на цель",
         # this means "at the enemy we've been tracking" → resolve from nearest contact.
-        _target_phrases_ru = ["на цель", "по цели", "по целям", "на противника",
-                              "по противнику", "на врага", "по врагу",
-                              "на позицию противника", "по позиции противника"]
-        _target_phrases_en = ["at the target", "at target", "on target", "at the enemy",
-                              "on the enemy", "at enemy position", "on enemy position"]
+        _target_phrases_ru = order_detection_lexicon["target_phrases_ru"]
+        _target_phrases_en = order_detection_lexicon["target_phrases_en"]
         _has_explicit_location = any(lr["ref_type"] in ("snail", "grid", "coordinate", "height")
                                      for lr in location_refs)
         if not _has_explicit_location:
@@ -1684,8 +1541,8 @@ class OrderParser:
             elif (
                 classification == MessageClassification.command
                 and order_type in ("attack", "request_fire", "support")
-                and any(kw in text_lower for kw in ["противник", "враг", "enemy", "contact"])
-                and any(kw in text_lower for kw in ["обход", "охват", "flank", "envelop", "фланг", "fire", "огонь"])
+                and _has_any(order_detection_lexicon["enemy_reference"])
+                and _has_any(order_detection_lexicon["flank_contact_target"])
             ):
                 location_refs.append({
                     "source_text": "enemy contact",
@@ -1771,25 +1628,8 @@ class OrderParser:
         # Speed detection — comprehensive EN/RU
         speed = None
         # Slow/cautious patterns
-        slow_kw = [
-            "slow", "careful", "cautious", "stealth", "stealthy", "quiet", "sneak",
-            "tactical movement", "slow and careful", "carefully", "move slow",
-            "cautiously", "silently", "covertly", "low profile",
-            "медленн", "осторожн", "скрытно", "тихо", "крадучись", "без шума",
-            "тактическ", "аккуратн", "не спеша", "осмотрительн",
-            "перебежк", "ползком", "незаметн", "потихоньку",
-            "с осторожн", "без лишнего шума", "скрытн",
-        ]
-        # Fast/rapid patterns
-        fast_kw = [
-            "fast", "rapid", "quick", "urgent", "rush", "sprint", "hurry", "double time",
-            "move fast", "quickly", "asap", "full speed", "at speed",
-            "at the double", "on the double", "forced march", "move out now",
-            "срочно", "быстр", "немедленно", "бегом", "марш-бросок",
-            "рывк", "скорее", "живее", "на скорости", "стремительн",
-            "максимальн", "ускоренн", "галопом", "на рысях",
-            "форсированн", "полным ходом", "мигом", "давай давай",
-        ]
+        slow_kw = speed_lexicon["slow"]
+        fast_kw = speed_lexicon["fast"]
         if any(kw in text_lower for kw in slow_kw):
             speed = "slow"
         elif any(kw in text_lower for kw in fast_kw):
@@ -1798,33 +1638,9 @@ class OrderParser:
         # ── Formation detection ─────────────────────────────────
         formation = None
         formation_map = {
-            # English
-            "column": "column", "single file": "column", "file": "column",
-            "march column": "column", "road march": "column",
-            "line": "line", "skirmish line": "line", "assault line": "line",
-            "firing line": "line", "extended line": "line", "on line": "line",
-            "abreast": "line",
-            "wedge": "wedge", "vee": "vee", "v formation": "vee",
-            "arrowhead": "wedge",
-            "echelon left": "echelon_left", "echelon right": "echelon_right",
-            "diamond": "diamond", "box": "box", "staggered column": "staggered",
-            "staggered": "staggered",
-            "herringbone": "herringbone",
-            # Russian
-            "колонн": "column", "походн": "column", "гуськом": "column",
-            "в затылок": "column", "друг за другом": "column",
-            "цепь": "line", "цепью": "line", "развернут": "line", "в линию": "line",
-            "шеренг": "line", "в шеренг": "line", "пеленг": "line",
-            "рассредоточ": "line", "стрелковая цепь": "line",
-            "боевая линия": "line",
-            "клин": "wedge", "клином": "wedge",
-            "уступ влево": "echelon_left", "уступом влево": "echelon_left",
-            "уступ вправо": "echelon_right", "уступом вправо": "echelon_right",
-            "уступ": "echelon_right",  # default echelon direction
-            "ромб": "diamond", "ромбом": "diamond",
-            "каре": "box",
-            "ёлочк": "herringbone", "елочк": "herringbone",
-            "боевой порядок": "wedge",  # generic "combat formation" → default wedge
+            pattern: form_name
+            for form_name, patterns in formation_lexicon["patterns"].items()
+            for pattern in patterns
         }
         # Check formation patterns (check longer patterns first)
         for pattern, form_name in sorted(formation_map.items(), key=lambda x: -len(x[0])):
@@ -1832,10 +1648,10 @@ class OrderParser:
                 formation = form_name
                 break
         if not formation:
-            if any(kw in text_lower for kw in ["левым охватом", "обход слева", "левый фланг"]):
+            if _has_any(formation_lexicon["maneuver_side_left"]):
                 formation = "echelon_left"
                 maneuver_side = "left"
-            elif any(kw in text_lower for kw in ["правым охватом", "обход справа", "правый фланг"]):
+            elif _has_any(formation_lexicon["maneuver_side_right"]):
                 formation = "echelon_right"
                 maneuver_side = "right"
         elif formation == "echelon_left":
@@ -1843,15 +1659,25 @@ class OrderParser:
         elif formation == "echelon_right":
             maneuver_side = maneuver_side or "right"
 
+        if (
+            formation == "line"
+            and order_type in ("withdraw", "disengage")
+            and re.search(r"\b(?:to|toward|towards|along)\s+line\s+[a-z]\d", text_lower)
+        ):
+            formation = None
+
         # Also look for explicit formation commands
         import re as _re
+        _formation_prefixes = "|".join(
+            _re.escape(prefix)
+            for prefix in sorted(formation_lexicon["explicit_prefixes"], key=len, reverse=True)
+        )
+        _formation_targets = "|".join(
+            _re.escape(pattern)
+            for pattern in sorted(formation_map, key=len, reverse=True)
+        )
         form_cmd = _re.search(
-            r'(?:form|formation|adopt|form up|go to|switch to|'
-            r'построение|движение|двигаться|перестрои|принять|'
-            r'в порядке|боевой порядок|марш\w*\s*порядок)\s*[:=]?\s*'
-            r'(column|line|wedge|vee|diamond|echelon|herringbone|staggered|box|abreast|'
-            r'колонн\w*|цеп\w*|клин\w*|уступ\w*|ромб\w*|каре|'
-            r'шеренг\w*|пеленг\w*|походн\w*)',
+            rf'(?:{_formation_prefixes})\s*[:=]?\s*({_formation_targets})',
             text_lower,
         )
         if form_cmd and not formation:
@@ -1863,14 +1689,11 @@ class OrderParser:
 
         # Engagement rules
         engagement_rules = None
-        if any(kw in text_lower for kw in ["hold fire", "не стрелять", "огонь не открывать"]):
+        if _has_any(engagement_lexicon["hold_fire"]):
             engagement_rules = "hold_fire"
-        elif any(kw in text_lower for kw in ["fire at will", "огонь по готовности",
-                                               "in your sight", "в поле зрения", "в зоне видимости",
-                                               "any target", "any enemy", "по любым целям",
-                                               "по всем целям", "по обнаруженным"]):
+        elif _has_any(engagement_lexicon["fire_at_will"]):
             engagement_rules = "fire_at_will"
-        elif any(kw in text_lower for kw in ["return fire only", "ответный огонь"]):
+        elif _has_any(engagement_lexicon["return_fire_only"]):
             engagement_rules = "return_fire_only"
 
         # ── Support target ref: extract the unit being supported in standby orders ──
@@ -1881,13 +1704,7 @@ class OrderParser:
         split_ratio = None
         _is_standby_check = (classification == MessageClassification.command
                              and order_type == "observe"
-                             and any(kw in text_lower for kw in [
-                                 "get ready", "stand by", "standby", "be ready", "on request",
-                                 "on call", "ready to support", "prepare to support",
-                                  "готовность", "готовьтесь", "будьте готовы", "будь готов", "по запросу",
-                                 "по вызову", "по команде", "в готовности",
-                                 "support", "поддержать", "поддерж", "целям", "передаст",
-                             ]))
+                             and _has_any(order_detection_lexicon["standby_support_markers"]))
         if _is_standby_check or order_type in ("observe", "support", "resupply", "request_fire"):
             # Look for patterns like "support X", "поддержать X", "targets from X",
             # "которые вам передаст X", "целям X", "work with X"
@@ -2018,32 +1835,25 @@ class OrderParser:
 
             # If the text refers to "the mortars"/"artillery" generically, ensure
             # a canonical ref survives the addressed-refs filter above.
-            if any(kw in text_lower for kw in ["миномёт", "миномет", "mortar"]):
+            if _has_any(order_detection_lexicon["generic_mortar"]):
                 if not any("мином" in ref.lower() or "mortar" in ref.lower() for ref in coordination_unit_refs):
                     coordination_unit_refs.append("Mortar")
-            elif any(kw in text_lower for kw in ["артиллер", "artillery"]):
+            elif _has_any(order_detection_lexicon["generic_artillery"]):
                 if not any("артилл" in ref.lower() or "artillery" in ref.lower() for ref in coordination_unit_refs):
                     coordination_unit_refs.append("Artillery")
 
 
-            if any(kw in text_lower for kw in [
-                "прикры", "covering fire", "cover me", "cover your movement",
-                "covers your", "cover your", "covers my",
-                "огневое прикрытие", "прикроют", "поддержат огн",
-            ]):
+            if _has_any(order_detection_lexicon["coordination_covering_fire"]):
                 coordination_kind = "covering_fire"
-            elif any(kw in text_lower for kw in [
-                "огневая поддержк", "артподдержк", "fire support", "support fire",
-                "suppress", "подав",
-            ]):
+            elif _has_any(order_detection_lexicon["coordination_fire_support"]):
                 coordination_kind = "fire_support"
             elif coordination_unit_refs:
                 coordination_kind = "coordination"
 
         if maneuver_kind == "flank" and maneuver_side is None:
-            if any(kw in text_lower for kw in ["слева", "left flank", "left hook", "left envelopment"]):
+            if _has_any(formation_lexicon["maneuver_side_left"]):
                 maneuver_side = "left"
-            elif any(kw in text_lower for kw in ["справа", "right flank", "right hook", "right envelopment"]):
+            elif _has_any(formation_lexicon["maneuver_side_right"]):
                 maneuver_side = "right"
 
         if maneuver_kind is None and _has_follow_maneuver and coordination_unit_refs:

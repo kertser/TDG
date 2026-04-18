@@ -1,0 +1,597 @@
+[lexicon.classification]
+command_en = [
+  "move", "advance", "proceed", "attack", "defend", "hold", "observe", "withdraw",
+  "retreat", "fall back", "pull back", "support", "halt", "stop", "watch",
+  "flank", "engage", "disengage", "fire at", "fire on", "fire mission", "shoot",
+  "break contact", "hit any", "hit enemy", "engage any", "open fire", "suppress",
+  "capture", "seize", "take", "occupy", "eliminate", "destroy", "neutralize",
+  "call for fire", "request fire", "direct artillery", "call artillery",
+  "request artillery", "breach", "clear a lane", "clear lane", "split", "split off",
+  "detach", "merge with", "join up with", "combine with", "lay mines", "mine the",
+  "emplace mines", "deploy bridge", "bridge the", "construct", "build", "dig in",
+  "entrench", "fortify", "establish command post", "set up aid station", "resupply",
+  "re-supply", "rearm", "reload", "replenish", "put smoke", "lay smoke",
+  "deploy smoke", "smoke the", "set smoke", "airlift", "insert", "extract",
+  "landing zone", "lz", "screen", "recon",
+]
+command_ru = [
+  "выдвигай", "двигай", "движен", "марш", "атак", "оборон", "удержи", "наблюда",
+  "наблюдение", "отход", "отступ", "поддерж", "стой", "стоп", "обход", "огонь по",
+  "огонь на", "открыть огонь", "стреляй", "разорвать контакт", "разорви контакт",
+  "выйти из боя", "выйди из боя", "отцепи", "перестрои", "построение", "поразить",
+  "уничтож", "бей по", "удар по", "подавить", "подавляющ", "захвати", "захват",
+  "овладе", "занять", "займ", "продолжай", "будьте готовы", "координируй",
+  "организуй", "прикрой", "откройте огонь", "открывай", "выдвину", "приказываю",
+  "остановитесь", "наведите", "наведи", "наводите", "наводи", "вызовите огонь",
+  "вызови огонь", "запросите огонь", "запроси огонь", "артиллерию на",
+  "миномёт на", "минометн на", "раздел", "выдел", "отдели", "слей", "объедин",
+  "соединись", "соединитесь", "проделай проход", "проделайте проход", "разминир",
+  "разминируй", "сними заграждение", "минируй", "заминируй", "ставь мины",
+  "установи мины", "навести мост", "наведите мост", "разверни мост", "оборудуй",
+  "окопай", "укрепи", "построй", "возведи", "подвези", "поставь дым",
+  "поставьте дым", "накрой дымом", "прикрой дымом", "снабди", "эвакуируй",
+  "десант", "высад", "погруз", "выгруз", "разведай", "разведайте", "свяжись",
+  "свяжитесь", "следуй за", "следовать за",
+]
+status_request_keywords = ["доложи", "report", "обстанов", "что у вас", "what's happening", "status"]
+acknowledgment = ["так точно", "roger", "wilco", "понял", "copy", "выполня", "принял"]
+report = ["здесь", "this is", "наблюдаем", "обнаружен", "потери", "контакт", "находимся", "spotted", "taking fire", "casualties"]
+self_report_markers = ["здесь ", "this is "]
+command_inference = [
+  "watch ", "watch the", "proceed ", "proceed to", "fall back", "pull back",
+  "разведай", "разведайте", "ведите наблюдение", "веди наблюдение",
+  "наведите мост", "соединитесь с", "остановитесь",
+]
+
+[lexicon.status_request_focus]
+nearby_friendlies = ["кто рядом", "какие подразделения рядом", "какие части рядом", "какие силы рядом", "свои рядом", "friendly nearby", "friendlies nearby", "who is near you", "who's near you", "units near you", "nearby units"]
+terrain = ["местност", "опиши местност", "terrain", "ground around you", "describe terrain", "what terrain", "какая местность", "что за местность", "cover around you", "укрыти", "ground nearby"]
+enemy = ["противник", "enemy", "contact", "контакт", "кого видишь", "видишь противника", "enemy seen", "any enemy", "spot anything"]
+position = ["где ты", "где вы", "твоя позиция", "ваша позиция", "position", "where are you", "your location", "your grid", "координаты"]
+task = ["какая задача", "что делаешь", "что делаете", "чем занят", "current task", "what are you doing", "mission now", "orders now"]
+condition = ["состояни", "потери", "боеприпас", "бк", "мораль", "готовност", "condition", "readiness", "casualties", "ammo", "morale", "combat ready"]
+weather = ["погода", "видимость", "условия", "weather", "visibility", "conditions"]
+objects = ["объект", "препятств", "загражден", "строени", "map object", "obstacle", "structure", "bridge nearby"]
+road_distance = ["дорог", "road", "distance to road", "nearest road", "сколько до дороги", "дистанция до дороги", "как далеко до дороги"]
+
+[lexicon.question_markers]
+ru = ["почему", "зачем", "отчего", "разве", "неужели", "как так", "как же", "что за", "с какой стати"]
+en = ["why", "how come", "what the", "why aren't", "why isn't", "why don't", "why not"]
+
+[lexicon.order_detection]
+standby = ["get ready", "stand by", "standby", "be ready", "on request", "on call", "when called", "when requested", "prepare to support", "ready to support", "prepare for support", "готовность", "готовьтесь", "будьте готовы", "будь готов", "по запросу", "по вызову", "по команде", "ожидайте", "ждите", "приготовьтесь", "приготовиться", "в готовности"]
+coordination = ["coordinate", "lead the", "lead attack", "coordinate with", "coordinate the", "organize the", "direct the", "command the", "координируй", "возглав", "руковод", "организуй атаку", "координируй огонь", "координируй поддержку", "наведите", "наведи", "свяжитесь", "свяжись", "запросите огонь", "запроси огонь", "вызовите огонь", "вызови огонь"]
+request_fire = ["request fire", "call for fire", "request artillery", "call artillery", "request smoke", "call smoke", "request mortar smoke", "direct artillery", "need fire support", "need artillery", "наведите артиллерию", "наведи артиллерию", "наводите артиллерию", "наводи артиллерию", "наведите миномёт", "наведи миномёт", "наводите миномёт", "наводи миномёт", "наведите миномет", "наведи миномет", "наводите миномет", "наводи миномет", "наведите огонь", "наведи огонь", "наводите огонь", "наводи огонь", "запросите огонь", "запроси огонь", "запросите дым", "запроси дым", "вызовите огонь", "вызови огонь", "артиллерию на цель", "миномёт на цель", "миномет на цель", "артиллерию на противника", "миномёт на противника"]
+liaison_only = ["свяж", "координиру", "coordinate with", "link up with", "liaise with"]
+liaison_fire_exclusions = ["огонь", "fire support", "support fire", "артподдержк", "огневая поддержк", "на цель", "по цели", "противник", "enemy", "suppress", "подав"]
+navedi_verbs = ["наведите", "наведи", "наводите", "наводи"]
+navedi_targets = ["на цель", "на противника", "на врага", "на позиции", "на позицию противника", "at the target", "at target", "on target", "at the enemy", "at enemy", "on the enemy"]
+enemy_reference = ["противник", "враг", "enemy", "contact", "contacts"]
+flank_maneuver = ["обход", "охват", "flank", "envelop", "заносите фланг"]
+follow_maneuver = ["follow ", "follow-", "trail ", "keep behind", "move behind", "следуй за", "следовать за", "иди за", "двигайся за", "держись за", "держаться за", "за ним", "за ними"]
+bounding_maneuver = ["bound forward", "bounding", "leapfrog", "bounds by", "перебежк", "перекатами", "скачками", "bound by fire"]
+support_by_fire = ["support by fire", "supporting fire position", "позиция поддержки огнем", "поддержка огнём", "поддержка огнем", "огневая позиция поддержки"]
+delay_mission = ["delay them", "delay the enemy", "fighting withdrawal", "задерживай", "задерживайте", "сдерживай", "сдерживайте"]
+halt = ["halt", "stop", "freeze", "hold where you are", "hold here", "остановись", "остановитесь", "стоять", "стой", "стоп", "остой"]
+defend = ["defend", "hold this position", "hold position", "hold the position", "take up defense", "take up defensive positions", "defensive position", "оборон", "оборону", "занять оборону", "займите оборону", "удержи", "удерживай", "удерживайте"]
+withdraw = ["withdraw", "retreat", "pull back", "fall back", "отход", "отступ", "отойти", "отойд", "отвести", "отводи", "назад", "уходим", "уходи"]
+screen = ["screen the flank", "screen left flank", "screen right flank", "screen the left flank", "screen the right flank", "screen forward", "screen this axis", "прикрой фланг наблюдением", "прикрыть фланг наблюдением", "прикрой левый фланг", "прикрой правый фланг", "прикрой левый фланг наблюдением", "прикрой правый фланг наблюдением", "экранируй", "screen and report"]
+breach = ["breach", "clear a lane", "clear lane", "open a lane", "проделай проход", "проделайте проход", "разминир", "разминируй", "сними заграждение", "очисти проход"]
+lay_mines = ["lay mines", "mine the", "emplace mines", "set a minefield", "минируй", "заминируй", "ставь мины", "установи мины", "создай минное поле", "поставь минное поле"]
+deploy_bridge = ["deploy bridge", "bridge the", "lay bridge", "launch bridge", "навести мост", "наведите мост", "разверни мост", "развернуть мост", "мостоукладчик", "на переправе мост"]
+construct = ["construct", "build", "dig in", "entrench", "fortify", "set up command post", "establish command post", "set up aid station", "set up supply point", "set up observation post", "оборудуй", "окопай", "окопаться", "укрепи", "построй", "возведи", "оборудуй позицию", "оборудуй окоп", "разверни кп", "разверни медпункт", "разверни пункт снабжения", "пост наблюдения"]
+smoke_fire = ["fire smoke", "lay smoke", "deploy smoke", "screen with smoke", "put smoke", "smoke the", "set smoke", "поставь дым", "поставьте дым", "дымовую завесу", "прикрой дымом", "накрой дымом", "отстреляй дымами"]
+split = ["split", "split off", "detach", "break into", "peel off", "раздел", "разделись", "выдели", "выделите", "отдели", "отделите"]
+merge = ["merge with", "join up with", "combine with", "rejoin", "merge back", "слий", "слейтесь", "объедин", "соединись", "соединитесь"]
+air_mobility = ["insert", "extract", "airlift", "landing zone", "lz", "casevac", "medevac", "pickup zone", "drop zone", "десант", "высад", "эвакуируй", "эвакуация", "забери раненых", "посадочная площадка", "площадка посадки"]
+standby_fire_support = ["fire support", "support fire", "artillery support", "огневая поддержк", "артподдержк", "поддержк огн", "fire", "огонь", "огневой"]
+coordination_attack = ["attack", "assault", "engage", "атак", "штурм", "наступ"]
+direct_fire = ["fire at", "fire on", "fire mission", "shoot at", "огонь по", "огонь на", "открыть огонь", "стреляй", "огонь по цели", "огонь по целям", "огонь на цель", "откройте огонь"]
+suppression = ["suppress", "подавить", "подавляющ", "suppressive", "подавляющий"]
+fire_support_general = ["artillery support", "fire support", "support fire", "need support on", "support on", "артподдержк", "огневая поддержк", "поддержк огн"]
+fire_at_will_attack = ["hit any", "hit enemy", "engage any", "fire on any", "open fire", "бей по", "поразить", "удар по", "огонь по любым", "огонь по всем"]
+attack = ["attack", "engage", "eliminate", "destroy", "neutralize", "атак", "capture", "seize", "take", "occupy", "уничтож", "ликвидир", "поразить", "поразите", "захвати", "захват", "овладе", "занять", "займ"]
+observe = ["observe", "watch", "surveil", "наблюда", "наблюден", "ведите наблюдение", "веди наблюдение", "recon", "развед", "разведай", "разведайте"]
+move = ["advance", "proceed", "form ", "выдвигай", "двигай", "движен", "марш", "обход", "перестрои", "построение"]
+simple_defend = ["defend", "hold", "оборон", "удержи"]
+disengage = ["disengage", "break contact", "разорвать контакт", "разорви контакт", "разорвите контакт", "выйти из боя", "выйди из боя", "выйдите из боя", "отцепи"]
+resupply = ["resupply", "re-supply", "rearm", "reload", "replenish", "пополн", "боеприпас", "снабж", "перезаряд", "дозаправ", "боекомплект", "пополнить бк", "пополни бк", "ammunition", "ammo", "supply point", "к складу", "на склад", "ближайш снабж", "nearest supply", "supply cache"]
+implied_contact_target = ["на цель", "по цели", "цель", "at the target", "on target", "target"]
+target_phrases_ru = ["на цель", "по цели", "по целям", "на противника", "по противнику", "на врага", "по врагу", "на позицию противника", "по позиции противника"]
+target_phrases_en = ["at the target", "at target", "on target", "at the enemy", "on the enemy", "at enemy position", "on enemy position"]
+flank_contact_target = ["обход", "охват", "flank", "envelop", "фланг", "fire", "огонь"]
+standby_support_markers = ["get ready", "stand by", "standby", "be ready", "on request", "on call", "ready to support", "prepare to support", "готовность", "готовьтесь", "будьте готовы", "будь готов", "по запросу", "по вызову", "по команде", "в готовности", "support", "поддержать", "поддерж", "целям", "передаст"]
+generic_mortar = ["миномёт", "миномет", "mortar"]
+generic_artillery = ["артиллер", "artillery"]
+coordination_covering_fire = ["прикры", "covering fire", "cover me", "cover your movement", "covers your", "cover your", "covers my", "огневое прикрытие", "прикроют", "поддержат огн"]
+coordination_fire_support = ["огневая поддержк", "артподдержк", "fire support", "support fire", "suppress", "подав"]
+
+[lexicon.speed]
+slow = ["slow", "careful", "cautious", "stealth", "stealthy", "quiet", "sneak", "tactical movement", "slow and careful", "carefully", "move slow", "cautiously", "silently", "covertly", "low profile", "медленн", "осторожн", "скрытно", "тихо", "крадучись", "без шума", "тактическ", "аккуратн", "не спеша", "осмотрительн", "перебежк", "ползком", "незаметн", "потихоньку", "с осторожн", "без лишнего шума", "скрытн"]
+fast = ["fast", "rapid", "quick", "urgent", "rush", "sprint", "hurry", "double time", "move fast", "quickly", "asap", "full speed", "at speed", "at the double", "on the double", "forced march", "move out now", "срочно", "быстр", "немедленно", "бегом", "марш-бросок", "рывк", "скорее", "живее", "на скорости", "стремительн", "максимальн", "ускоренн", "галопом", "на рысях", "форсированн", "полным ходом", "мигом", "давай давай"]
+
+[lexicon.formation]
+maneuver_side_left = ["левым охватом", "обход слева", "левый фланг", "слева", "left flank", "left hook", "left envelopment"]
+maneuver_side_right = ["правым охватом", "обход справа", "правый фланг", "справа", "right flank", "right hook", "right envelopment"]
+explicit_prefixes = ["form", "formation", "adopt", "form up", "go to", "switch to", "построение", "движение", "двигаться", "перестрои", "принять", "в порядке", "боевой порядок", "марш порядок", "маршевый порядок"]
+
+[lexicon.formation.patterns]
+column = ["column", "single file", "file", "march column", "road march", "колонн", "походн", "гуськом", "в затылок", "друг за другом"]
+line = ["line", "skirmish line", "assault line", "firing line", "extended line", "on line", "abreast", "цепь", "цепью", "развернут", "в линию", "шеренг", "в шеренг", "пеленг", "рассредоточ", "стрелковая цепь", "боевая линия"]
+wedge = ["wedge", "arrowhead", "клин", "клином", "боевой порядок"]
+vee = ["vee", "v formation"]
+echelon_left = ["echelon left", "уступ влево", "уступом влево"]
+echelon_right = ["echelon right", "уступ вправо", "уступом вправо", "уступ"]
+diamond = ["diamond", "ромб", "ромбом"]
+box = ["box", "каре"]
+staggered = ["staggered column", "staggered"]
+herringbone = ["herringbone", "ёлочк", "елочк"]
+
+[lexicon.engagement]
+hold_fire = ["hold fire", "не стрелять", "огонь не открывать"]
+fire_at_will = ["fire at will", "огонь по готовности", "in your sight", "в поле зрения", "в зоне видимости", "any target", "any enemy", "по любым целям", "по всем целям", "по обнаруженным"]
+return_fire_only = ["return fire only", "ответный огонь"]
+
+[lexicon.location]
+
+[[lexicon.location.map_object_patterns]]
+name = "at_minefield"
+patterns = ["anti-tank minefield", "at minefield", "противотанковое минное поле", "пт минное поле"]
+
+[[lexicon.location.map_object_patterns]]
+name = "minefield"
+patterns = ["minefield", "mines", "минное поле", "минном поле", "минного поля", "минному полю", "мины"]
+
+[[lexicon.location.map_object_patterns]]
+name = "barbed_wire"
+patterns = ["barbed wire", "wire obstacle", "колючая проволока", "проволочное заграждение"]
+
+[[lexicon.location.map_object_patterns]]
+name = "concertina_wire"
+patterns = ["concertina", "razor wire", "спираль бруно", "егоза"]
+
+[[lexicon.location.map_object_patterns]]
+name = "roadblock"
+patterns = ["roadblock", "checkpoint", "блокпост", "дорожное заграждение"]
+
+[[lexicon.location.map_object_patterns]]
+name = "anti_tank_ditch"
+patterns = ["anti-tank ditch", "tank ditch", "противотанковый ров"]
+
+[[lexicon.location.map_object_patterns]]
+name = "dragons_teeth"
+patterns = ["dragon's teeth", "dragons teeth", "надолбы", "зубы дракона"]
+
+[[lexicon.location.map_object_patterns]]
+name = "entrenchment"
+patterns = ["entrenchment", "trench", "foxhole", "окоп", "траншея", "укреплен"]
+
+[[lexicon.location.map_object_patterns]]
+name = "observation_tower"
+patterns = ["observation tower", "watchtower", "вышка", "наблюдательный пост"]
+
+[[lexicon.location.map_object_patterns]]
+name = "field_hospital"
+patterns = ["field hospital", "aid station", "медпункт", "полевой госпиталь"]
+
+[[lexicon.location.map_object_patterns]]
+name = "smoke"
+patterns = ["smoke", "smokescreen", "дым", "дымовая завеса"]
+
+[[lexicon.location.map_object_patterns]]
+name = "command_post_structure"
+patterns = ["command post", "hq post", "командный пункт", "кп"]
+
+[[lexicon.location.map_object_patterns]]
+name = "supply_cache"
+patterns = ["supply cache", "ammo dump", "supply point", "склад", "пункт снабжения"]
+
+[[lexicon.location.map_object_patterns]]
+name = "bridge_structure"
+patterns = ["bridge", "crossing", "мост", "переправа", "переправ"]
+
+[[lexicon.location.map_object_patterns]]
+name = "pillbox"
+patterns = ["pillbox", "bunker", "дот", "дзот"]
+
+# Runtime order phrasebook.
+# Parser reads the lexicon above directly in production.
+# Tests read the same file and validate regression cases below.
+
+[[case]]
+id = "standby_fire_support_en"
+text = "Mortar, stand by for fire support on request at the bridge crossing."
+classification = "command"
+order_type = "observe"
+
+[[case]]
+id = "observe_bridge_en"
+text = "Recon section, observe the eastern bridge and report all movement."
+classification = "command"
+order_type = "observe"
+
+[[case]]
+id = "breach_roadblock_en"
+text = "Combat engineers, breach the roadblock at E6-3 and open a lane."
+classification = "command"
+order_type = "breach"
+location_ref_types_contains = ["snail"]
+
+[[case]]
+id = "lay_mines_en"
+text = "Engineer section, lay mines on the northern road approach."
+classification = "command"
+order_type = "lay_mines"
+map_object_type = "minefield"
+
+[[case]]
+id = "smoke_fire_en"
+text = "Mortar, put smoke on the bridge crossing at E6-2."
+classification = "command"
+order_type = "fire"
+map_object_type = "smoke"
+
+[[case]]
+id = "request_smoke_move_en"
+text = "B-squad, request smoke on the crossing and move under concealment."
+classification = "command"
+order_type = "request_fire"
+
+[[case]]
+id = "bridge_layer_ru"
+text = "Сапёры, разверните мостоукладчик у переправы и наведите мост."
+classification = "command"
+order_type = "deploy_bridge"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "construct_cp_en"
+text = "Construction engineers, build a command post near Hill 170."
+classification = "command"
+order_type = "construct"
+
+[[case]]
+id = "resupply_follow_en"
+text = "Logistics unit, resupply A-squad and stay behind them."
+classification = "command"
+order_type = "resupply"
+
+[[case]]
+id = "drone_screen_ru"
+text = "БПЛА, прикрой правый фланг наблюдением и докладывай о противнике."
+classification = "command"
+order_type = "observe"
+
+[[case]]
+id = "aviation_insert_en"
+text = "Aviation flight, insert recon team to Hill 201."
+classification = "command"
+order_type = "move"
+location_ref_types_contains = ["height"]
+
+[[case]]
+id = "split_one_third_en"
+text = "A-squad, split off one third of your strength to screen the bunker."
+classification = "command"
+order_type = "split"
+split_ratio = 0.33
+
+[[case]]
+id = "merge_continue_en"
+text = "B-squad, merge with C-squad and continue as one element."
+classification = "command"
+order_type = "merge"
+merge_target_ref = "C-squad"
+
+[[case]]
+id = "road_distance_request_ru"
+text = "AAA -> C-squad: Какая дистанция до ближайшей дороги?"
+classification = "status_request"
+order_type = "report_status"
+status_request_focus_contains = ["road_distance"]
+
+[[case]]
+id = "move_fast_ru"
+text = "Быстро двигайтесь в квадрат F6-4-7"
+classification = "command"
+order_type = "move"
+speed = "fast"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["F6-4-7"]
+
+[[case]]
+id = "move_proceed_en"
+text = "Proceed to grid F6-4-7"
+classification = "command"
+order_type = "move"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["F6-4-7"]
+
+[[case]]
+id = "move_advance_fast_en"
+text = "Advance rapidly to grid F6-4-7"
+classification = "command"
+order_type = "move"
+speed = "fast"
+location_ref_types_contains = ["snail"]
+
+[[case]]
+id = "move_vydvigaites_ru"
+text = "Выдвигайтесь на F6-4-7"
+classification = "command"
+order_type = "move"
+location_ref_types_contains = ["snail"]
+
+[[case]]
+id = "move_marsh_ru"
+text = "Марш в район F6-4-7"
+classification = "command"
+order_type = "move"
+location_ref_types_contains = ["snail"]
+
+[[case]]
+id = "defend_hill_en"
+text = "Defend Hill 201"
+classification = "command"
+order_type = "defend"
+location_ref_types_contains = ["height"]
+
+[[case]]
+id = "defend_take_up_positions_en"
+text = "Take up defensive positions at Hill 201"
+classification = "command"
+order_type = "defend"
+location_ref_types_contains = ["height"]
+
+[[case]]
+id = "defend_ru_occupy_defense"
+text = "Займите оборону на высоте 201"
+classification = "command"
+order_type = "defend"
+location_ref_types_contains = ["height"]
+
+[[case]]
+id = "defend_hold_bridge_en"
+text = "Hold this position and defend the bridge"
+classification = "command"
+order_type = "defend"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "defend_hold_bridge_ru"
+text = "Удерживайте мост"
+classification = "command"
+order_type = "defend"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "halt_plain_en"
+text = "Halt"
+classification = "command"
+order_type = "halt"
+
+[[case]]
+id = "halt_hold_where_en"
+text = "Halt and hold where you are"
+classification = "command"
+order_type = "halt"
+
+[[case]]
+id = "halt_hold_position_ru"
+text = "Остановитесь и удерживайте текущую позицию"
+classification = "command"
+order_type = "halt"
+
+[[case]]
+id = "halt_stop_ru"
+text = "Остановитесь"
+classification = "command"
+order_type = "halt"
+
+[[case]]
+id = "withdraw_line_en"
+text = "Withdraw to line C4-2"
+classification = "command"
+order_type = "withdraw"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["C4-2"]
+
+[[case]]
+id = "withdraw_fall_back_en"
+text = "Fall back to B3-1"
+classification = "command"
+order_type = "withdraw"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["B3-1"]
+
+[[case]]
+id = "withdraw_pull_back_en"
+text = "Pull back to B3-1"
+classification = "command"
+order_type = "withdraw"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["B3-1"]
+
+[[case]]
+id = "withdraw_ru_axis"
+text = "Отходите на рубеж C4-2"
+classification = "command"
+order_type = "withdraw"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["C4-2"]
+
+[[case]]
+id = "withdraw_retreat_ru"
+text = "Отступайте на рубеж B3-1"
+classification = "command"
+order_type = "withdraw"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["B3-1"]
+
+[[case]]
+id = "disengage_plain_en"
+text = "Disengage now"
+classification = "command"
+order_type = "disengage"
+
+[[case]]
+id = "disengage_break_contact_en"
+text = "Break contact and fall back to B3-1"
+classification = "command"
+order_type = "disengage"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["B3-1"]
+
+[[case]]
+id = "disengage_break_contact_ru"
+text = "Разорвите контакт и отходите к B3-1"
+classification = "command"
+order_type = "disengage"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["B3-1"]
+
+[[case]]
+id = "disengage_exit_battle_ru"
+text = "Выйдите из боя и отходите к B3-1"
+classification = "command"
+order_type = "disengage"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["B3-1"]
+
+[[case]]
+id = "observe_crossing_en"
+text = "Observe the crossing and report all movement"
+classification = "command"
+order_type = "observe"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "observe_watch_bridge_en"
+text = "Watch the bridge and report movement"
+classification = "command"
+order_type = "observe"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "observe_crossing_ru"
+text = "Наблюдайте за переправой и докладывайте обо всем движении"
+classification = "command"
+order_type = "observe"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "observe_watch_ru"
+text = "Ведите наблюдение за мостом и докладывайте"
+classification = "command"
+order_type = "observe"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "observe_recon_ru"
+text = "Разведайте район F6-4-7"
+classification = "command"
+order_type = "observe"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["F6-4-7"]
+
+[[case]]
+id = "attack_immediate_en"
+text = "Attack the enemy immediately"
+classification = "command"
+order_type = "attack"
+location_ref_types_contains = ["contact_target"]
+
+[[case]]
+id = "attack_engage_en"
+text = "Engage enemy at F6-4-7"
+classification = "command"
+order_type = "attack"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["F6-4-7"]
+
+[[case]]
+id = "attack_hasty_ru"
+text = "Атакуйте противника с ходу"
+classification = "command"
+order_type = "attack"
+location_ref_types_contains = ["contact_target"]
+
+[[case]]
+id = "attack_destroy_ru"
+text = "Уничтожьте противника у F6-4-7"
+classification = "command"
+order_type = "attack"
+location_ref_types_contains = ["snail"]
+location_normalized_contains = ["F6-4-7"]
+
+[[case]]
+id = "request_fire_en"
+text = "Request fire on the enemy position"
+classification = "command"
+order_type = "request_fire"
+location_ref_types_contains = ["contact_target"]
+
+[[case]]
+id = "call_for_fire_en"
+text = "Call for fire on the bridge crossing"
+classification = "command"
+order_type = "request_fire"
+map_object_type = "bridge_structure"
+
+[[case]]
+id = "request_fire_ru_artillery"
+text = "Наведите артиллерию на цель"
+classification = "command"
+order_type = "request_fire"
+coordination_unit_refs_contains = ["Artillery"]
+
+[[case]]
+id = "request_fire_ru_enemy"
+text = "Запросите огонь по противнику"
+classification = "command"
+order_type = "request_fire"
+location_ref_types_contains = ["contact_target"]
+
+[[case]]
+id = "resupply_ru_ammo"
+text = "Подвезите боеприпасы B-squad"
+classification = "command"
+order_type = "resupply"
+support_target_ref = "B-squad"
+
+[[case]]
+id = "breach_ru_minefield"
+text = "Проделайте проход в минном поле у F7-2-1"
+classification = "command"
+order_type = "breach"
+map_object_type = "minefield"
+location_ref_types_contains = ["snail"]
+
+[[case]]
+id = "lay_mines_ru"
+text = "Заминируйте северный подход"
+classification = "command"
+order_type = "lay_mines"
+map_object_type = "minefield"
+
+[[case]]
+id = "deploy_bridge_ru_simple"
+text = "Наведите мост у переправы E5-4"
+classification = "command"
+order_type = "deploy_bridge"
+map_object_type = "bridge_structure"
+location_ref_types_contains = ["snail"]
+
+[[case]]
+id = "split_half_ru"
+text = "Выделите половину сил"
+classification = "command"
+order_type = "split"
+split_ratio = 0.5
+
+[[case]]
+id = "merge_ru_simple"
+text = "Соединитесь с C-squad"
+classification = "command"
+order_type = "merge"
+merge_target_ref = "C-squad"
