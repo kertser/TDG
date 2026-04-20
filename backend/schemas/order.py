@@ -180,6 +180,14 @@ class ParsedOrderData(BaseModel):
                     "'task', 'condition', 'weather', 'objects', 'road_distance'",
     )
 
+    # For compound/multi-step commands
+    order_queue: list[dict] = Field(
+        default_factory=list,
+        description="For compound commands: subsequent phases after the primary order. "
+                    "Each entry: {order_type, locations: [{source_text, ref_type, normalized}], "
+                    "speed, formation, condition: 'task_completed'|'location_reached'}",
+    )
+
     # For acknowledgment / status_report messages
     report_text: Optional[str] = Field(
         None,
@@ -202,6 +210,7 @@ class ParsedOrderData(BaseModel):
         "coordination_unit_refs",
         "status_request_focus",
         "ambiguities",
+        "order_queue",
         mode="before",
     )
     @classmethod

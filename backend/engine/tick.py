@@ -858,6 +858,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                     "target_location": target_loc,
                     "target_unit_id": target_uid,
                     "coordination_unit_refs": list(task.get("coordination_unit_refs") or []),
+                    "coordination_unit_ids": list(task.get("coordination_unit_ids") or []),
+                    "supporting_unit_ids": list(task.get("supporting_unit_ids") or []),
                     "fire_effect_type": task.get("fire_effect_type"),
                     "map_object_type": task.get("map_object_type"),
                     "smoke_duration_ticks": task.get("smoke_duration_ticks"),

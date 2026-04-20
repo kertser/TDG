@@ -762,16 +762,22 @@ def _process_area_fire(
         * (1.0 - suppression)
     )
 
-    # Find enemy units within blast radius of the target location
+    # Find ALL units within blast radius of the target location
+    # Artillery shells don't discriminate — both enemy and friendly units
+    # in the blast radius take damage. The danger-close check above (50m)
+    # is the pre-fire safety check. Units beyond 50m but within 150m
+    # blast radius WILL take damage if the fire mission proceeds.
     hit_any = False
+    friendly_hit = False
     if _debug:
         dlog(f"    [area_fire] {attacker.name}: FIRING at ({target_lat:.4f},{target_lon:.4f}) dist={dist_to_target:.0f}m FE={fire_effectiveness:.1f} ammo={ammo:.2f}")
     for target in all_units:
         if target.is_destroyed:
             continue
+        if target.id == attacker.id:
+            continue  # Don't hit yourself
         t_side = target.side.value if hasattr(target.side, 'value') else str(target.side)
-        if t_side == attacker_side:
-            continue  # Same side — don't hit friendlies
+        is_friendly = (t_side == attacker_side)
 
         tgt_pos = _get_position(target)
         if tgt_pos is None:
@@ -808,6 +814,8 @@ def _process_area_fire(
         target.suppression = min(1.0, (target.suppression or 0.0) + suppression_inflicted)
 
         hit_any = True
+        if is_friendly:
+            friendly_hit = True
 
         if target.strength <= 0.01:
             target.is_destroyed = True
@@ -821,11 +829,12 @@ def _process_area_fire(
                 if u_task and u_task.get("target_unit_id") == str(target.id):
                     involved_ids.append(str(u.id))
                     u.current_task = None
+            _ff_label = " (FRIENDLY FIRE)" if is_friendly else ""
             events.append({
                 "event_type": "unit_destroyed",
                 "actor_unit_id": attacker.id,
                 "target_unit_id": target.id,
-                "text_summary": f"{attacker.name} destroyed {target.name} with indirect fire",
+                "text_summary": f"{attacker.name} destroyed {target.name} with indirect fire{_ff_label}",
                 "payload": {
                     "attacker": str(attacker.id),
                     "target": str(target.id),
@@ -833,17 +842,20 @@ def _process_area_fire(
                     "target_lat": tgt_pos[0],
                     "target_lon": tgt_pos[1],
                     "is_artillery": True,
+                    "friendly_fire": is_friendly,
                 },
             })
         else:
             fire_desc = _fire_intensity(damage)
             strength_desc = _strength_category(target.strength)
+            _event_type = "friendly_fire" if is_friendly else "combat"
+            _ff_label = " (FRIENDLY FIRE!)" if is_friendly else ""
             events.append({
-                "event_type": "combat",
+                "event_type": _event_type,
                 "actor_unit_id": attacker.id,
                 "target_unit_id": target.id,
                 "text_summary": (
-                    f"{attacker.name} area fire on {target.name} — "
+                    f"{attacker.name} area fire on {target.name}{_ff_label} — "
                     f"{fire_desc}, target {strength_desc}"
                 ),
                 "payload": {
@@ -857,17 +869,20 @@ def _process_area_fire(
                     "target_lon": target_lon,
                     "is_artillery": True,
                     "area_fire": True,
+                    "friendly_fire": is_friendly,
                 },
             })
 
     # Always generate an impact event for visual effects,
-    # even if no enemy was directly hit
+    # even if no unit was directly hit
+    _hits = [e for e in events if e.get("target_unit_id")]
+    _ff_warn = " ⚠ FRIENDLY FIRE!" if friendly_hit else ""
     events.append({
         "event_type": "combat",
         "actor_unit_id": attacker.id,
         "text_summary": (
             f"{attacker.name} firing at grid location"
-            + (f" — {len([e for e in events if e.get('target_unit_id')])} enemies in blast zone" if hit_any else " — area suppression")
+            + (f" — {len(_hits)} units in blast zone{_ff_warn}" if hit_any else " — area suppression")
         ),
         "payload": {
             "attacker": str(attacker.id),
@@ -876,6 +891,7 @@ def _process_area_fire(
             "is_artillery": True,
             "area_fire": True,
             "hit_enemies": hit_any,
+            "friendly_fire": friendly_hit,
         },
     })
 
@@ -1436,17 +1452,26 @@ def process_artillery_support(
                     continue
                 cand_name = (candidate.name or "").lower()
                 cand_id = str(candidate.id)
+                def _arty_ref_matches(ref: str, name: str) -> bool:
+                    if ref in name or name in ref:
+                        return True
+                    # Russian inflection stems for artillery/mortar
+                    _arty_stems = ["артилл", "artillery", "батар", "battery"]
+                    _mortar_stems = ["мином", "mortar", "миномёт", "миномет"]
+                    if any(s in ref for s in _arty_stems) and any(s in name for s in _arty_stems):
+                        return True
+                    if any(s in ref for s in _mortar_stems) and any(s in name for s in _mortar_stems):
+                        return True
+                    # unit_type keyword match
+                    if getattr(candidate, "unit_type", None) in ARTILLERY_TYPES:
+                        if any(s in ref for s in _arty_stems + _mortar_stems):
+                            return True
+                    return False
+
                 if (
                     cand_id in req_coord_ids
                     or cand_id in req_support_ids
-                    or any(
-                    ref in cand_name
-                    or cand_name in ref
-                    or (ref == "mortar" and "мином" in cand_name)
-                    or (ref == "миномёт" and "mortar" in cand_name)
-                    or (ref == "миномет" and "mortar" in cand_name)
-                    for ref in req_coord_refs
-                    )
+                    or any(_arty_ref_matches(ref, cand_name) for ref in req_coord_refs)
                 ):
                     preferred_artillery.append(candidate)
 
@@ -1466,6 +1491,18 @@ def process_artillery_support(
             visited.add(parent_id)
             candidate_groups.append(children_by_parent.get(parent_id, []))
             current_id = parent_id
+
+        # ── Fallback: scan ALL same-side artillery when CoC hierarchy not set up ──
+        # Many exercises don't have strict CoC. If no candidates found via preferred or
+        # CoC walk-up, try any available same-side artillery unit.
+        all_side_arty = [
+            u for u in all_units
+            if not getattr(u, "is_destroyed", False)
+            and getattr(u, "unit_type", None) in ARTILLERY_TYPES
+            and (u.side.value if hasattr(u.side, 'value') else str(u.side)) == unit_side
+        ]
+        if all_side_arty:
+            candidate_groups.append(all_side_arty)
 
         assigned = False
         for siblings in candidate_groups:
@@ -1676,6 +1713,16 @@ def process_artillery_support(
             candidate_groups.append(children_by_parent.get(parent_id, []))
             current_id = parent_id
 
+        # ── Fallback: scan ALL same-side artillery when CoC hierarchy not set up ──
+        all_side_arty = [
+            u for u in all_units
+            if not getattr(u, "is_destroyed", False)
+            and getattr(u, "unit_type", None) in ARTILLERY_TYPES
+            and (u.side.value if hasattr(u.side, 'value') else str(u.side)) == unit_side
+        ]
+        if all_side_arty:
+            candidate_groups.append(all_side_arty)
+
         assigned = False
         for siblings in candidate_groups:
             for sib in siblings:
@@ -1730,6 +1777,23 @@ def process_artillery_support(
                 if friendly_danger:
                     continue
 
+                # Blast zone friendly warning: check for friendlies in the full blast radius
+                # (beyond danger-close but within 150m blast zone). Fire will proceed but
+                # friendlies WILL take area damage — this is realistic artillery behavior.
+                _friendlies_in_blast = []
+                for fu in all_units:
+                    if fu.is_destroyed or fu.id == sib.id:
+                        continue
+                    fu_side = fu.side.value if hasattr(fu.side, 'value') else str(fu.side)
+                    if fu_side != unit_side:
+                        continue
+                    fu_pos = _get_position(fu)
+                    if fu_pos is None:
+                        continue
+                    d_f2t = _distance_m(fu_pos[0], fu_pos[1], actual_fire_target["lat"], actual_fire_target["lon"])
+                    if DANGER_CLOSE_RADIUS_M < d_f2t <= AREA_FIRE_BLAST_RADIUS_M:
+                        _friendlies_in_blast.append((fu.name, round(d_f2t, 0)))
+
                 # Assign fire mission
                 sib.current_task = {
                     "type": "fire",
@@ -1743,17 +1807,28 @@ def process_artillery_support(
                 tasked_artillery.add(str(sib.id))
 
                 support_label = "supporting" if support_type == "offensive_support" else "defending"
+                _blast_warn = ""
+                _blast_payload = {}
+                if _friendlies_in_blast:
+                    names = ", ".join(f"{n} ({d:.0f}m)" for n, d in _friendlies_in_blast)
+                    _blast_warn = f" ⚠ friendlies in blast zone: {names}"
+                    _blast_payload = {
+                        "friendlies_in_blast_zone": [
+                            {"name": n, "distance_m": d} for n, d in _friendlies_in_blast
+                        ],
+                    }
                 events.append({
                     "event_type": "artillery_support",
                     "actor_unit_id": sib.id,
                     "target_unit_id": uuid.UUID(actual_target_uid) if actual_target_uid else None,
-                    "text_summary": f"{sib.name} firing in support of {unit.name} ({support_label})",
+                    "text_summary": f"{sib.name} firing in support of {unit.name} ({support_label}){_blast_warn}",
                     "payload": {
                         "artillery_id": str(sib.id),
                         "supported_unit_id": str(unit.id),
                         "support_type": support_type,
                         "target_lat": actual_fire_target["lat"],
                         "target_lon": actual_fire_target["lon"],
+                        **_blast_payload,
                     },
                 })
                 assigned = True

@@ -97,6 +97,14 @@ If an attack or fire-support order references "the target", "на цель", "th
    - Prefer continuity with recent orders/radio traffic when wording is shorthand ("continue", "same target", "as before")
    - Consider weather, terrain, contacts, map objects, and latest reports when inferring intent
 
+5. **Handle compound/multi-step commands**: when a single message contains multiple sequential actions, return them as **phased orders** via the `order_queue` field (array of sub-orders):
+   - "Move to B8-3, then attack enemy forces" → primary order_type="move" to B8-3 + order_queue: [{{"order_type": "attack", "condition": "task_completed"}}]
+   - "Halt, set up defense, and request artillery support" → primary order_type="halt" + order_queue: [{{"order_type": "defend", "condition": "task_completed"}}, {{"order_type": "request_fire", "condition": "task_completed"}}]
+   - "Сначала выдвиньтесь к F7-5, затем займите оборону" → primary order_type="move" to F7-5 + order_queue: [{{"order_type": "defend", "condition": "task_completed"}}]
+   - Each sub-order in order_queue has: order_type, locations (if any), condition ("task_completed" or "location_reached"), and optional speed/formation
+   - The PRIMARY order is the FIRST action; subsequent ones go into order_queue
+   - If the command is simple (single action), order_queue should be null or empty
+
 ## Grid Reference Format
 
 The tactical grid uses alphanumeric labels (e.g., "B8", "C7", "A1").

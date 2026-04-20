@@ -735,6 +735,7 @@ class OrderParser:
         if parsing_mode == "llm_first":
             kw_conf = keyword_result.confidence
             kw_class = keyword_result.classification
+            _is_compound = False
 
             # ── 5a: Run local triage to get a cheap classification hint ──
             triage_result = None
@@ -747,7 +748,37 @@ class OrderParser:
                     kw_class.value,
                     kw_conf,
                 )
+                # Even when skipping full triage, check for compound commands via keywords
+                from backend.services.local_triage import detect_compound_keyword
+                if detect_compound_keyword(original_text):
+                    _is_compound = True
+                    kw_conf = min(kw_conf, 0.40)
+                    logger.info(
+                        "OrderParser[triage]: compound command detected via keywords → conf=%.2f",
+                        kw_conf,
+                    )
+
             if triage_result is not None:
+                # ── Compound command detection ──
+                if triage_result.is_compound:
+                    _is_compound = True
+                    kw_class = MessageClassification.command
+                    kw_conf = min(kw_conf, 0.35)  # forces full model
+                    keyword_result = keyword_result.model_copy(
+                        update={
+                            "classification": MessageClassification.command,
+                            "confidence": kw_conf,
+                            "ambiguities": [
+                                *(keyword_result.ambiguities or []),
+                                "Compound/multi-step command detected — requires full model parsing",
+                            ],
+                        }
+                    )
+                    logger.info(
+                        "OrderParser[triage]: compound command → forced full model (conf=%.2f)",
+                        kw_conf,
+                    )
+
                 # Merge triage into classification decision:
                 # If keyword and triage AGREE on non-command → higher confidence to skip LLM
                 # If they DISAGREE → lower confidence to force LLM
@@ -1319,6 +1350,14 @@ class OrderParser:
             _has_split_order = _has_any(order_detection_lexicon["split"])
             _has_merge_order = _has_any(order_detection_lexicon["merge"])
             _has_air_mobility_order = _has_any(order_detection_lexicon["air_mobility"])
+            # Fire adjustment (artillery correction) and fire direction between units
+            _has_fire_adjustment = _has_any(order_detection_lexicon.get("fire_adjustment", []))
+            _has_fire_direction = _has_any(order_detection_lexicon.get("fire_direction", []))
+            # Regroup / rally
+            _has_regroup_order = _has_any(order_detection_lexicon.get("regroup", []))
+            # "check fire" / "cease fire" / "прекратить огонь" → halt (cease fire)
+            _cease_fire_kw = ["check fire", "cease fire", "прекратить огонь", "прекрати огонь"]
+            _has_cease_fire = _has_any(_cease_fire_kw)
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
@@ -1331,6 +1370,9 @@ class OrderParser:
             if _is_standby and _has_any(order_detection_lexicon["standby_fire_support"]):
                 # Standby for fire support → observe/wait, NOT immediate fire
                 order_type = "observe"
+            elif _has_cease_fire:
+                # "Check fire", "Cease fire", "Прекратить огонь" → halt (stop shooting)
+                order_type = "halt"
             elif _has_split_order:
                 order_type = "split"
             elif _has_merge_order:
@@ -1359,6 +1401,12 @@ class OrderParser:
                 order_type = "attack"
             elif _has_any(order_detection_lexicon["direct_fire"]):
                 # Direct fire commands → fire
+                order_type = "fire"
+            elif _has_fire_adjustment:
+                # "Adjust fire", "Корректировка", "Fire for effect" → fire
+                order_type = "fire"
+            elif _has_fire_direction:
+                # "Concentrate fire on", "Сосредоточить огонь" → fire
                 order_type = "fire"
             elif _has_any(order_detection_lexicon["suppression"]):
                 # Suppression orders → fire
@@ -1411,9 +1459,22 @@ class OrderParser:
                 order_type = "halt"
             elif _has_any(order_detection_lexicon["resupply"]):
                 order_type = "resupply"
+            elif _has_regroup_order:
+                order_type = "move"  # regroup = move to rally point
             elif _has_follow_maneuver:
                 order_type = "move"
                 maneuver_kind = "follow"
+
+            # ── Fallback: command with location but no order type → move ──
+            # Colloquial phrases like "давай к F7-5-6" are commands but don't
+            # match any specific order detection, yet having a location implies movement.
+            if order_type is None and classification == MessageClassification.command:
+                _has_loc = bool(location_refs) if 'location_refs' in dir() else False
+                if not _has_loc:
+                    # Pre-check for locations in text (snail or grid patterns)
+                    _has_loc = bool(re.search(r'[A-Za-z]\d+(?:-\d)', text))
+                if _has_loc:
+                    order_type = "move"
 
         # Extract snail/grid references with regex
         location_refs = []
@@ -1790,6 +1851,10 @@ class OrderParser:
                 r'свяж(?:ись|итесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
                 r'скоординиру(?:й|йте)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
                 r'договор(?:ись|итесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                # Fire direction: "наведите артиллерию Art1 на цель" / "direct artillery Art1 at target"
+                r'навед(?:и|ите)\s+(?:артиллери\w*|миномёт\w*|минометн\w*|огонь)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'direct\s+(?:artillery|mortar|fire(?:\s+from)?)\s+([A-Za-z][\w-]+)',
+                r'call\s+(?:in\s+)?(?:fire\s+from|artillery\s+from|strikes?\s+from)\s+([A-Za-z][\w-]+)',
             ]
             for pat in coord_patterns:
                 for match in _re3.finditer(pat, text, _re3.IGNORECASE):
@@ -1956,12 +2021,18 @@ class OrderParser:
             text_lower = original_text.lower()
 
             # Check for multiple action verbs in the same command
-            move_verbs = ["move", "advance", "proceed", "выдвигай", "двигай", "марш", "движен"]
+            move_verbs = ["move", "advance", "proceed", "выдвигай", "двигай", "марш", "движен",
+                          "rally", "regroup", "перегруппируй"]
             attack_verbs = ["attack", "engage", "eliminate", "destroy", "neutralize",
-                           "fire", "shoot", "suppress",
-                           "атак", "уничтож", "ликвидир", "поразить", "огонь", "подавить"]
-            defend_verbs = ["defend", "hold", "оборон", "удержи"]
-            observe_verbs = ["observe", "recon", "scout", "наблюда", "разведк"]
+                           "fire", "shoot", "suppress", "assault", "storm",
+                           "атак", "уничтож", "ликвидир", "поразить", "огонь", "подавить",
+                           "штурмуй"]
+            defend_verbs = ["defend", "hold", "fortify", "entrench", "dig in",
+                           "оборон", "удержи", "окопай", "укрепи"]
+            observe_verbs = ["observe", "recon", "scout", "screen", "overwatch",
+                            "наблюда", "разведк", "прикрой наблюдением"]
+            engineer_verbs = ["breach", "mine", "bridge", "construct", "build",
+                             "разминир", "минируй", "мост", "построй"]
             # Coordination/leadership verbs indicate complex multi-unit orders
             coord_verbs = ["coordinate", "lead", "organize", "direct", "command",
                           "координируй", "организуй", "возглав", "руковод", "командуй"]
@@ -1971,8 +2042,9 @@ class OrderParser:
             has_defend = any(v in text_lower for v in defend_verbs)
             has_observe = any(v in text_lower for v in observe_verbs)
             has_coord = any(v in text_lower for v in coord_verbs)
+            has_engineer = any(v in text_lower for v in engineer_verbs)
 
-            verb_count = sum([has_move, has_attack, has_defend, has_observe])
+            verb_count = sum([has_move, has_attack, has_defend, has_observe, has_engineer])
 
             if verb_count >= 2:
                 # Multiple action verbs → complex command → reduce confidence
@@ -1982,6 +2054,11 @@ class OrderParser:
             # Coordination orders are inherently complex — always send to LLM
             if has_coord:
                 conf = min(conf, 0.50)  # cap at 0.50 to trigger full model
+
+            # Compound/sequential commands → force full model
+            from backend.services.local_triage import detect_compound_keyword
+            if detect_compound_keyword(original_text):
+                conf = min(conf, 0.40)  # cap well below nano threshold
 
             # Long commands (>50 chars) are more likely to be complex
             if len(original_text) > 50:

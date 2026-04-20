@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -316,9 +317,14 @@ async def get_replay_data(
     }
 
 
+class AARRequest(BaseModel):
+    language: str | None = None  # "en" or "ru" — overrides auto-detection
+
+
 @router.post("/{session_id}/aar")
 async def generate_aar(
     session_id: uuid.UUID,
+    request: AARRequest = AARRequest(),
     db: AsyncSession = Depends(get_db),
     participant=Depends(get_session_participant),
 ):
@@ -336,6 +342,26 @@ async def generate_aar(
     if session.scenario_id:
         sc_result = await db.execute(select(Scenario).where(Scenario.id == session.scenario_id))
         scenario = sc_result.scalar_one_or_none()
+
+    # ── Detect language: request body > order_service cache > scenario environment ──
+    lang = "en"
+    if scenario and isinstance(scenario.environment, dict):
+        env_lang = scenario.environment.get("language", "en")
+        if str(env_lang).lower() in ("ru", "rus", "russian", "русский"):
+            lang = "ru"
+    # Also check session-level language override via order_service cache
+    try:
+        from backend.services.order_service import get_session_language
+        side_lang = get_session_language(session_id, side if side in ("blue", "red") else "blue")
+        if side_lang in ("ru", "rus"):
+            lang = "ru"
+    except Exception:
+        pass
+    # Explicit client-provided language always wins
+    if request.language and str(request.language).lower() in ("ru", "rus", "russian", "русский"):
+        lang = "ru"
+    elif request.language and str(request.language).lower() in ("en", "eng", "english"):
+        lang = "en"
 
     ev_result = await db.execute(
         select(Event).where(Event.session_id == session_id)
@@ -416,57 +442,238 @@ async def generate_aar(
         f"KEY EVENTS TIMELINE:\n" + "\n".join(key_events)
     )
 
+    # ── Compute statistics for the report ──
+    combat_events = [e for e in events if e.event_type == "combat"]
+    contact_events = [e for e in events if e.event_type == "contact_new"]
+    destroyed_events = [e for e in events if e.event_type == "unit_destroyed"]
+    first_contact_tick = min((e.tick for e in contact_events), default=None)
+    first_combat_tick = min((e.tick for e in combat_events), default=None)
+    blue_orders = len([o for o in orders if o.issued_by_side and o.issued_by_side.value == "blue"])
+    red_orders = len([o for o in orders if o.issued_by_side and o.issued_by_side.value == "red"])
+
+    # Determine winner based on casualties
+    blue_casualties_pct = (blue_destroyed / len(blue_units) * 100) if blue_units else 0
+    red_casualties_pct = (red_destroyed / len(red_units) * 100) if red_units else 0
+    if red_destroyed > 0 and blue_destroyed == 0:
+        winner = "BLUE"
+        outcome = "Decisive Blue Victory" if lang == "en" else "Решительная победа синих"
+    elif blue_destroyed > 0 and red_destroyed == 0:
+        winner = "RED"
+        outcome = "Decisive Red Victory" if lang == "en" else "Решительная победа красных"
+    elif red_casualties_pct > blue_casualties_pct + 20:
+        winner = "BLUE"
+        outcome = "Blue Tactical Victory" if lang == "en" else "Тактическая победа синих"
+    elif blue_casualties_pct > red_casualties_pct + 20:
+        winner = "RED"
+        outcome = "Red Tactical Victory" if lang == "en" else "Тактическая победа красных"
+    else:
+        winner = "DRAW"
+        outcome = "Inconclusive / Draw" if lang == "en" else "Ничья / Неопределённый результат"
+
+    # ── Build LLM system prompt (bilingual) ──
+    if lang == "ru":
+        system_prompt = (
+            "Вы — старший офицер штаба, составляющий официальный разбор учения (AAR) "
+            "для тактического командно-штабного учения. Пишите строго на русском языке, "
+            "в профессиональном военном стиле.\n\n"
+            "Структурируйте доклад ТОЧНО следующим образом:\n"
+            "# РАЗБОР УЧЕНИЯ\n\n"
+            "## 1. ОБСТАНОВКА\n"
+            "Краткий обзор сценария, задействованных сил и задач.\n\n"
+            "## 2. ЗАДАЧА\n"
+            "Что должна была выполнить каждая сторона.\n\n"
+            "## 3. ХОД ВЫПОЛНЕНИЯ\n"
+            "Хронологическое описание проведения операции. Упоминать конкретные подразделения и ходы.\n\n"
+            "## 4. РЕЗУЛЬТАТЫ\n"
+            "Состояние сил по итогам учения. Потери. Выполнение/невыполнение задач.\n\n"
+            "## 5. АНАЛИЗ\n"
+            "### а. Что прошло успешно\n"
+            "### б. Что прошло неудовлетворительно\n"
+            "### в. Ключевые моменты принятия решений\n\n"
+            "## 6. ВЫВОДЫ\n"
+            "Нумерованный список тактических выводов.\n\n"
+            "## 7. РЕКОМЕНДАЦИИ\n"
+            "Конкретные рекомендации для будущих операций.\n\n"
+            "Используйте военную терминологию. Ссылайтесь на конкретные подразделения и номера ходов. "
+            "Будьте аналитичны, не обобщайте. Не более 1000 слов."
+        )
+    else:
+        system_prompt = (
+            "You are a senior military staff officer writing a formal After-Action Report (AAR) "
+            "for a tactical command-staff exercise. Write in professional military style.\n\n"
+            "Structure your report EXACTLY as follows:\n"
+            "# AFTER-ACTION REPORT\n\n"
+            "## 1. SITUATION\n"
+            "Brief overview of the scenario, forces involved, and mission objectives.\n\n"
+            "## 2. MISSION\n"
+            "What each side was tasked to accomplish.\n\n"
+            "## 3. EXECUTION SUMMARY\n"
+            "Chronological narrative of how the operation unfolded. Reference specific units and turns.\n\n"
+            "## 4. RESULTS\n"
+            "Force status at end of exercise. Casualties. Objectives achieved/failed.\n\n"
+            "## 5. ANALYSIS\n"
+            "### a. What went well\n"
+            "### b. What went wrong\n"
+            "### c. Key decision points\n\n"
+            "## 6. LESSONS LEARNED\n"
+            "Numbered list of tactical lessons.\n\n"
+            "## 7. RECOMMENDATIONS\n"
+            "Specific recommendations for future operations.\n\n"
+            "Use military terminology. Reference specific unit names and turn numbers. "
+            "Be analytical, not generic. Maximum 1000 words."
+        )
+
     try:
         from backend.services.llm_client import get_llm_client
         llm = get_llm_client()
         if llm is None:
             raise RuntimeError("No LLM configured")
-        resp = await llm.client.chat.completions.create(
-            model=llm.model,
-            messages=[
-                {"role": "system", "content": (
-                    "You are a senior military staff officer writing a formal After-Action Report (AAR) "
-                    "for a tactical command-staff exercise. Write in professional military style.\n\n"
-                    "Structure your report EXACTLY as follows:\n"
-                    "# AFTER-ACTION REPORT\n\n"
-                    "## 1. SITUATION\n"
-                    "Brief overview of the scenario, forces involved, and mission objectives.\n\n"
-                    "## 2. MISSION\n"
-                    "What each side was tasked to accomplish.\n\n"
-                    "## 3. EXECUTION SUMMARY\n"
-                    "Chronological narrative of how the operation unfolded. Reference specific units and turns.\n\n"
-                    "## 4. RESULTS\n"
-                    "Force status at end of exercise. Casualties. Objectives achieved/failed.\n\n"
-                    "## 5. ANALYSIS\n"
-                    "### a. What went well\n"
-                    "### b. What went wrong\n"
-                    "### c. Key decision points\n\n"
-                    "## 6. LESSONS LEARNED\n"
-                    "Numbered list of tactical lessons.\n\n"
-                    "## 7. RECOMMENDATIONS\n"
-                    "Specific recommendations for future operations.\n\n"
-                    "Use military terminology. Reference specific unit names and turn numbers. "
-                    "Be analytical, not generic. Maximum 1000 words."
-                )},
+
+        # Use max_completion_tokens for newer models, fallback to max_tokens
+        api_params = {
+            "model": llm.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context},
             ],
-            temperature=0.3,
-            max_tokens=3000,
-        )
+            "temperature": 0.3,
+        }
+
+        # Try max_completion_tokens first (for o1/o3/gpt-4.1), fallback to max_tokens
+        try:
+            api_params["max_completion_tokens"] = 3000
+            resp = await llm.client.chat.completions.create(**api_params)
+        except Exception as param_err:
+            if "max_completion_tokens" in str(param_err) or "unsupported_parameter" in str(param_err):
+                del api_params["max_completion_tokens"]
+                api_params["max_tokens"] = 3000
+                resp = await llm.client.chat.completions.create(**api_params)
+            else:
+                raise
+
         aar_text = resp.choices[0].message.content
     except Exception as e:
-        aar_text = (
-            f"# AFTER-ACTION REPORT\n\n"
-            f"## 1. SITUATION\n"
-            f"{scenario_ctx or 'Tactical exercise.'}\n\n"
-            f"## 2. RESULTS\n"
-            f"Exercise concluded after {session.tick} turns.\n"
-            f"- Blue: {len(blue_units) - blue_destroyed}/{len(blue_units)} surviving ({blue_destroyed} destroyed)\n"
-            f"- Red: {len(red_units) - red_destroyed}/{len(red_units)} surviving ({red_destroyed} destroyed)\n\n"
-            f"## 3. KEY EVENTS\n"
-            + "\n".join(f"- {line}" for line in key_events[-30:])
-            + f"\n\n---\n*Detailed LLM analysis unavailable: {e}*"
+        # ── Enhanced fallback report with full structure ──
+        import logging
+        logging.getLogger(__name__).warning("AAR LLM failed: %s", e)
+
+        # Build detailed execution summary from events
+        execution_phases = []
+        if lang == "ru":
+            if first_contact_tick:
+                execution_phases.append(f"- **Ход {first_contact_tick}**: Первый контакт с противником")
+            if first_combat_tick:
+                execution_phases.append(f"- **Ход {first_combat_tick}**: Начало боевых действий")
+            for ev in destroyed_events:
+                if ev.text_summary:
+                    execution_phases.append(f"- **Ход {ev.tick}**: {ev.text_summary}")
+        else:
+            if first_contact_tick:
+                execution_phases.append(f"- **Turn {first_contact_tick}**: First enemy contact established")
+            if first_combat_tick:
+                execution_phases.append(f"- **Turn {first_combat_tick}**: Combat operations commenced")
+            for ev in destroyed_events:
+                if ev.text_summary:
+                    execution_phases.append(f"- **Turn {ev.tick}**: {ev.text_summary}")
+
+        execution_summary = (
+            "\n".join(execution_phases) if execution_phases
+            else ("- Значимых боевых событий не зафиксировано" if lang == "ru"
+                  else "- No significant combat actions recorded")
         )
+
+        # Build key events list (filter most important)
+        filtered_events = [
+            line for line in key_events
+            if any(kw in line for kw in ["destroyed", "contact_new", "artillery", "morale_break", "order_completed"])
+        ][-20:]
+
+        if lang == "ru":
+            aar_text = (
+                f"# РАЗБОР УЧЕНИЯ\n\n"
+                f"---\n"
+                f"**Гриф:** ДЛЯ СЛУЖЕБНОГО ПОЛЬЗОВАНИЯ\n"
+                f"**Дата:** Завершение учения\n"
+                f"**Продолжительность:** {session.tick} ходов\n"
+                f"---\n\n"
+                f"## 1. ОБСТАНОВКА\n\n"
+                f"{scenario_ctx or 'Тактическое командно-штабное учение.'}\n\n"
+                f"**Исходная расстановка сил:**\n"
+                f"- Синие: {len(blue_units)} подразделений\n"
+                f"- Красные: {len(red_units)} подразделений\n\n"
+                f"## 2. ЗАДАЧА\n\n"
+                f"Синие и красные провели тактическое учение в условиях огневого контакта.\n\n"
+                f"## 3. ХОД ВЫПОЛНЕНИЯ\n\n"
+                f"{execution_summary}\n\n"
+                f"## 4. РЕЗУЛЬТАТЫ\n\n"
+                f"### Состояние сил по итогам учения\n\n"
+                f"| Сторона | Нач. состав | Выжило | Уничтожено | Потери |\n"
+                f"|---------|------------|--------|------------|--------|\n"
+                f"| Синие   | {len(blue_units)} | {len(blue_units) - blue_destroyed} | {blue_destroyed} | {blue_casualties_pct:.0f}% |\n"
+                f"| Красные | {len(red_units)} | {len(red_units) - red_destroyed} | {red_destroyed} | {red_casualties_pct:.0f}% |\n\n"
+                f"### Оценка: **{outcome}**\n\n"
+                f"## 5. АНАЛИЗ\n\n"
+                f"### а. Тактические показатели\n"
+                f"- Первый контакт: ход {first_contact_tick or 'Н/Д'}\n"
+                f"- Продолжительность боя: {(session.tick - (first_combat_tick or session.tick))} ходов\n"
+                f"- Отдано приказов: синие — {blue_orders}, красные — {red_orders}\n\n"
+                f"### б. Ключевые моменты принятия решений\n"
+                f"- Исходная расстановка и выдвижение к рубежу встречи\n"
+                f"- Решения по вступлению в огневой контакт\n"
+                f"- Координация огня и манёвра\n\n"
+                f"## 6. ХРОНОЛОГИЯ КЛЮЧЕВЫХ СОБЫТИЙ\n\n"
+                + "\n".join(f"- {line}" for line in filtered_events)
+                + f"\n\n## 7. ВЫВОДЫ\n\n"
+                f"1. Эффективность управления и контроля\n"
+                f"2. Организация огневой поддержки\n"
+                f"3. Выполнение тактического манёвра\n\n"
+                f"---\n"
+                f"*ИИ-анализ недоступен ({type(e).__name__})*\n"
+                f"*Доклад сформирован по данным учения*"
+            )
+        else:
+            aar_text = (
+                f"# AFTER-ACTION REPORT\n\n"
+                f"---\n"
+                f"**Classification:** UNCLASSIFIED // FOR OFFICIAL USE ONLY\n"
+                f"**Date:** Exercise Completion\n"
+                f"**Duration:** {session.tick} Turns\n"
+                f"---\n\n"
+                f"## 1. SITUATION\n\n"
+                f"{scenario_ctx or 'Tactical command-staff exercise.'}\n\n"
+                f"**Initial Force Disposition:**\n"
+                f"- Blue Force: {len(blue_units)} unit(s)\n"
+                f"- Red Force: {len(red_units)} unit(s)\n\n"
+                f"## 2. MISSION\n\n"
+                f"Blue Force and Red Force conducted a tactical engagement exercise.\n\n"
+                f"## 3. EXECUTION SUMMARY\n\n"
+                f"{execution_summary}\n\n"
+                f"## 4. RESULTS\n\n"
+                f"### Force Status at Exercise End\n\n"
+                f"| Force | Initial | Surviving | Destroyed | Casualty Rate |\n"
+                f"|-------|---------|-----------|-----------|---------------|\n"
+                f"| Blue  | {len(blue_units)} | {len(blue_units) - blue_destroyed} | {blue_destroyed} | {blue_casualties_pct:.0f}% |\n"
+                f"| Red   | {len(red_units)} | {len(red_units) - red_destroyed} | {red_destroyed} | {red_casualties_pct:.0f}% |\n\n"
+                f"### Assessment: **{outcome}**\n\n"
+                f"## 5. ANALYSIS\n\n"
+                f"### a. Tactical Performance\n"
+                f"- First contact: Turn {first_contact_tick or 'N/A'}\n"
+                f"- Combat duration: {(session.tick - (first_combat_tick or session.tick))} turns\n"
+                f"- Orders issued: Blue {blue_orders}, Red {red_orders}\n\n"
+                f"### b. Key Decision Points\n"
+                f"- Initial disposition and movement to contact\n"
+                f"- Engagement decisions upon contact\n"
+                f"- Fire and maneuver coordination\n\n"
+                f"## 6. KEY EVENTS TIMELINE\n\n"
+                + "\n".join(f"- {line}" for line in filtered_events)
+                + f"\n\n## 7. LESSONS IDENTIFIED\n\n"
+                f"1. Command and control effectiveness\n"
+                f"2. Fire support coordination\n"
+                f"3. Tactical maneuver execution\n\n"
+                f"---\n"
+                f"*AI Staff Analysis: Unavailable ({type(e).__name__})*\n"
+                f"*Report generated from exercise data*"
+            )
 
     return {"aar": aar_text}
 

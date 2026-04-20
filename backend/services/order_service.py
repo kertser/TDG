@@ -2130,7 +2130,15 @@ class OrderService:
                 type_keywords = self._get_type_keywords(unit_type)
                 for kw in type_keywords:
                     if kw in ref_lower:
-                        score += 15
+                        score += 20  # was 15 — boost so artillery stem matches reach threshold
+
+                # Russian inflected artillery/mortar stems — direct type match
+                _arty_ru_stems = ["артилл", "батар", "артиллер"]
+                _mort_ru_stems = ["мином", "миномёт", "миномет"]
+                if any(s in ref_lower for s in _arty_ru_stems) and "artillery" in unit_type:
+                    score = max(score, 60)
+                if any(s in ref_lower for s in _mort_ru_stems) and "mortar" in unit_type:
+                    score = max(score, 60)
 
                 # Russian ordinals
                 ru_ordinals = {

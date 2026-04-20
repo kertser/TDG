@@ -133,7 +133,7 @@ def test_breach_context_builder_prioritizes_engineer_and_map_object_data():
             "  - Roadblock Alpha (roadblock, category=obstacle, side=red) at (48.1502, 24.7101)\n"
             "  - Supply cache (supply_cache, category=support, side=blue) at (48.1200, 24.6800)"
         ),
-        is_local=True,
+        profile="local",
     )
 
     assert retrieved.units_for_prompt[0]["name"] == "Combat engineers"
@@ -176,7 +176,7 @@ def test_request_fire_context_builder_prioritizes_contacts_and_reports():
             "  - 2026-04-17T11:57:00Z [spotrep] from HQ: Smoke recommended before movement."
         ),
         map_objects_context="Known map objects / points of interest (1):\n  - Eastern crossing (bridge_structure, category=mobility, side=neutral) at (48.1500, 24.7100)",
-        is_local=False,
+        profile="cloud",
     )
 
     assert "machine-gun" in retrieved.contacts_context.lower()
@@ -235,7 +235,7 @@ def test_state_packet_and_continuity_hints_capture_shorthand_context_for_local_m
             "  - Eastern bridge (bridge_structure, category=mobility, side=neutral) at (48.1500, 24.7100)\n"
             "  - Smoke screen Bravo (smoke, category=effect, side=blue) at (48.1499, 24.7099)"
         ),
-        is_local=True,
+        profile="local",
     )
 
     assert "Parser state packet:" in retrieved.state_packet
