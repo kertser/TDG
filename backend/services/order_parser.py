@@ -1748,8 +1748,8 @@ class OrderParser:
                 r'join\s+up\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
                 r'combine\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
                 r'соедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
-                r'объедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
-                r'слей(?:ся|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'объедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-ZazlА-Яа-яё][\w-]+)*)',
+                r'слей(?:ся|тесь)\s+с\s+([A-ZazlА-Яа-яё][\w-]+(?:\s+[A-ZazlА-Яа-яё][\w-]+)*)',
             ]
             for pat in merge_patterns:
                 match = _re_merge.search(pat, text, _re_merge.IGNORECASE)
@@ -1807,11 +1807,12 @@ class OrderParser:
                 r'follow\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
                 r'trail\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
                 r'keep\s+behind\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
-                r'следуй\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
-                r'следовать\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
-                r'иди\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
-                r'двигай(?:ся)?\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
-                r'держ(?:ись|аться)\s+за\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'следуй(?:те)?\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'следовать\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'иди(?:те)?\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'двигай(?:ся|тесь|те)?\s+(?:вслед\s+)?за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'держ(?:ись|итесь|аться)\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'вслед\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
             ]
             for pat in follow_patterns:
                 for match in _re3.finditer(pat, text, _re3.IGNORECASE):

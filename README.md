@@ -20,11 +20,14 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge, authority checks, and support for command-driven reorganization orders
 - **Admin Panel** — Floating admin window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, area effects placement
 - **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with tactical assessment, smart formation suggestion, height/coordinate/snail location resolution, immediate task assignment, map-object-aware engineer/logistics handling, and doctrinal parsing of split/merge and support-unit commands
+- **Order Phrasebook** — Data-driven keyword lexicon (`order_phrasebook.toml`) for bilingual command classification, order type detection, speed/formation parsing, engagement rules, location references, and 60+ regression test cases; loaded at runtime by the order parser
 - **Doctrine-Aware Prompting** — Tactical doctrine is loaded from `FIELD_MANUAL.md` and injected by topic so prompts receive only relevant slices such as fires, recon, engineers, logistics, aviation, map objects, or split/merge
 - **Prompt Compression & Retrieval** — 4-layer context packing for local/cloud LLM: task frame, state deltas (not full history), topic-scoped doctrine cards (BM25-like retrieval), dynamically selected few-shot exemplars. Negative context suppression omits empty sections. Deterministic continuity resolution ("same target", "the bridge"). Prompt-result cache with 5min TTL. Static system prefix for llama.cpp KV cache reuse. Typical prompt size: 1292–1648 tokens.
 - **Local LLM Support** — Air-gapped deployment via llama.cpp (OpenAI-compatible API). Docker Compose profile `llm` with CPU-tuned settings: ctx=4096, reasoning off, Q4_K_M quantization, KV cache reuse. Configurable via `LOCAL_MODEL_URL` / `LOCAL_MODEL_NAME` in `.env`. Three parsing modes: `llm_first` (default), `keyword_first` (legacy), `keyword_only` (offline).
 - **Radio Chat** — Tactical radio channel between session commanders with recipient selection, three channel filters (All / 💬 Chat / 📡 Units), and unread indicator. Auto-generated unit radio chatter: idle reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance halt/resume
 - **Reports** — Five auto-generated report types: SPOTREP (enemy contacts), SHELREP (under fire), CASREP (unit destroyed), SITREP (periodic status), INTSUM (intelligence summary). Bilingual RU/EN. Unread badge on sidebar tab.
+- **Session Replay** — Turn-by-turn playback with transport controls (play/pause, step forward/back, speed 0.5×–4×), timeline slider, per-tick unit position rendering with smooth animation, and LLM-generated After-Action Report (AAR)
+- **Internationalization (i18n)** — Full EN/RU UI language switching via `KI18n` module; `data-i18n` HTML attributes for declarative translation; language selector in user settings; real-time re-rendering on language change
 - **AI Victory Referee** — LLM-based victory evaluation every 5 ticks against scenario objectives. Game turn limit support. Auto-finish on victory or turn limit.
 - **Red AI Opponents** — AI commander agents with 4 doctrine profiles (aggressive/balanced/cautious/defensive), limited knowledge (no Blue leaks), LLM decisions with rule-based fallback
 - **Game Log** — Append-only event timeline, reports panel with channel filtering, app log (separated from tactical data)
@@ -92,6 +95,107 @@ LOCAL_MODEL_NAME=local
 LLM_PARSING_MODE=llm_first   # or keyword_first, keyword_only
 ```
 
+## Order Parsing Pipeline
+
+```
+Player types radio message
+         │
+         ▼
+┌─────────────────────────────────┐
+│  1. KEYWORD PARSER  (~0 ms)     │  Deterministic regex/keyword matching via
+│     order_phrasebook.toml       │  order_phrasebook.toml lexicon.
+│                                 │  Extracts: classification, order_type,
+│     → ParsedOrderData           │  locations, units, speed, formation,
+│     + confidence 0.15–0.90      │  engagement rules.
+└──────────┬──────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────┐
+│  2. LOCAL TRIAGE  (optional)    │  If LOCAL_TRIAGE_ENABLED and local LLM
+│     ~200-token prompt, 2 s      │  is available. Asks only:
+│     timeout, 30 s backoff       │  "command / ack / report / request / unclear?"
+│                                 │  + language detection (en/ru).
+│  Agrees with keyword?           │
+│   → boost confidence +0.10      │  No doctrine, no context, no few-shot.
+│  Disagrees?                     │
+│   → reduce confidence           │
+│   → force full cloud model      │
+│  Unavailable?                   │
+│   → skip, use keyword conf      │
+└──────────┬──────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────┐
+│  3. ROUTING DECISION            │
+│                                 │
+│  Non-command + conf ≥ 0.95 ───► SKIP LLM, return keyword result
+│                                 │
+│  Command + conf ≥ 0.70 ───────► Cloud NANO  (gpt-5-nano)
+│                                 │
+│  Command + conf < 0.70 ───────► Cloud FULL  (gpt-5.4-mini)
+│  or unclear                     │
+└──────────┬──────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  4. CONTEXT BUILDING  (retrieval_context.py, profile="cloud")   │
+│                                                                 │
+│  ┌─ Doctrine (RAG-like) ─────────────────────────────────────┐  │
+│  │  Infer topics from order text → extract matching sections │  │
+│  │  from FIELD_MANUAL.md → BM25-like scoring → top 6, ≤2 KB  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│  ┌─ Unit Roster ─────────────────────────────────────────────┐  │
+│  │  Rank units by relevance (target refs, type match) → 18   │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│  ┌─ 9 Contextual Sections ───────────────────────────────────┐  │
+│  │  terrain · contacts · friendly_status · objectives        │  │
+│  │  environment · orders · radio · reports · map_objects     │  │
+│  │  Each section: score by query-token overlap + recency,    │  │
+│  │  pick top N lines. Empty sections suppressed entirely.    │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│  ┌─ State Packet (≤ 2400 chars) ─────────────────────────────┐  │
+│  │  task frame · compact unit atoms · section summaries      │  │
+│  │  history digest · continuity hints · height tops          │  │
+│  └───────────────────────────────────────────────────────────┘  │
+└──────────┬──────────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  5. CLOUD LLM CALL                                              │
+│                                                                 │
+│  SYSTEM (~3–5 K tokens): parsing instructions, doctrine         │
+│    excerpt, grid format, unit roster, 9 context sections,       │
+│    Russian radio conventions                                    │
+│                                                                 │
+│  USER (~0.5–1.5 K tokens): radio message text, state packet,    │
+│    continuity hints, 1–4 few-shot examples (by order type+lang) │
+│                                                                 │
+│  Response → JSON → Pydantic validation → ParsedOrderData        │
+└──────────┬──────────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────────────────┐
+│  6. RECONCILIATION              │  Merge LLM result with keyword hints:
+│     _reconcile_llm_result()     │  • Strong command frame → prevent downgrade
+│                                 │  • Fire-request signals → preserve order_type
+│                                 │  • Nano returns "unclear" → escalate to full
+└──────────┬──────────────────────┘
+           │
+           ▼
+   ParsedOrderData
+           │
+     ┌─────┴──────┬────────────────┐
+     ▼            ▼                ▼
+IntentInterp. LocationResolver  ResponseGen.
+(deterministic) (grid/coord/    (template-based
+ 25+ rules)      snail/height)   unit radio ack)
+     │            │                │
+     └─────┬──────┘                │
+           ▼                       ▼
+      OrderService ──────► WebSocket broadcast
+    (persist + task assign)  (order status + unit response)
+```
+
 ## Doctrine Loading
 
 - `FIELD_MANUAL.md` is the authoritative tactical source.
@@ -109,6 +213,20 @@ LLM_PARSING_MODE=llm_first   # or keyword_first, keyword_only
   - `map_objects`
   - `split_merge`
 
+## Order Phrasebook
+
+The keyword parser is driven by `backend/data/order_phrasebook.toml` — a structured TOML file that contains:
+
+- **Classification lexicon** — bilingual command/ack/report/status-request keywords
+- **Order detection patterns** — standby, coordination, fire requests, breach, mining, bridge deployment, construction, smoke, split/merge, air mobility, screening, withdrawal, disengage, resupply, and more
+- **Speed keywords** — slow/fast movement qualifiers in EN and RU (30+ keywords each)
+- **Formation patterns** — column, line, wedge, vee, echelon, diamond, box, staggered, herringbone with explicit prefix patterns
+- **Engagement rules** — hold fire, fire at will, return fire only
+- **Location object patterns** — minefields, barbed wire, bridges, pillboxes, command posts, supply caches, etc.
+- **60+ regression test cases** — `[[case]]` entries with expected classification, order type, location refs, speed, and map object type; validated by the test suite
+
+The phrasebook is loaded at startup by `backend/services/order_phrasebook.py` and consumed by the order parser for deterministic keyword matching before any LLM call.
+
 ## Usage
 
 1. Enter a callsign and password, then click **Register** (first time) or **Login**
@@ -123,6 +241,8 @@ LLM_PARSING_MODE=llm_first   # or keyword_first, keyword_only
 10. **Advance simulation** by clicking **Execute Orders** — units move along A*-optimized paths, detect enemies, fight with coordinated roles, and report back via radio
 11. View events and reports in the sidebar tabs (**Events**, **Reports** with unread badge); click the **📋 session name** for scenario briefing
 12. Reference **height tops** in orders: *"Move toward height 170"* / *"Выдвинуться к высоте 170"*
+13. **Switch language**: open user settings and select English or Russian — the entire UI updates in real-time
+14. **Replay a session**: hover the game clock (bottom-right) and click **Replay** to load turn-by-turn playback; use transport controls to step through ticks or auto-play; click **📊 AAR** to generate an AI-written After-Action Report
 
 ### Admin Panel
 Press the admin button (🔑) and enter the admin password to access:
@@ -222,7 +342,9 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 |---|---|
 | `frontend/config/unit_types.json` | Unit type registry: SIDC codes, speeds, ranges, personnel, eye heights |
 | `frontend/config/units_config.json` | Display/behavior constants: status icons, formations, movement arrows, selection params |
-| `backend/config.py` | Server configuration: DB URL, Redis, API keys |
+| `backend/data/order_phrasebook.toml` | Bilingual keyword lexicon + regression test cases for order parsing |
+| `FIELD_MANUAL.md` | Tactical doctrine source (loaded by `backend/prompts/tactical_doctrine.py`) |
+| `backend/config.py` | Server configuration: DB URL, Redis, API keys, LLM settings |
 | `.env` | Environment variables (secrets, overrides) |
 
 ## Testing
@@ -253,6 +375,9 @@ python -m scripts.tactical_tests.run_all
 - River crossing (bridge requirements)
 - Withdraw under pressure (morale, disengage)
 
+### Order Phrasebook Regression
+The `order_phrasebook.toml` file contains 60+ `[[case]]` entries that serve as regression tests for the keyword parser. Each case specifies input text and expected outputs (classification, order type, locations, speed, map object type). These are validated by the test suite to prevent parser regressions.
+
 See `scripts/tactical_tests/` for scenario definitions and the test framework.
 
 ## API Documentation
@@ -263,6 +388,60 @@ FastAPI auto-generates interactive docs:
 ## Project Structure
 See `AGENTS.MD` for full architecture, domain model, and implementation roadmap.
 
+```
+KShU/
+├── AGENTS.MD                       # Architecture & implementation guide
+├── FIELD_MANUAL.md                 # Tactical doctrine source
+├── README.md
+├── Task.MD                         # Original project requirements
+├── requirements.txt
+├── docker-compose.yml              # PostgreSQL+PostGIS, Redis, optional llama.cpp
+├── alembic.ini
+├── .env
+├── backend/
+│   ├── main.py                     # FastAPI app factory
+│   ├── config.py                   # Pydantic settings
+│   ├── database.py                 # Async SQLAlchemy engine
+│   ├── models/                     # SQLAlchemy models (15 tables)
+│   ├── api/                        # REST + WebSocket endpoints
+│   ├── engine/                     # Deterministic rules engine (tick processing)
+│   ├── services/                   # Business logic (grid, orders, visibility, pathfinding, etc.)
+│   │   ├── order_parser.py         # 3-tier LLM routing (keyword→nano→full)
+│   │   ├── order_phrasebook.py     # TOML phrasebook loader
+│   │   ├── pathfinding_service.py  # Tactical A* over terrain cells
+│   │   ├── retrieval_context.py    # Prompt compression & doctrine retrieval
+│   │   ├── local_triage.py         # Local LLM triage classifier
+│   │   ├── los_service.py          # LOS viewshed ray casting
+│   │   └── terrain_analysis/       # OSM + ESA + elevation analyzers
+│   ├── data/
+│   │   └── order_phrasebook.toml   # Bilingual keyword lexicon + regression cases
+│   ├── prompts/                    # LLM prompt templates
+│   ├── schemas/                    # Pydantic v2 schemas
+│   └── tests/                      # Unit & integration tests
+├── frontend/
+│   ├── index.html
+│   ├── config/                     # unit_types.json, units_config.json
+│   ├── css/style.css
+│   └── js/
+│       ├── app.js                  # Main entry, WS handlers
+│       ├── map.js                  # Leaflet map, game clock
+│       ├── units.js                # Unit rendering, selection, movement
+│       ├── orders.js               # Command panel + radio chat
+│       ├── admin.js                # Admin panel (~4300 lines)
+│       ├── i18n.js                 # EN/RU internationalization
+│       ├── replay.js               # Session replay with AAR
+│       ├── terrain.js              # Terrain overlay + elevation
+│       ├── map_objects.js          # Tactical objects (mines, wire, bridges, etc.)
+│       ├── overlays.js             # Drawing tools
+│       ├── dialogs.js              # Themed confirm/alert/prompt modals
+│       └── ...                     # contacts, events, reports, grid, symbols, etc.
+├── scripts/
+│   ├── seed_scenario.py            # DB seed script
+│   ├── download_model.ps1          # Download local LLM model
+│   └── tactical_tests/             # Automated tactical scenario framework
+└── models/                         # Local LLM model files (GGUF)
+```
+
 ## Tech Stack
 | Layer | Technology |
 |---|---|
@@ -270,6 +449,7 @@ See `AGENTS.MD` for full architecture, domain model, and implementation roadmap.
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, GeoAlchemy2 |
 | Database | PostgreSQL 16 + PostGIS 3.4 |
 | Cache/PubSub | Redis 7 |
-| AI | OpenAI GPT-4.1 (order parsing, Red AI decisions, unit responses); local llama.cpp fallback (Gemma/Qwen GGUF) |
+| AI | OpenAI GPT-4.1 / GPT-5 (order parsing, Red AI decisions, unit responses, AAR); local llama.cpp fallback (Gemma/Qwen GGUF) |
 | Geospatial | Shapely, pyproj, PostGIS spatial queries |
 | Terrain Data | OSM Overpass API, ESA WorldCover 2021, Open-Elevation API |
+| i18n | Custom `KI18n` module with EN/RU dictionaries |

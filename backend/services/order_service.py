@@ -568,6 +568,15 @@ class OrderService:
                 task["follow_unit_name"] = lead.get("name", "")
                 task["follow_distance_m"] = 120.0
 
+                # Set initial target_location from leader's current position
+                # so the unit starts moving immediately (tick engine will update dynamically)
+                if lead.get("lat") is not None and lead.get("lon") is not None:
+                    if not task.get("target_location"):
+                        task["target_location"] = {
+                            "lat": lead["lat"],
+                            "lon": lead["lon"],
+                        }
+
                 side_hint = task.get("maneuver_side")
                 if side_hint == "left":
                     task["follow_offset_m"] = {"rear": 120.0, "lateral": -40.0}
