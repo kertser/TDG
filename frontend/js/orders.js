@@ -714,6 +714,34 @@ const KOrders = (() => {
                 KUnits.clearSelection();
                 updateSelectedDisplay([]);
 
+                // ── Immediately show order in radio chat (optimistic) ──
+                const myName = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserName() : '';
+                const myId = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserId() : '';
+                let gameTimeStr = null;
+                const clockEl2 = document.querySelector('.game-clock-time');
+                if (clockEl2 && clockEl2.dataset && clockEl2.dataset.isoTime) {
+                    gameTimeStr = clockEl2.dataset.isoTime;
+                }
+                // Get target unit names for display
+                const allUnits = typeof KUnits !== 'undefined' ? KUnits.getAllUnits() : [];
+                const unitNames = (selectedIds || []).map(id => {
+                    const u = allUnits.find(x => x.id === id);
+                    return u ? u.name : id.slice(0, 8);
+                });
+                const targetStr = unitNames.length > 0 ? unitNames.join(', ') : 'All units';
+                _chatMessages.push({
+                    sender_id: myId,
+                    sender_name: `📋 ${myName}`,
+                    text: `→ ${targetStr}: ${text}`,
+                    recipient: 'all',
+                    timestamp: new Date().toISOString(),
+                    game_time: gameTimeStr,
+                    own: true,
+                    is_order: true,
+                    _local_order_id: result.id,  // track to prevent WS duplicate
+                });
+                _renderRadioMessages();
+
                 // Auto-switch to Radio → Units channel to see the unit response
                 _switchToRadioUnits();
             } else {
@@ -773,6 +801,13 @@ const KOrders = (() => {
         const myId = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserId() : '';
         const isUnitResponse = data.is_unit_response || false;
         const isOrder = data.is_order || false;
+
+        // Skip duplicate order messages we already added locally (optimistic)
+        if (isOrder && data.sender_id === myId) {
+            const hasDupe = _chatMessages.some(m => m._local_order_id && m.is_order && m.own);
+            if (hasDupe) return;
+        }
+
         _chatMessages.push({
             sender_id: data.sender_id,
             sender_name: data.sender_name || 'Unknown',
@@ -823,12 +858,11 @@ const KOrders = (() => {
             return;
         }
 
-        container.innerHTML = filtered.map(msg => {
+        container.innerHTML = filtered.map((msg, idx) => {
             const isUnit = msg.is_unit_response || false;
             const isOrder = msg.is_order || false;
             const cls = isOrder ? 'msg-order' : isUnit ? 'msg-unit' : (msg.own ? 'msg-own' : 'msg-other');
             // Prefer game_time (scenario time) over wall-clock timestamp
-            // Always display in UTC 24h format to match the game clock (bottom-right overlay)
             const timeSource = msg.game_time || msg.timestamp;
             let time = '';
             if (timeSource) {
@@ -843,18 +877,106 @@ const KOrders = (() => {
                 time = `${hh}:${mm}:${ss}`;
             }
             const recipientTag = msg.recipient !== 'all' && !msg.own ? ' (DM)' : '';
+            const senderName = msg.sender_name || '';
+
+            // Build from → to header
+            let fromTo = '';
+            if (isOrder) {
+                // Orders: "📋 Commander → Target: text" — extract from the sender_name + text
+                const cleanSender = senderName.replace(/^📋\s*/, '').trim();
+                // Text format is "→ TargetName: order text" — extract target and order
+                const arrowMatch = (msg.text || '').match(/^→\s*(.+?):\s*([\s\S]+)$/);
+                if (arrowMatch) {
+                    fromTo = `<span class="radio-from">${_escHtml(cleanSender)}</span> <span class="radio-arrow">→</span> <span class="radio-to">${_escHtml(arrowMatch[1])}</span>`;
+                } else {
+                    fromTo = `<span class="radio-from">${_escHtml(senderName)}</span>`;
+                }
+            } else if (isUnit) {
+                // Unit responses: "📻 UnitName" → show as "UnitName → Commander"
+                const cleanUnit = senderName.replace(/^📻\s*/, '').trim();
+                fromTo = `<span class="radio-from">${_escHtml(cleanUnit)}</span> <span class="radio-arrow">→</span> <span class="radio-to">HQ</span>`;
+            } else {
+                // Regular chat
+                const recipientName = _getRecipientDisplayName(msg.recipient);
+                fromTo = `<span class="radio-from">${_escHtml(senderName)}</span> <span class="radio-arrow">→</span> <span class="radio-to">${_escHtml(recipientName)}</span>`;
+            }
+
+            // Message text — for orders strip the "→ Target:" prefix since we show it in header
+            let displayText = msg.text || '';
+            if (isOrder) {
+                const arrowMatch = displayText.match(/^→\s*.+?:\s*([\s\S]+)$/);
+                if (arrowMatch) displayText = arrowMatch[1];
+            }
+
+            // Reply button for unit messages
+            const replyBtn = isUnit
+                ? `<button class="radio-reply-btn" data-reply-unit="${_escHtml(senderName)}" title="Reply to ${_escHtml(senderName.replace(/^📻\s*/, ''))}">↩</button>`
+                : '';
             return `<div class="radio-msg ${cls}">
-                <div class="radio-msg-sender">${_escHtml(msg.sender_name)}${recipientTag}</div>
-                <div class="radio-msg-text">${_escHtml(msg.text)}</div>
-                <div class="radio-msg-time">${time}</div>
+                <div class="radio-msg-header">
+                    <span class="radio-msg-sender">${fromTo}${recipientTag}</span>
+                    <span class="radio-msg-meta">${time}${replyBtn}</span>
+                </div>
+                <div class="radio-msg-text">${_escHtml(displayText)}</div>
             </div>`;
         }).join('');
+
+        // Attach reply button handlers
+        container.querySelectorAll('.radio-reply-btn').forEach(btn => {
+            btn.addEventListener('click', () => _handleReply(btn.dataset.replyUnit));
+        });
 
         // Scroll to bottom
         _scrollRadioToBottom();
     }
 
+    /** Handle reply to a unit: select unit, switch to Orders tab, prefill with context, focus. */
+    function _handleReply(unitName) {
+        if (!unitName) return;
+        // Clean unit name — strip 📻 prefix if present
+        const cleanName = unitName.replace(/^📻\s*/, '').trim();
+
+        // Find the unit by name and select it
+        let foundUnit = null;
+        if (typeof KUnits !== 'undefined') {
+            const allUnits = KUnits.getAllUnits();
+            foundUnit = allUnits.find(u => u.name === cleanName);
+            if (foundUnit) {
+                KUnits.clearSelection();
+                KUnits.selectUnit(foundUnit.id);
+                updateSelectedDisplay([foundUnit.id]);
+            }
+        }
+
+        // Switch to Orders tab
+        document.querySelectorAll('.cmd-tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.cmd-tab-panel').forEach(p => p.classList.remove('active'));
+        const ordersTabBtn = document.querySelector('.cmd-tab-btn[data-cmd-tab="cmd-orders"]');
+        if (ordersTabBtn) ordersTabBtn.classList.add('active');
+        const ordersPanel = document.getElementById('cmd-orders');
+        if (ordersPanel) ordersPanel.classList.add('active');
+
+        // Focus textarea
+        const textArea = document.getElementById('order-text');
+        if (textArea) {
+            textArea.value = '';
+            textArea.placeholder = `Order to ${cleanName}...`;
+            textArea.focus();
+        }
+
+        // Ensure panel is visible
+        const panel = document.getElementById('command-panel');
+        if (panel) panel.classList.add('hovered');
+    }
+
     // ── Orders History (sidebar tab) ──
+
+    function _getRecipientDisplayName(recipient) {
+        if (!recipient || recipient === 'all') return 'All';
+        const p = _participants.find(pp => pp.user_id === recipient);
+        return p ? p.display_name : 'All';
+    }
+
     async function _loadOrders() {
         if (!_sessionId || !_token) return;
         try {

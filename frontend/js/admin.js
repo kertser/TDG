@@ -1408,6 +1408,7 @@ const KAdmin = (() => {
                 try { KMapObjects.clearAll(); KMapObjects.load(sid, token); } catch(e) {}
                 try { KTerrain.load(sid, token); } catch(e) {}
                 try { KOrders.clearRadio(); } catch(e) {}
+                try { KReplay.clearData(); } catch(e) {}
                 // Reset game clock to the reset time from server
                 KMap.setGameTime(0, data.current_time || null);
                 // Update the admin game-time input to reflect reset time
@@ -1540,6 +1541,7 @@ const KAdmin = (() => {
                     try { KMapObjects.clearAll(); KMapObjects.load(sid, token); } catch(e) {}
                     try { KTerrain.load(sid, token); } catch(e) {}
                     try { KOrders.clearRadio(); } catch(e) {}
+                    try { KReplay.clearData(); } catch(e) {}
                     KMap.setGameTime(0, null);
                 }
                 await _loadUnitDashboard();

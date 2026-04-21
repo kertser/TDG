@@ -341,8 +341,8 @@ const KUnits = (() => {
     // ── Visibility Toggle ────────────────────────────
     // ══════════════════════════════════════════════════
 
-    function toggle() {
-        _visible = !_visible;
+    function toggle(forceState) {
+        _visible = forceState !== undefined ? !!forceState : !_visible;
         if (_map) {
             if (_visible) {
                 if (unitsLayer && !_map.hasLayer(unitsLayer)) _map.addLayer(unitsLayer);
@@ -2680,13 +2680,18 @@ const KUnits = (() => {
                 const distIcon = L.divIcon({
                     className: 'trajectory-distance-label',
                     html: `<span style="
-                        font-size: 10px;
-                        color: ${lineColor};
-                        background: rgba(0,0,0,0.6);
-                        padding: 1px 4px;
-                        border-radius: 3px;
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #fff;
+                        background: rgba(20,20,40,0.88);
+                        padding: 2px 7px;
+                        border-radius: 4px;
                         white-space: nowrap;
                         pointer-events: none;
+                        text-shadow: 0 0 4px #000, 0 1px 2px #000;
+                        border: 1.5px solid ${lineColor};
+                        box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+                        letter-spacing: 0.3px;
                     ">${distText}</span>`,
                     iconSize: [60, 14],
                     iconAnchor: [30, 7],
@@ -3078,7 +3083,7 @@ const KUnits = (() => {
     return {
         init, load, update, render, getMarker,
         toggle, isVisible,
-        toggleSelect, assignToMe,
+        toggleSelect, assignToMe, selectUnit: (id) => _selectUnit(id, false),
         getSelectedIds, clearSelection, selectAllCommandable, getAllUnits,
         clearAll, setAdminDrag,
         invalidateViewshedCache: _invalidateViewshedCache,

@@ -115,9 +115,11 @@ const KMap = (() => {
                 const _t = typeof KI18n !== 'undefined' ? KI18n.t.bind(KI18n) : (k) => k;
                 const container = L.DomUtil.create('div', 'game-clock-control');
                 container.innerHTML =
+                    '<div class="game-clock-row">' +
                     '<span class="game-clock-icon">🕐</span>' +
                     '<span id="game-clock-time" class="game-clock-time">--:--</span>' +
-                    `<span id="game-clock-tick" class="game-clock-tick">${_t('clock.turn')} 0</span>`;
+                    `<span id="game-clock-tick" class="game-clock-tick">${_t('clock.turn')} 0</span>` +
+                    '</div>';
                 L.DomEvent.disableClickPropagation(container);
                 return container;
             },

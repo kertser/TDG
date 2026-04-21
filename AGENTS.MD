@@ -5,6 +5,22 @@
 
 ---
 
+## Current Directive: Tactical Breadth
+
+The platform must support a broad command vocabulary across heterogeneous unit families, not only infantry maneuver.
+
+Implementation priority:
+- engineer, artillery, recon, logistics, and aviation-related command families
+- map-object-aware command execution (bridges, minefields, wire, smoke, roadblocks, fortifications, support structures)
+- split/merge and other command-and-control reorganization actions
+- bilingual EN/RU parsing and regression scenarios for offensive, defensive, withdrawal, sustainment, breach, screening, air-mobility, and reorganization cases
+- doctrine loading from `FIELD_MANUAL.md` by targeted topic snippets rather than injecting the full doctrine block into every prompt
+- favor scenario-style regression tests that replay multi-step tactical interactions over single-command parser checks alone
+
+Any future agent work must preserve this direction when modifying parser prompts, doctrine loading, tests, or simulation behavior.
+
+---
+
 ## Section 1: Research Summary
 
 ### 1.1 Web Mapping Stacks
@@ -1365,6 +1381,15 @@ if unit.ammo <= 0:
 | **Enemy Personnel Unknown Display** | `units.js` | Fixed enemy units showing exact personnel count ("p20") when it should be unknown due to fog-of-war. For generalized unit types (e.g., "infantry" instead of "infantry_squad"), the `PERSONNEL` lookup returns undefined. Frontend now shows "?p" in tooltip and "? personnel" in info card when personnel count is unknown (enemy units with generalized type). Prevents players from deducing exact enemy strength from personnel display. |
 | **Coordination Order LLM Routing** | `order_parser.py` | Fixed coordination/leadership orders being classified as "fire" orders when they mention "artillery support" or "fire support". Example: "Lead the attack. Coordinate artillery support" was incorrectly classified as `order_type=fire` for infantry unit. Fix: (1) Added coordination keyword detection (`coordinate`, `lead the`, `organize`, `command`), (2) If coordination keywords + attack keywords present → classify as `attack` (not fire), (3) Reduced confidence to 0.50 for any order with coordination keywords to force LLM parsing. Coordination verbs now trigger full LLM model for proper intent resolution. |
 | **Tactical Test Framework** | `scripts/tactical_tests/` | Automated tactical scenario testing framework for validating engine behavior. **Components**: `BaseScenario` ABC (unit/order builders, assertions), `TacticalTestRunner` (session creation, order injection, tick execution), `run_all.py` CLI (runs all scenarios, generates HTML report). **10 scenarios**: basic movement, armored breakthrough, defensive stand, combined arms, recon infiltration, meeting engagement, urban combat, night operations, river crossing, withdraw under pressure. **Assertions**: event_exists, detection_occurs, unit_moved, unit_strength_below/above, order_executed, no_event. **Report**: color-coded HTML with scenario results, per-unit timelines, movement analysis, assertion details. Run with `python -m scripts.tactical_tests.run_all`. |
+| **Prompt Compression & Retrieval Context System** | `retrieval_context.py`, `order_parser.py`, `tactical_doctrine.py` | **Cloud-primary architecture**: cloud LLM (GPT-5.4/nano) handles all substantive parsing; local LLM only for cheap classification triage. **Named context profiles**: `"cloud"` (generous — 18 units, 8 contacts, 2000 doctrine chars, 2400 state packet chars, 6 doctrine passages, 8 history facts) and `"local"` (compressed — 10 units, 4 contacts, 700 doctrine chars, 1050 state packet, used only as air-gapped fallback). Replaces old boolean `is_local` flag. **4-layer state packet**: (1) task frame (class/lang/order_hint/targets/locations), (2) state deltas via history_digest (only changed facts, not full chat), (3) doctrine cards via topic-scoped BM25-like excerpt retrieval from FIELD_MANUAL.md (2-6 atomic rules per topic), (4) 1-3 dynamically selected few-shot exemplars by order type + language. **Negative context suppression**: empty/default sections omitted entirely (`_is_empty_context`). **Continuity resolution**: "same target", "continue", "the bridge" resolved deterministically from last order/contact/object before LLM sees the prompt (`_build_continuity_hints`). **Prompt-result cache**: sha256-keyed OrderedDict with 5min TTL, 256 entry max — identical normalized inputs reuse full parse result. **Section relevance scoring**: `_SECTION_RELEVANCE` profiles per order family (breach prioritizes map_objects+terrain+engineers, fire prioritizes contacts+terrain). |
+| **Local Triage Classifier** | `local_triage.py`, `llm_client.py`, `config.py` | Lightweight local LLM (~1-3B params) used ONLY for trivial message classification (command/ack/report/request/unclear) and language detection (en/ru). ~200 token prompt, no doctrine/context/few-shot. `LocalTriageClassifier` with 2s timeout, 30s backoff on failure. When keyword+triage agree on non-command → boosted confidence skips cloud LLM. When they disagree → forced full-model cloud call. Master toggle: `LOCAL_TRIAGE_ENABLED`. Graceful fallback: if unavailable, keyword heuristics used as before. `get_local_client()` in llm_client.py returns local-only client (never falls back to cloud). |
+| **LLM Routing: Cloud Primary** | `order_parser.py` | Overhauled LLM routing: cloud is ALWAYS primary for order parsing. Local LLM used ONLY as full-parser fallback when no API key, or as triage classifier for classification hints. llm_first flow: (1) keyword parser, (2) optional local triage for classification confirmation, (3) cloud LLM (nano for conf≥0.70, full for lower). Triage-keyword agreement boosts non-command confidence to skip cloud. Triage-keyword disagreement reduces confidence to force full model. If triage detects command that keyword missed, overrides to command classification. |
+| **LLM Parsing Mode Config** | `config.py`, `order_parser.py`, `.env` | New `LLM_PARSING_MODE` setting: `"llm_first"` (default — cloud LLM primary for all commands; local triage for classification hints; keyword fallback), `"keyword_first"` (legacy 3-tier), `"keyword_only"` (no LLM, pure keyword parsing for offline/testing). New settings: `LOCAL_TRIAGE_ENABLED` (bool, default true), `LOCAL_TRIAGE_TIMEOUT` (float, default 2.0s). Commands ALWAYS go through cloud LLM regardless of keyword confidence. Only non-command classifications (acks, status reports) with confidence ≥0.95 can skip LLM. |
+| **Keyword Parser: Screen Mission Priority** | `order_parser.py` | Screen/observe orders (`_has_screen_mission`) now override both flank+enemy attack inference and generic move keywords. "Screen the left flank and report enemy movement" correctly classifies as `observe` instead of `attack`. Added "screen", "recon" to command keyword list. Screen patterns expanded: "screen the left/right flank", "прикрой левый/правый фланг наблюдением". Status request frame check now guarded by `not has_command_kw` so "screen and report" isn't misclassified as status_request. |
+| **Keyword Parser: Coordination & Follow** | `order_parser.py` | Added "свяжись", "свяжитесь", "следуй за", "следовать за" to `command_kw_ru`. Follow maneuver (`_has_follow_maneuver`) now sets `order_type = "move"` + `maneuver_kind = "follow"` as fallback when no other order type matches. Generic "Mortar"/"Artillery" canonical refs re-inserted after addressed_refs filtering to survive inflected form deduplication. "covers your move" → covering_fire. |
+| **Keyword Parser: Map Object Inflection** | `order_parser.py` | Minefield pattern expanded with inflected Russian forms: "минном поле" (prepositional), "минного поля" (genitive), "минному полю" (dative), plus English "mines". Merge target regex truncates at conjunctions ("C-squad and continue..." → "C-squad"). |
+| **Comprehensive Phrasebook Expansion** | `order_phrasebook.toml`, `order_parser.py`, `local_triage.py` | Massive expansion of bilingual command vocabulary — 93 regression test cases (up from ~50). **New command keywords**: adjust fire, fire for effect, shift fire, casevac, medevac, immediately, right now, right away, hit (attack), давай к/на/быстро (colloquial Russian). **New order detection patterns**: `fire_adjustment` (adjust fire, fire for effect, корректировка огня, перенеси огонь), `fire_direction` (concentrate fire, сосредоточить огонь, залп по), `regroup` (rally, regroup, consolidate, перегруппируй, на сбор). **Expanded lexicons**: 60+ command_en keywords (up from ~30), 80+ command_ru keywords (up from ~40), 35+ fast speed keywords (added immediately, right now, right away), halt/defend/withdraw/screen/breach/construct/deploy_bridge/lay_mines patterns greatly expanded. **New test cases**: compound commands (move→attack, halt→defend→request_fire, breach→advance), fire adjustment/correction, regroup/rally, overwatch, cease fire, informal/colloquial (both EN/RU), ack+command disambiguation, coordination orders, construction, concentrated fire, air mobility (casevac/medevac). **Keyword parser improvements**: regroup → move order type, command+location fallback to move (catches "давай к F7-5-6"), engineer verb count in multi-verb detection. **Local triage expansion**: 30+ action verbs (both EN/RU) for compound command detection, 8 new compound markers (after reaching, before attacking, continue to, по занятии, перед атакой). |
+| **Retrieval Context Test Fix** | `test_retrieval_context.py` | Fixed `is_local=True/False` → `profile="local"/"cloud"` in all 3 test calls to match current `build_order_parser_context()` signature. |
 
 ### Key Architecture Decisions Made
 
@@ -1450,11 +1475,14 @@ KShU/
 │   │   ├── tick_scheduler.py
 │   │   ├── los_service.py        ← LOS viewshed computation (ray casting, terrain-aware)
 │   │   ├── order_parser.py       ← OrderParser: 3-tier model routing (keyword→nano→full), bilingual EN/RU
+│   │   ├── order_phrasebook.py   ← TOML phrasebook loader (lexicons + regression cases)
 │   │   ├── intent_interpreter.py ← IntentInterpreter: fully deterministic (25+ rules, no LLM call)
 │   │   ├── location_resolver.py  ← LocationResolver: deterministic snail/grid/coord/relative resolution
 │   │   ├── response_generator.py ← ResponseGenerator: template-based unit radio responses
 │   │   ├── order_service.py      ← OrderService orchestrator: full pipeline, background task, WS broadcast
 │   │   ├── pathfinding_service.py ← A* pathfinding over terrain cells (movement trajectory)
+│   │   ├── retrieval_context.py  ← Prompt context builder: named profiles (cloud/local), state packets, doctrine retrieval, negative suppression, continuity hints
+│   │   ├── local_triage.py       ← Local LLM triage classifier (command/ack/report/request classification only)
 │   │   ├── report_generator.py   ← Auto-generate tick reports: SPOTREP, SHELREP, CASREP, SITREP, INTSUM
 │   │   ├── debug_logger.py      ← Debug log recording to file (admin toggle, tick timing, combat trace)
 │   │   ├── llm_client.py        ← Unified OpenAI/local LLM client wrapper (model routing, fallback)
@@ -1506,6 +1534,7 @@ KShU/
 │       ├── test_combat.py
 │       ├── test_red_ai.py         ← Red AI 42 tests: doctrine, decisions, validation, prompt safety, schemas
 │       └── test_los_service.py    ← LOS viewshed + has_los tests
+│       └── test_retrieval_context.py ← Retrieval context builder tests (state packets, doctrine, suppression)
 ├── frontend/
 │   ├── index.html
 │   ├── favicon.svg

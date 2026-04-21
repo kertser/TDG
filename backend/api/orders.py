@@ -339,6 +339,28 @@ async def _assign_task_to_units_immediately(
                 "order_id": str(order.id),
                 "disengaging": True,
             }
+        elif task_type == "request_fire":
+            # Fire requests are coordination overlays — merge into existing task
+            # instead of replacing it, mirroring tick.py _process_orders logic.
+            existing = dict(unit.current_task) if unit.current_task else {
+                "type": "defend",
+                "order_id": str(order.id),
+            }
+            existing["order_id"] = str(order.id)
+            existing["request_artillery"] = True
+            if task.get("target_location"):
+                existing["request_fire_target_location"] = dict(task["target_location"])
+            if task.get("target_unit_id"):
+                existing["request_fire_target_unit_id"] = task["target_unit_id"]
+            for key in (
+                "coordination_unit_refs",
+                "coordination_unit_ids",
+                "coordination_kind",
+                "supporting_unit_ids",
+            ):
+                if task.get(key):
+                    existing[key] = task[key]
+            unit.current_task = existing
         else:
             unit.current_task = dict(task)
 

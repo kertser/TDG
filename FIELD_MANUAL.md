@@ -2084,8 +2084,17 @@ LLM-based victory evaluation runs every 5 ticks:
 - **Danger close**: Never fire within 50m of friendly troops. Cease fire if friendlies advance into the beaten zone.
 - **Proactive ceasefire**: When assault infantry approaches within 250m of the bombardment zone, they halt and request cease-fire. Artillery finishes its last salvo then stops. Infantry resumes advance only after confirming artillery has ceased. This prevents friendly fire during the critical fire-to-assault transition.
 - **Three-tier friendly fire prevention**: (1) Proactive ceasefire at 250m, (2) Danger-close auto-stop at 50m, (3) Area-fire blast zone exclusion at 150m.
+- **Sustained support link**: A fire-support request does NOT cancel the caller's primary maneuver. The supported unit keeps moving/fighting while the support unit maintains linked fires until the target is neutralized, shifted, or stopped by cease-fire logic.
+- **Approach updates**: Supported maneuver elements report approach stages while closing under fire support. Typical stages: "closing" (~700m), "final approach" (~400m), then cease-fire request (~250m).
 
-#### C.2.4 Combat Role Coordination
+#### C.2.4 Follow, Lead, Trail, and Bounds
+- **Follow / Trail**: A following element tracks a designated lead element, usually 80-150m to the rear. Use to keep command cohesion, reinforce a lead squad, or pass through a cleared lane.
+- **Lead**: The lead element is responsible for navigation, first contact, and initial deployment. Following units do not overtake unless ordered.
+- **Left/Right rear follow**: If a commander specifies left-rear/right-rear, the following unit offsets laterally while maintaining rear interval. This preserves dispersion and protects a flank.
+- **Bounding movement**: When contact is likely, one element moves while another covers. Use explicit language such as "bound", "cover my move", "двигайтесь перебежками", or "прикрывай выдвижение".
+- **Rule**: Follow/trail orders are persistent maneuver relationships, not one-time coordinate moves. The follower continuously adjusts to the lead unit's movement.
+
+#### C.2.5 Combat Role Coordination
 When **multiple units engage the same enemy**, they automatically coordinate:
 
 1. **Suppress** (~40% of attacking group): Stay at weapon range, provide covering fire. Damage reduced (×0.6) but suppression increased (×1.5). Preferred unit types: tanks, AT teams, mortars, mechanized infantry. **Do NOT advance to point-blank.**
@@ -2096,7 +2105,21 @@ When **multiple units engage the same enemy**, they automatically coordinate:
 
 Radio coordination: units announce their roles ("providing suppressive fire" / "moving to flank" / "moving to assault position") so adjacent units are aware.
 
-#### C.2.5 Combined Arms Principles
+#### C.2.6 Command Language Patterns
+The parser and tactical AI should treat the following command families as doctrinally equivalent:
+
+- **Follow / trail**: "follow B-squad", "trail A-squad", "следуй за B-squad", "держись за ведущим".
+- **Flank left / right**: "go in on the left flank", "hook right", "левый охват", "заходите справа", "уступом влево/вправо".
+- **Support by fire / covering fire**: "support by fire", "cover their move", "прикройте огнём", "огневое прикрытие".
+- **Bounding / leapfrogging**: "bound forward", "advance by bounds", "двигайтесь перебежками", "скачками вперёд".
+- **Delay / fighting withdrawal**: "delay them and fall back", "slow the enemy then withdraw", "задерживайте и отходите".
+- **Hold / defend in place**: "hold this line", "occupy and defend", "занять и удерживать", "держать рубеж".
+- **Recon / screen**: "recon forward", "screen the left flank", "вести разведку", "прикрыть фланг наблюдением".
+- **Fire request / adjust fire**: "call for fire", "direct mortars on target", "наведи миномёт на цель", "перенеси огонь глубже".
+- **Withdrawal / disengage**: "break contact", "withdraw to rally point", "разорвать контакт", "отход на запасной рубеж".
+- **Air/river/assault special tasks**: "land on objective", "cross under smoke", "desant on ridge", "форсировать реку под дымом" should preserve the same principles: reconnaissance, suppressive fires, security of flanks, and phased movement.
+
+#### C.2.7 Combined Arms Principles
 
 | Unit Type | Primary Role | Employment Principle |
 |-----------|-------------|---------------------|
@@ -2510,6 +2533,10 @@ Units respond with:
 #### Key Tactical Principles
 - **Fire and Maneuver**: One element suppresses while another moves. Never advance without covering fire. Suppressing units hold at weapon range (80%), only assault elements close in.
 - **Combat Role Coordination**: Multiple units attacking the same enemy auto-coordinate — ~40% suppress (stay at range, ×1.5 suppression), 1-2 assault (close in), rest flank (60° offset). Not everyone storms point-blank.
+- **Follow / Trail Relationships**: Orders such as "follow B-squad", "trail the lead section", or "следуй за B-squad" create a persistent lead-follow link. The follower keeps interval and adjusts continuously to the lead unit rather than moving to a single fixed point.
+- **Support Overlay, Not Replacement**: Calling fire support or directing a supporting unit does not erase the caller's maneuver task. Fire requests are layered over the ongoing maneuver until shifted or ceased.
+- **Implicit Current Target**: When commanders say "the target", "на цель", or "the enemy" without a new grid, subordinate units should use the latest valid contact or last designated target for continuity.
+- **Bounding and Screening**: Bounding movement means one element moves while another covers. Screening means observing, warning, and preserving flank security rather than closing decisively with the enemy.
 - **Combined Arms**: Infantry clears complex terrain, armor provides shock in open terrain, artillery suppresses from range, recon finds the enemy.
 - **Concentration of Force**: Attack with local superiority (3:1 minimum). Never spread forces evenly.
 - **Terrain**: Use cover (forest 1.4× protection, urban 1.5×) and concealment (forest 0.4 vis, urban 0.5 vis). Higher ground = advantage.
@@ -2519,6 +2546,7 @@ Units respond with:
 #### Order Types and Implied Tasks
 - **Move**: Maintain comms, report arrival, expect contact en route.
 - **Attack**: Suppress enemy, establish fire superiority, coordinate roles (suppress/assault/flank), consolidate after assault. Request artillery cease-fire before storming bombarded positions.
+- **Follow / Trail Move**: Maintain lead-follow interval, do not overtake lead element, inherit the lead element's route and contact tempo.
 - **Defend**: Dig in, improve positions, prepare fire plan, establish OPs.
 - **Observe**: Maintain concealment, report contacts, avoid engagement. Also used for **standby orders** (e.g., "get ready for fire support on request" → unit waits for explicit fire commands rather than firing immediately).
 - **Fire**: Compute fire solution, observe and adjust. Danger close = 50m. Cease fire when friendly infantry within 250m of target.
@@ -2645,15 +2673,157 @@ doctrine.py (posture profiles)
 
 ### D.4 How to Update Tactical Doctrine
 
-1. **Edit FIELD_MANUAL.md** — Appendix C sections only.
+1. **Edit FIELD_MANUAL.md** — Appendix C for broad doctrine and Appendix F for compact topic snippets.
 2. Do NOT edit `tactical_doctrine.py` — it reads from FIELD_MANUAL.md automatically.
 3. Keep content between the DOCTRINE FULL START/END markers (Appendix C.1–C.12).
 4. Keep content between the DOCTRINE BRIEF START/END markers (Appendix C.13).
-5. Restart the backend to pick up changes (doctrine is loaded at import time).
-6. Test with: `python -c "from backend.prompts.tactical_doctrine import get_tactical_doctrine; print(len(get_tactical_doctrine('full')))"`
+5. Keep compact targeted snippets between the `DOCTRINE:TOPIC:<NAME>:START/END` markers in Appendix F.
+6. The order parser should receive only the relevant topic snippets plus `general`, not the full doctrine blob.
+7. Restart the backend to pick up changes (doctrine is loaded at import time).
+8. Test with: `python -c "from backend.prompts.tactical_doctrine import get_tactical_doctrine; print(get_tactical_doctrine('brief', topics=['fires','engineers']))"`
 
 ---
 
 *Last updated: 2026-04-13*
 *Source: `backend/engine/`, `backend/services/red_ai/`, `backend/services/los_service.py`, `backend/services/visibility_service.py`, `backend/services/pathfinding_service.py`, `backend/prompts/tactical_doctrine.py`, `backend/engine/radio_chatter.py`*
+
+---
+
+## Appendix E. Command Families For Non-Infantry Units
+
+This appendix is normative for parser behavior, radio acknowledgments, and deterministic task construction.
+
+### E.1 Combat Engineers
+
+- `breach`: open a lane through an existing obstacle.
+  - EN examples: `breach the wire`, `clear a lane through the minefield`, `breach the roadblock`.
+  - RU examples: `проделайте проход в минном поле`, `разминируйте проход`, `снимите проволочное заграждение`.
+  - Expected behavior: move to the obstacle, work in place until the obstacle is neutralized, then report lane open.
+- `lay_mines`: emplace a mine obstacle in an area or on an avenue of approach.
+  - EN: `lay mines on the western approach`, `emplace an AT minefield on the road`.
+  - RU: `заминируйте дорогу`, `установите противотанковое минное поле`.
+  - Expected behavior: move to the worksite, create the obstacle geometry, remain vulnerable while building.
+- `construct`: build entrenchments or support structures.
+  - EN: `dig in`, `construct entrenchments`, `set up a command post`, `establish an aid station`.
+  - RU: `оборудуйте окопы`, `укрепите позицию`, `разверните КП`, `разверните медпункт`.
+  - Expected behavior: move to the site, build in place, then create the corresponding map object.
+- `deploy_bridge`: deploy a crossing asset at a water obstacle.
+  - EN: `deploy bridge at crossing E5-4`, `launch bridge`.
+  - RU: `наведите мост на переправе`, `разверните мостоукладчик`.
+  - Expected behavior: move to the crossing point, deploy in place, then create a usable bridge structure.
+
+### E.2 Logistics And Sustainment
+
+- `resupply` can mean self-resupply or mobile support to another unit.
+- If the order names a supported unit, sustainment becomes persistent support rather than a one-shot reload run.
+  - EN: `resupply B-squad and follow them`, `escort the lead company with ammo and medical support`.
+  - RU: `подвези боеприпасы B-squad и следуй за ними`, `снабжай роту на левом фланге`.
+- Expected behavior:
+  - logistics unit follows the supported unit;
+  - resupplies friendlies when close enough;
+  - does not terminate the mission only because its own ammo state is full.
+
+### E.3 Reconnaissance And Security
+
+- Recon orders usually resolve to `observe` plus security posture, not frontal assault.
+- Typical patterns:
+  - EN: `screen the left flank`, `observe the axis and report`, `recon the bridge and avoid decisive engagement`.
+  - RU: `прикрой левый фланг наблюдением`, `веди разведку переправы`, `доложи о контактах и не ввязывайся в бой`.
+- Expected behavior:
+  - maintain observation;
+  - report contacts quickly;
+  - avoid closing unless explicitly ordered to recon by force or attack.
+
+### E.4 Fire Support
+
+- `request_fire` is a coordination overlay, not a maneuver replacement.
+- Typical chain:
+  - supported unit detects or tracks the target;
+  - supported unit sends a fire mission to the mortar/artillery element;
+  - fire support acknowledges, fires, shifts with the supported unit's corrections, and ceases when friendlies close.
+- Explicit target shorthand like `на цель`, `по цели`, `the target`, `the enemy` should resolve from the current known contact when no fresh grid is given.
+
+### E.5 Aviation And Air Mobility
+
+The engine may not yet simulate every aviation effect, but parser and doctrine must still classify these orders consistently.
+
+- Transport / insertion / extraction:
+  - EN: `insert recon team to Hill 201`, `extract casualties from the LZ`.
+  - RU: `десантируйте разведгруппу на высоту 201`, `эвакуируйте раненых с площадки`.
+- Air recon / screen:
+  - EN: `drone team, screen the valley and report contacts`.
+  - RU: `БПЛА, веди разведку долины и докладывай контакты`.
+- Air fires:
+  - EN: `hold CAS on call`, `strike the enemy armor once marked`.
+  - RU: `держите авиаудар по вызову`, `нанесите удар по бронетехнике после целеуказания`.
+
+Until dedicated aviation task types exist, use the nearest doctrinal mapping:
+- movement / insertion / extraction -> `move`
+- screen / recon / overwatch -> `observe`
+- coordinated air fires -> `support` or `request_fire`
+- direct attack by the receiving air unit -> `attack` or `fire`, depending on whether it physically maneuvers or simply delivers fires
+
+---
+
+## Appendix F. Topic-Scoped Doctrine Snippets
+
+These snippets are the compact doctrine source for targeted prompt injection.
+
+<!-- DOCTRINE:TOPIC:GENERAL:START -->
+- Apply fire and maneuver, maintain security, and preserve continuity with previous orders and radio traffic.
+- Prefer clear command intent over literal wording when the message uses shorthand.
+- Use terrain, weather, visibility, and known map objects when interpreting ambiguous phrasing.
+<!-- DOCTRINE:TOPIC:GENERAL:END -->
+
+<!-- DOCTRINE:TOPIC:OFFENSE:START -->
+- Offensive action includes attack, assault, advance to contact, flanking movement, bounding overwatch, and support by fire.
+- A maneuver element closes only when a support element suppresses or screens the threat.
+- If a unit is ordered to flank or envelop, calculate an approach that offsets from the enemy rather than driving straight at the target.
+<!-- DOCTRINE:TOPIC:OFFENSE:END -->
+
+<!-- DOCTRINE:TOPIC:DEFENSE:START -->
+- Defensive action includes hold, defend, delay, disengage, fighting withdrawal, and flank screening.
+- A defending unit should seek cover, retain observation, and preserve a route for disengagement or relief.
+<!-- DOCTRINE:TOPIC:DEFENSE:END -->
+
+<!-- DOCTRINE:TOPIC:FIRES:START -->
+- Fire support is an overlay on maneuver, not a replacement for it.
+- Mortars/artillery acknowledge support, fire on the designated or current contact target, shift with corrections, and cease when friendlies close.
+- Smoke and suppressive fires are valid ways to support movement across exposed terrain or crossings.
+<!-- DOCTRINE:TOPIC:FIRES:END -->
+
+<!-- DOCTRINE:TOPIC:RECON:START -->
+- Reconnaissance, screen, and observation missions emphasize detection and reporting, not decisive engagement.
+- Recon and drone elements should cover flanks, bridges, crossings, and avenues of approach, then report quickly.
+<!-- DOCTRINE:TOPIC:RECON:END -->
+
+<!-- DOCTRINE:TOPIC:ENGINEERS:START -->
+- Engineers enable mobility and deny enemy mobility: breach, lay mines, construct positions, and deploy bridges.
+- Breach tasks require movement to the obstacle, work at the obstacle, and a clear “lane open” result.
+- Construction and mine-laying require interaction with the actual map geometry, not abstract movement only.
+<!-- DOCTRINE:TOPIC:ENGINEERS:END -->
+
+<!-- DOCTRINE:TOPIC:LOGISTICS:START -->
+- Sustainment missions may target a location or a supported unit.
+- When a supported unit is named, logistics should follow and sustain that unit rather than immediately terminating after self-checks.
+- Rearm, resupply, casualty collection, and aid-station tasks are part of the same sustainment family.
+<!-- DOCTRINE:TOPIC:LOGISTICS:END -->
+
+<!-- DOCTRINE:TOPIC:AVIATION:START -->
+- Aviation and air mobility commands include insert, extract, CASEVAC/MEDEVAC, air reconnaissance, overwatch, and strike-on-call.
+- Until dedicated air simulation exists, map air insertion/extraction to movement, air recon to observe, and coordinated air fires to support/request_fire.
+<!-- DOCTRINE:TOPIC:AVIATION:END -->
+
+<!-- DOCTRINE:TOPIC:MAP_OBJECTS:START -->
+- Bridges, minefields, wire, ditches, smoke, bunkers, roadblocks, hospitals, and command posts are tactically meaningful objects.
+- Orders that reference them should bind to the actual discovered map object when possible.
+- Object interaction must influence both unit answers and deterministic action generation.
+- Smoke is an object-level battlefield effect: it may be requested to mask movement, crossings, breach work, disengagement, or casualty evacuation.
+<!-- DOCTRINE:TOPIC:MAP_OBJECTS:END -->
+
+<!-- DOCTRINE:TOPIC:SPLIT_MERGE:START -->
+- Split is a reorganization order: detach a sub-element, preserve command continuity, and keep combat power accounting consistent.
+- Merge is a recombination order: units must be compatible and physically co-located closely enough to recombine safely.
+- Split/merge are command-and-control actions, not standard movement tasks.
+<!-- DOCTRINE:TOPIC:SPLIT_MERGE:END -->
 

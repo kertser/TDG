@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Enums ────────────────────────────────────────────────────────
@@ -38,6 +38,12 @@ class OrderType(str, enum.Enum):
     defend = "defend"
     observe = "observe"
     support = "support"
+    split = "split"
+    merge = "merge"
+    breach = "breach"
+    lay_mines = "lay_mines"
+    construct = "construct"
+    deploy_bridge = "deploy_bridge"
     withdraw = "withdraw"
     disengage = "disengage"
     halt = "halt"
@@ -132,6 +138,55 @@ class ParsedOrderData(BaseModel):
         description="Unit name/callsign that this unit should support/relay to, "
                     "e.g. 'C-squad' in 'be ready to support C-squad's targets'",
     )
+    merge_target_ref: Optional[str] = Field(
+        None,
+        description="Unit name/callsign to merge with, e.g. 'B-squad' in "
+                    "'A-squad merge with B-squad'",
+    )
+    split_ratio: Optional[float] = Field(
+        None,
+        ge=0.1,
+        le=0.9,
+        description="For split orders, approximate fraction detached into the new element",
+    )
+    map_object_type: Optional[str] = Field(
+        None,
+        description="Obstacle/structure/effect type referenced in the order, e.g. "
+                    "'minefield', 'entrenchment', 'roadblock', 'bridge_structure', or 'smoke'",
+    )
+    coordination_unit_refs: list[str] = Field(
+        default_factory=list,
+        description="Friendly units explicitly mentioned for coordination, liaison, "
+                    "or mutual support, e.g. ['Mortar'] in 'Свяжись с миномётами'",
+    )
+    coordination_kind: Optional[str] = Field(
+        None,
+        description="Type of coordination requested, e.g. 'coordination', "
+                    "'covering_fire', or 'fire_support'",
+    )
+    maneuver_kind: Optional[str] = Field(
+        None,
+        description="Requested maneuver method, e.g. 'follow', 'flank', "
+                    "'bounding', 'support_by_fire', 'lead', or 'trail'",
+    )
+    maneuver_side: Optional[str] = Field(
+        None,
+        description="Side bias for a maneuver when applicable: 'left' or 'right'",
+    )
+    status_request_focus: list[str] = Field(
+        default_factory=list,
+        description="For status_request messages: requested info categories such as "
+        "'full', 'position', 'terrain', 'nearby_friendlies', 'enemy', "
+                    "'task', 'condition', 'weather', 'objects', 'road_distance'",
+    )
+
+    # For compound/multi-step commands
+    order_queue: list[dict] = Field(
+        default_factory=list,
+        description="For compound commands: subsequent phases after the primary order. "
+                    "Each entry: {order_type, locations: [{source_text, ref_type, normalized}], "
+                    "speed, formation, condition: 'task_completed'|'location_reached'}",
+    )
 
     # For acknowledgment / status_report messages
     report_text: Optional[str] = Field(
@@ -148,6 +203,22 @@ class ParsedOrderData(BaseModel):
         default_factory=list,
         description="List of unclear/ambiguous elements in the order",
     )
+
+    @field_validator(
+        "target_unit_refs",
+        "location_refs",
+        "coordination_unit_refs",
+        "status_request_focus",
+        "ambiguities",
+        "order_queue",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_null_list_fields(cls, value):
+        """LLMs occasionally emit explicit null for list fields; treat that as empty."""
+        if value is None:
+            return []
+        return value
 
 
 # ── Tactical intent (IntentInterpreter output) ──────────────────

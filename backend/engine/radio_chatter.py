@@ -810,6 +810,26 @@ FIRE_RESPONSE_EN = [
     "This is {arty}. Coordinates received. Grid {contact_grid}. Shot, over!",
 ]
 
+FIRE_SUPPORT_PROGRESS_RU = {
+    "closing": "Здесь {unit}. Сближаюсь с целью, до района удара ~{dist}м. Продолжайте подавление.",
+    "final_approach": "Здесь {unit}. До цели ~{dist}м. Готовьтесь к переносу или прекращению огня.",
+}
+
+FIRE_SUPPORT_PROGRESS_EN = {
+    "closing": "This is {unit}. Closing on the target, ~{dist}m from the impact area. Continue suppression.",
+    "final_approach": "This is {unit}. ~{dist}m to target. Prepare to shift or cease fire.",
+}
+
+FIRE_SUPPORT_PROGRESS_ACK_RU = {
+    "closing": "{arty}, принял. Продолжаю огонь по цели.",
+    "final_approach": "{arty}, принял. Готовлю перенос или прекращение огня.",
+}
+
+FIRE_SUPPORT_PROGRESS_ACK_EN = {
+    "closing": "{arty}, copy. Continuing fire on the target.",
+    "final_approach": "{arty}, copy. Preparing to shift or cease fire.",
+}
+
 
 def generate_artillery_fire_messages(
     all_units: list,
@@ -913,6 +933,60 @@ def generate_artillery_fire_messages(
             "text": resp_text,
             "is_unit_response": True,
             "response_type": "fire_response",
+        })
+
+    return messages
+
+
+def generate_fire_support_progress_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    grid_service=None,
+    language: str = "ru",
+    side_languages: dict | None = None,
+) -> list[dict]:
+    """Generate radio updates while maneuver units close under friendly fire support."""
+    messages = []
+    units_by_id = {str(u.id): u for u in all_units}
+
+    for evt in tick_events:
+        if evt.get("event_type") != "fire_support_progress":
+            continue
+
+        payload = evt.get("payload", {})
+        unit = units_by_id.get(str(evt.get("actor_unit_id")))
+        arty = units_by_id.get(str(payload.get("artillery_id")))
+        if not unit or not arty or unit.is_destroyed or arty.is_destroyed:
+            continue
+
+        lang = _get_unit_lang(unit, language, side_languages)
+        side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+        dist = int(round(payload.get("distance_to_target_m", 0)))
+        stage = payload.get("stage", "closing")
+
+        progress_templates = FIRE_SUPPORT_PROGRESS_RU if lang == "ru" else FIRE_SUPPORT_PROGRESS_EN
+        ack_templates = FIRE_SUPPORT_PROGRESS_ACK_RU if lang == "ru" else FIRE_SUPPORT_PROGRESS_ACK_EN
+
+        text = progress_templates.get(stage, progress_templates["closing"]).format(
+            unit=unit.name,
+            dist=dist,
+        )
+        ack = ack_templates.get(stage, ack_templates["closing"]).format(arty=arty.name)
+
+        messages.append({
+            "sender_name": unit.name,
+            "side": side,
+            "text": text,
+            "is_unit_response": True,
+            "response_type": "fire_support_progress",
+        })
+        messages.append({
+            "sender_name": arty.name,
+            "side": side,
+            "text": ack,
+            "is_unit_response": True,
+            "response_type": "fire_support_progress_ack",
         })
 
     return messages

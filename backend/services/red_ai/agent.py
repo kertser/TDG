@@ -57,9 +57,12 @@ class RedAIAgent:
         # Try LLM decision first
         try:
             from backend.config import settings
-            if settings.OPENAI_API_KEY:
+            from backend.services.llm_client import get_llm_client
+            llm = get_llm_client()
+            if llm is not None:
                 orders = await self._llm_decide(
-                    agent_data, doctrine, mission, knowledge, tick
+                    agent_data, doctrine, mission, knowledge, tick,
+                    is_local=llm.is_local,
                 )
                 if orders:
                     # Validate LLM output — only reference known unit IDs
@@ -82,13 +85,15 @@ class RedAIAgent:
         mission: dict,
         knowledge: dict,
         tick: int,
+        is_local: bool = False,
     ) -> list[dict]:
         """Use LLM to make strategic decisions."""
         from backend.prompts.red_commander import build_red_commander_prompt
         from backend.services.llm_client import get_llm_client
 
         system_prompt, user_message = build_red_commander_prompt(
-            agent_data, doctrine, mission, knowledge, tick
+            agent_data, doctrine, mission, knowledge, tick,
+            is_local=is_local,
         )
 
         llm = get_llm_client()
@@ -102,9 +107,12 @@ class RedAIAgent:
                 {"role": "user", "content": user_message},
             ],
             temperature=0.7,
-            max_completion_tokens=1500,
+            max_completion_tokens=800 if is_local else 1500,
             response_format={"type": "json_object"},
         )
+        # Local models may not support response_format
+        if is_local:
+            create_kwargs.pop("response_format", None)
         try:
             response = await llm.client.chat.completions.create(**create_kwargs)
         except Exception as api_err:

@@ -29,13 +29,23 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Local LLM sidecar (OpenAI-compatible API) ───────────────────
-  # Optional: provides a local LLM for air-gapped / offline use.
-  # Uses the official pre-built llama.cpp server image — NO compilation.
+  # ── Local LLM — llama.cpp server (OpenAI-compatible API) ─────────
+  # CPU-only inference with prompt caching tuned for short structured parser prompts.
+  # Important:
+  # - Native Windows llama-server.exe is still usually faster on this workstation.
+  # - This container profile is kept tuned and reproducible for local/dev deployments.
+  # - Warm it after start with: .\venv\Scripts\python.exe scripts\warm_local_llm.py
   #
-  # Start with:  docker compose --profile llm up -d
   # Model file must exist at ./models/model.gguf
-  # Download one:  .\scripts\download_model.ps1
+  #   Download: .\scripts\download_model.ps1
+  #   Default: Gemma 3 1B Instruct Q4_K_M (~800MB on weak CPU)
+  #
+  # Dev (Windows native, usually faster on this machine):
+  #   .\tools\llama-cpp\llama-server.exe --model models\model.gguf --alias local --host 127.0.0.1 --port 8081 --ctx-size 4096 --threads 8 --threads-batch 8 --threads-http 2 --flash-attn on --cache-type-k q4_0 --cache-type-v q4_0 --cache-reuse 64 --slot-prompt-similarity 0.75 --reasoning off --reasoning-format none --no-webui --mlock
+  #
+  # Backend .env config:
+  #   LOCAL_MODEL_URL=http://localhost:8081/v1
+  #   LOCAL_MODEL_NAME=local
   llm:
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: tdg-llm
@@ -43,32 +53,42 @@ services:
     volumes:
       - ./models:/models:ro
     ports:
-      - "8081:8080"            # llama.cpp server listens on 8080 by default
-    # IPC_LOCK allows use_mlock (model pinned in RAM) if enabled
+      - "8081:8080"
     cap_add:
       - IPC_LOCK
-    shm_size: "512m"
-    # llama.cpp server CLI args — tuned for single-user TDG workload
+    shm_size: "2g"
+    environment:
+      OMP_NUM_THREADS: "${LLM_THREADS:-8}"
     command: >
       --model /models/model.gguf
       --alias local
-      --ctx-size 4096
-      --threads 4
-      --parallel 1
-      --flash-attn on
-      --cache-type-k q8_0
-      --cache-type-v q8_0
-      --mlock
       --host 0.0.0.0
       --port 8080
+      --ctx-size ${LLM_CTX_SIZE:-4096}
+      --threads ${LLM_THREADS:-8}
+      --threads-batch ${LLM_THREADS_BATCH:-8}
+      --threads-http ${LLM_THREADS_HTTP:-2}
+      --parallel 1
+      --batch-size ${LLM_BATCH_SIZE:-256}
+      --ubatch-size ${LLM_UBATCH_SIZE:-128}
+      --flash-attn on
+      --cache-type-k ${LLM_CACHE_TYPE_K:-q4_0}
+      --cache-type-v ${LLM_CACHE_TYPE_V:-q4_0}
+      --cache-reuse ${LLM_CACHE_REUSE:-64}
+      --slot-prompt-similarity ${LLM_SLOT_PROMPT_SIMILARITY:-0.75}
+      --reasoning off
+      --reasoning-format none
+      --metrics
+      --no-webui
+      --timeout ${LLM_TIMEOUT_SEC:-180}
+      --mlock
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 30s       # pre-built image loads model much faster
+      start_period: 60s
 
 volumes:
   pgdata:
-
