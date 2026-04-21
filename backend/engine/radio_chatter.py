@@ -1295,3 +1295,81 @@ def generate_contact_halt_messages(
 
     return messages
 
+
+# ── Templates for out-of-range artillery ──
+
+OUT_OF_RANGE_RU = [
+    "Здесь {unit}. Цель за пределами дальности — {dist}м, макс. {max_range}м. Не могу открыть огонь.",
+    "{unit}, приём. Дальность цели превышает возможности — {dist}м против {max_range}м. Запрашиваю выдвижение на позицию.",
+    "Здесь {unit}. Отказ. Цель {dist}м, дальность орудий {max_range}м. Огонь невозможен.",
+]
+
+OUT_OF_RANGE_EN = [
+    "This is {unit}. Target out of range — {dist}m, max range {max_range}m. Cannot engage.",
+    "{unit}, over. Target distance {dist}m exceeds maximum range {max_range}m. Requesting reposition.",
+    "This is {unit}. Negative. Target at {dist}m, weapons max range {max_range}m. Unable to fire.",
+]
+
+
+def generate_out_of_range_messages(
+    all_units: list,
+    tick_events: list[dict],
+    tick: int,
+    language: str = "ru",
+    side_languages: dict | None = None,
+) -> list[dict]:
+    """
+    Generate radio messages when artillery/mortar cannot reach the target.
+    Triggered by 'fire_out_of_range' events in the tick.
+    """
+    messages = []
+    units_by_id = {str(u.id): u for u in all_units}
+
+    # Deduplicate — one message per firing unit per tick
+    reported_units: set[str] = set()
+
+    for evt in tick_events:
+        if evt.get("event_type") != "fire_out_of_range":
+            continue
+
+        actor_id = evt.get("actor_unit_id")
+        if not actor_id:
+            continue
+        actor_id_str = str(actor_id)
+        if actor_id_str in reported_units:
+            continue
+
+        unit = units_by_id.get(actor_id_str)
+        if not unit or unit.is_destroyed:
+            continue
+
+        comms = unit.comms_status
+        if hasattr(comms, 'value'):
+            comms = comms.value
+        if comms == "offline":
+            continue
+
+        reported_units.add(actor_id_str)
+
+        lang = _get_unit_lang(unit, language, side_languages)
+        templates = OUT_OF_RANGE_RU if lang == "ru" else OUT_OF_RANGE_EN
+        side = unit.side.value if hasattr(unit.side, 'value') else str(unit.side)
+
+        payload = evt.get("payload", {})
+        dist = int(round(payload.get("distance_m", 0)))
+        max_range = int(round(payload.get("weapon_range_m", 0)))
+
+        text = random.choice(templates).format(
+            unit=unit.name, dist=dist, max_range=max_range,
+        )
+        messages.append({
+            "sender_name": unit.name,
+            "side": side,
+            "text": text,
+            "is_unit_response": True,
+            "response_type": "fire_out_of_range",
+        })
+
+    return messages
+
+
