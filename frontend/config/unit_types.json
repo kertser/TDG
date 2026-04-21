@@ -421,5 +421,48 @@
         "det": 800,
         "fire": 100,
         "personnel": 20
+    },
+    "attack_helicopter": {
+        "label": "Attack Helicopter",
+        "sidc_blue": "10031001141202000000",
+        "sidc_red": "10061001141202000000",
+        "speed": 55.0,
+        "speed_slow": 30.0,
+        "speed_fast": 70.0,
+        "det": 5000,
+        "fire": 4000,
+        "personnel": 2,
+        "eye_height": 100.0,
+        "is_aviation": true,
+        "indirect_fire": false
+    },
+    "transport_helicopter": {
+        "label": "Transport Helicopter",
+        "sidc_blue": "10031001141400000000",
+        "sidc_red": "10061001141400000000",
+        "speed": 45.0,
+        "speed_slow": 25.0,
+        "speed_fast": 60.0,
+        "det": 3000,
+        "fire": 500,
+        "personnel": 2,
+        "eye_height": 150.0,
+        "is_aviation": true,
+        "indirect_fire": false,
+        "cargo_capacity": 12
+    },
+    "recon_uav": {
+        "label": "Recon UAV",
+        "sidc_blue": "10031001111200000000",
+        "sidc_red": "10061001111200000000",
+        "speed": 25.0,
+        "speed_slow": 15.0,
+        "speed_fast": 35.0,
+        "det": 8000,
+        "fire": 0,
+        "personnel": 0,
+        "eye_height": 200.0,
+        "is_aviation": true,
+        "indirect_fire": false
     }
 }

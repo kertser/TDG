@@ -20,7 +20,7 @@ Messages can be in **English** or **Russian**. Detect the language and parse acc
 ## Your Tasks
 
 1. **Classify** the message into one of these categories:
-   - `command` — an actionable order (move, attack, fire, request_fire, defend, observe, support, split, merge, breach, lay_mines, construct, deploy_bridge, withdraw, disengage, halt, regroup, resupply, report_status)
+   - `command` — an actionable order (move, attack, fire, request_fire, defend, observe, support, split, merge, breach, lay_mines, construct, deploy_bridge, withdraw, disengage, halt, regroup, resupply, air_assault, casevac, medevac, airstrike, report_status)
    - `status_request` — asking a unit for their status ("доложите обстановку", "report status", "what's happening")
    - `acknowledgment` — confirming receipt of an order ("так точно", "roger", "wilco", "выполняем")
    - `status_report` — reporting unit's own situation ("находимся в ...", "enemy spotted", "taking fire", "имеем потери")
@@ -39,7 +39,7 @@ For `status_request`, also extract what information is being requested:
 
 2. **Extract** structured data from command messages:
    - Target unit(s) referenced by name or callsign
-    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), **request_fire** (direct another support unit to fire), defend, observe, support, split, merge, breach, lay_mines, construct, deploy_bridge, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), report_status
+    - Order type: move, attack, **fire** (indirect fire at a location by artillery/mortar), **request_fire** (direct another support unit to fire), defend, observe, support, split, merge, breach, lay_mines, construct, deploy_bridge, withdraw, **disengage** (break contact and seek cover), halt, regroup, **resupply** (replenish ammunition/supplies), **air_assault** (helicopter insertion of troops to a landing zone), **casevac/medevac** (evacuate casualties by helicopter), **airstrike** (attack helicopter or CAS attack run on a target), report_status
    - Location references (grid squares like "B8", snail paths like "B8-2-4" or "2-4", coordinates, relative directions)
    - **Speed preference**: "slow" = cautious/tactical/stealthy movement; "fast" = rapid/urgent movement
      - Slow indicators (EN): slow, careful, cautious, stealth, tactical, sneak, quietly, covertly, low profile

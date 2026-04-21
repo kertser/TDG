@@ -51,6 +51,11 @@ class OrderType(str, enum.Enum):
     resupply = "resupply"
     request_fire = "request_fire"
     report_status = "report_status"
+    # Aviation / air-mobility
+    air_assault = "air_assault"     # helicopter insertion of troops
+    casevac = "casevac"             # casualty evacuation (combat)
+    medevac = "medevac"             # medical evacuation (non-combat)
+    airstrike = "airstrike"         # request / execute air strike
 
 
 class SpeedMode(str, enum.Enum):
@@ -67,9 +72,11 @@ class ResponseType(str, enum.Enum):
     wilco_standby = "wilco_standby"   # will comply — standby to support another unit
     wilco_disengage = "wilco_disengage"  # will comply — disengage/break contact
     wilco_resupply = "wilco_resupply"    # will comply — resupply mission
+    wilco_air_assault = "wilco_air_assault"  # will comply — air assault/insertion
+    wilco_casevac = "wilco_casevac"          # will comply — casevac/medevac
+    wilco_airstrike = "wilco_airstrike"      # will comply — airstrike mission
     unable = "unable"                 # cannot comply
     unable_range = "unable_range"     # cannot comply — target beyond max fire range
-    unable_area = "unable_area"       # cannot comply — target outside operations area
     unable_route = "unable_route"     # cannot comply — no passable route to destination
     clarify = "clarify"              # request clarification
     status = "status"                # status report

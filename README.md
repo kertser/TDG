@@ -9,6 +9,7 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Fog of War** — Server-authoritative visibility filtering via PostGIS `ST_DWithin` + terrain-aware LOS viewshed; players only see enemy units within line-of-sight; recon/sniper units in concealment mode are nearly invisible; enemy unit type and echelon masked (only broad category shown)
 - **LOS Viewshed** — Ray-casting based visibility polygons replace simple circles; terrain obstacles (forests, buildings) block line-of-sight; unit-type-specific eye heights; visibility absorption model
 - **Tactical A* Pathfinding** — Terrain-aware movement trajectories over depth-1 terrain cells (~333m resolution); considers terrain cost, slope, minefields, enemy avoidance, cover preference, friendly proximity; speed-mode-aware routing (slow=concealment, fast=speed); waypoints computed immediately on order and recalculated every 5 ticks; smooth Catmull-Rom spline rendering on frontend
+- **Aviation & Air-Mobility** — 3 aviation unit types (attack helicopter, transport helicopter, recon UAV) with terrain-bypass flight mechanics; aviation-specific order types (air_assault, casevac/medevac, airstrike); high eye heights (100-200m) for superior detection; bilingual EN/RU aviation keywords
 - **Collaborative Overlays** — Real-time synchronized drawing tools (arrows, polylines, rectangles, markers, ellipses, measurement) via WebSocket; shared across all sides
 - **Terrain Intelligence** — Automatic terrain classification from OSM Overpass + ESA WorldCover + Open-Elevation API; 12-type taxonomy with military modifiers; admin manual painting; SSE progress streaming; height tops detection
 - **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos, combat role coordination), morale, suppression, ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply, engineer task execution, and targeted logistics support
@@ -35,11 +36,219 @@ collaborative map drawing, terrain intelligence, and structured order understand
 
 ## Quick Start
 
-### 1. Prerequisites
+### Production Deployment (Recommended)
+
+**One-command Docker deployment** — the easiest way to get started. The local LLM sidecar is included by default.
+
+**Windows (PowerShell)**:
+```powershell
+# 1. Clone and configure
+git clone <repository-url>
+cd KShU
+Copy-Item .env.example .env
+# Edit .env: set OPENAI_API_KEY, SECRET_KEY, ADMIN_PASSWORD
+
+# 2. Deploy everything (PostgreSQL + Redis + Backend + Nginx + Local LLM)
+.\deploy.ps1
+
+# 3. Access
+# Frontend:  http://localhost
+# API docs:  http://localhost/api/docs
+# Local LLM: http://localhost:8081
+```
+
+**Linux/Unix**:
+```bash
+git clone <repository-url>
+cd KShU
+cp .env.example .env
+# Edit .env: set OPENAI_API_KEY, SECRET_KEY, ADMIN_PASSWORD
+chmod +x deploy.sh
+./deploy.sh
+```
+
+### Deployment Script Flags
+
+Both `deploy.ps1` (Windows) and `deploy.sh` (Linux) support identical flags:
+
+| Flag | Description |
+|---|---|
+| *(none)* | Build images (using cache) and start the full stack |
+| `--rebuild` | Tear down, rebuild images with `--no-cache`, restart. **Keeps database.** |
+| `--clean` | **Full wipe**: remove containers, **volumes (data erased)**, images, build cache — then rebuild fresh |
+| `--down` | Stop and remove all containers. **Database volume preserved** — data survives. |
+| `--logs` | Follow container logs after start (`Ctrl+C` to exit) |
+
+```powershell
+# Windows examples
+.\deploy.ps1 --rebuild        # force full rebuild
+.\deploy.ps1 --rebuild --logs # rebuild then tail logs
+.\deploy.ps1 --clean          # nuclear option
+.\deploy.ps1 --down           # stop everything
+```
+
+> **To disable the local LLM**: comment out `COMPOSE_PROFILES=llm` in your `.env`.
+
+---
+
+## Deployment Architecture
+
+```
+Client Browser (http://localhost)
+        ↓
+    Nginx (port 80)
+    ├─→ Frontend static files
+    ├─→ /api/*  → Backend:8000
+    └─→ /ws/*   → Backend:8000 (WebSocket)
+        ↓
+    FastAPI Backend (port 8000)
+    ├─→ PostgreSQL:5432 (+ PostGIS)
+    ├─→ Redis:6379 (pub/sub + cache)
+    └─→ LLM:8081 (local llama.cpp)
+```
+
+| Service | Port | Description |
+|---|---|---|
+| `nginx` | 80 | Reverse proxy + frontend static files |
+| `backend` | 8000 | FastAPI app + auto migrations (internal) |
+| `postgres` | 5432 | PostgreSQL 16 + PostGIS 3.4 |
+| `redis` | 6379 | Redis (pub/sub, session cache) |
+| `llm` | 8081 | llama.cpp OpenAI-compatible API |
+
+All services have health checks, restart policies, and proper dependency chains.
+
+---
+
+## Environment Configuration
+
+Copy `.env.example` to `.env`. Required settings:
+
+```env
+OPENAI_API_KEY=sk-...         # for LLM order parsing and Red AI
+SECRET_KEY=<random-64-chars>  # for JWT tokens
+ADMIN_PASSWORD=<strong-pass>  # for admin panel
+```
+
+Optional settings:
+```env
+LOCAL_MODEL_URL=http://localhost:8081/v1
+LOCAL_MODEL_NAME=local
+LOCAL_TRIAGE_ENABLED=true
+LLM_PARSING_MODE=llm_first    # llm_first | keyword_first | keyword_only
+
+OPENAI_MODEL=gpt-4.1
+OPENAI_MODEL_MINI=gpt-4.1-mini
+OPENAI_MODEL_NANO=gpt-4o-mini
+```
+
+Generate a `SECRET_KEY`:
+```powershell
+# Windows PowerShell
+[Convert]::ToBase64String((1..48 | ForEach-Object { [byte](Get-Random -Max 256) }))
+```
+
+---
+
+## Logs, Health & Troubleshooting
+
+```powershell
+# All service logs
+docker compose logs -f
+
+# Specific service
+docker compose logs -f backend
+docker compose logs -f llm
+
+# Service health
+docker compose ps
+curl http://localhost/health
+curl http://localhost:8081/health
+```
+
+**Backend won't start** — check `docker compose logs backend`. Common causes: missing `OPENAI_API_KEY`, database not ready (wait 30s, backend retries automatically), port 8000 already in use.
+
+**Database migrations fail**:
+```powershell
+docker compose exec backend alembic upgrade head
+# or full reset (destroys data):
+.\deploy.ps1 --down
+docker volume rm tdg_pgdata
+.\deploy.ps1
+```
+
+**Nginx 502 Bad Gateway** — backend not healthy yet: `docker compose restart backend`
+
+**Local LLM not responding**:
+```powershell
+docker compose logs llm
+# Warm the model after first start (slow cold load):
+python scripts\warm_local_llm.py
+```
+
+---
+
+## Data Persistence & Reset
+
+Game data lives in Docker volume `pgdata`. It **survives** `--down` and is reattached on next start.
+
+To fully reset (wipe the database):
+
+```powershell
+# Windows — wipes everything including data
+.\deploy.ps1 --clean
+
+# Linux/Unix
+./deploy.sh --clean
+```
+
+Backup the database before wiping:
+```powershell
+docker compose exec postgres pg_dump -U tdg tdg > backup.sql
+```
+
+---
+
+## Updates
+
+```powershell
+# Windows
+git pull
+.\deploy.ps1 --rebuild
+
+# Linux/Unix
+git pull
+./deploy.sh --rebuild
+```
+
+---
+
+## Production Hardening
+
+1. **Change all default passwords** in `.env` — `SECRET_KEY`, `ADMIN_PASSWORD`, and the database passwords in `docker-compose.yml`
+2. **Enable HTTPS** — use nginx SSL config or a reverse proxy (Traefik, Caddy)
+3. **Resource limits** — add to `docker-compose.yml` backend service:
+   ```yaml
+   deploy:
+     resources:
+       limits:
+         cpus: '2'
+         memory: 4G
+   ```
+4. **Scheduled backups** of the `pgdata` volume
+5. **Monitoring** — Prometheus + Grafana on the `/health` endpoints
+
+---
+
+### Development Setup (Alternative)
+
+For active development with hot-reload:
+
+
+#### 1. Prerequisites
 - Python 3.12+
 - Docker & Docker Compose
 
-### 2. Start infrastructure
+##### 2. Start infrastructure
 ```powershell
 docker compose up -d
 ```
@@ -48,30 +257,30 @@ This launches PostgreSQL + PostGIS (port 5432) and Redis (port 6379).
 > **Note:** If upgrading from a previous version that used `kshu` as the DB name,
 > run `docker compose down -v` first to remove the old volume, then `docker compose up -d`.
 
-### 3. Install Python dependencies
+#### 3. Install Python dependencies
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment
+#### 4. Configure environment
 ```powershell
 Copy-Item .env.example .env
 # Edit .env and set your OPENAI_API_KEY
 ```
 
-### 5. Seed the database (creates tables + sample scenario)
+#### 5. Seed the database (creates tables + sample scenario)
 ```powershell
 python -m scripts.seed_scenario
 ```
 
-### 6. Start the backend
+#### 6. Start the backend
 ```powershell
 uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 7. Open the frontend
+#### 7. Open the frontend
 Navigate to `http://localhost:8000` in your browser.
 
 ### Local LLM (Optional — Air-Gapped Deployment)
@@ -81,9 +290,7 @@ If no `OPENAI_API_KEY` is set, the parser falls back to a local model via llama.
 # Download model (default: Gemma 3 1B Instruct Q4_K_M, ~800MB)
 .\scripts\download_model.ps1
 
-# Start llama.cpp via Docker
-docker compose --profile llm up -d
-
+# The LLM container starts automatically with the stack (COMPOSE_PROFILES=llm in .env)
 # Or run native (faster on Windows):
 .\tools\llama-cpp\llama-server.exe --model models\model.gguf --alias local --host 127.0.0.1 --port 8081 --ctx-size 4096 --threads 8 --reasoning off --no-webui --mlock
 ```
@@ -300,13 +507,14 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 
 ### Movement
 - Each unit type has unique **slow** (tactical) and **fast** (rapid) movement speeds in m/s
-- **Tactical A* pathfinding**: units navigate terrain-aware paths that avoid minefields, enemy observation, and impassable terrain
+- **Aviation units bypass all terrain** — helicopters and UAVs fly over water, minefields, obstacles, and steep terrain without penalty
+- **Tactical A* pathfinding**: ground units navigate terrain-aware paths that avoid minefields, enemy observation, and impassable terrain
 - Speed mode affects routing: **slow** prefers concealed routes (forest, urban), **fast** prefers roads and open terrain
 - `effective_speed = base_speed × terrain_factor × slope_factor × (1 - suppression × 0.7) × morale_factor × weather_mod`
 - **Terrain factors**: road=1.0, open=0.8, forest=0.5, urban=0.4, water=0.05, fields=0.7, marsh=0.3, etc.
 - **Slope penalty**: `max(0.2, 1.0 - slope_deg/45)` — steep terrain dramatically slows movement
 - Map objects affect movement: minefields damage/slow, barbed wire slows, etc.
-- Units halt before discovered minefields (request engineers) and at water without bridges
+- Ground units halt before discovered minefields (request engineers) and at water without bridges
 - **Contact during advance**: moving (non-attack) units halt on enemy detection and request orders; resume after 3 ticks if no new orders
 
 ### Detection & LOS
@@ -329,23 +537,33 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 - **Auto-return fire**: Units under attack with no orders engage nearest attacker (except disengaging units)
 
 ### Unit Types
-36 unit types defined in `frontend/config/unit_types.json`, each with:
+39 unit types defined in `frontend/config/unit_types.json`, each with:
 - MIL-STD-2525D SIDC codes (Blue + Red variants)
 - Slow/fast movement speeds (m/s)
 - Detection range, fire range, personnel count
 - Eye height for LOS calculations
 - Indirect fire flag (mortars, artillery)
+- Special capabilities (aviation terrain bypass, cargo capacity, etc.)
+
+**Aviation units** (3 types):
+- **Attack Helicopter** — 70 m/s fast, 5km detection, 4km fire range, 100m eye height
+- **Transport Helicopter** — 60 m/s fast, 3km detection, 12-person cargo, 150m eye height
+- **Recon UAV** — 35 m/s fast, 8km detection, unarmed, 200m eye height
+
+Aviation units bypass all terrain restrictions (water, minefields, obstacles, slope) and are handled by special order types: `air_assault` (helicopter insertion), `casevac`/`medevac` (casualty evacuation), `airstrike` (attack run).
 
 ## Configuration Files
 
 | File | Purpose |
 |---|---|
-| `frontend/config/unit_types.json` | Unit type registry: SIDC codes, speeds, ranges, personnel, eye heights |
+| `frontend/config/unit_types.json` | Unit type registry: SIDC codes, speeds, ranges, personnel, eye heights, aviation flags |
 | `frontend/config/units_config.json` | Display/behavior constants: status icons, formations, movement arrows, selection params |
 | `backend/data/order_phrasebook.toml` | Bilingual keyword lexicon + regression test cases for order parsing |
 | `FIELD_MANUAL.md` | Tactical doctrine source (loaded by `backend/prompts/tactical_doctrine.py`) |
 | `backend/config.py` | Server configuration: DB URL, Redis, API keys, LLM settings |
 | `.env` | Environment variables (secrets, overrides) |
+| `docker-compose.yml` | Multi-container orchestration (postgres, redis, backend, nginx, llm) |
+| `nginx.conf` | Reverse proxy configuration for production deployment |
 
 ## Testing
 
@@ -382,8 +600,8 @@ See `scripts/tactical_tests/` for scenario definitions and the test framework.
 
 ## API Documentation
 FastAPI auto-generates interactive docs:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- **Production**: `http://localhost/api/docs` (Swagger UI), `http://localhost/api/redoc` (ReDoc)
+- **Development**: `http://localhost:8000/docs` (Swagger UI), `http://localhost:8000/redoc` (ReDoc)
 
 ## Project Structure
 See `AGENTS.MD` for full architecture, domain model, and implementation roadmap.
@@ -395,7 +613,12 @@ KShU/
 ├── README.md
 ├── Task.MD                         # Original project requirements
 ├── requirements.txt
-├── docker-compose.yml              # PostgreSQL+PostGIS, Redis, optional llama.cpp
+├── docker-compose.yml              # PostgreSQL+PostGIS, Redis, backend, nginx, llama.cpp
+├── Dockerfile                      # Backend multi-stage build
+├── docker-entrypoint.sh            # Runs migrations on container start
+├── nginx.conf                      # Reverse proxy + static serving config
+├── deploy.ps1                      # One-command deployment script (Windows PowerShell)
+├── deploy.sh                       # One-command deployment script (Linux/Unix Bash)
 ├── alembic.ini
 ├── .env
 ├── backend/
@@ -449,6 +672,7 @@ KShU/
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, GeoAlchemy2 |
 | Database | PostgreSQL 16 + PostGIS 3.4 |
 | Cache/PubSub | Redis 7 |
+| Deployment | Docker, Docker Compose, Nginx (reverse proxy) |
 | AI | OpenAI GPT-4.1 / GPT-5 (order parsing, Red AI decisions, unit responses, AAR); local llama.cpp fallback (Gemma/Qwen GGUF) |
 | Geospatial | Shapely, pyproj, PostGIS spatial queries |
 | Terrain Data | OSM Overpass API, ESA WorldCover 2021, Open-Elevation API |

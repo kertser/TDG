@@ -898,28 +898,32 @@ const KScenarioBuilder = (() => {
         const dLat = sizeMt / mPerDegLat;
         const dLon = sizeMt / mPerDegLon;
 
-        // Draw grid lines
+        // Draw grid lines — same style as game grid (grid.js)
+        const borderColor = '#1a3a5c';
+        const innerColor  = 'rgba(26, 58, 92, 0.55)';
         for (let c = 0; c <= cols; c++) {
             const lon = originLon + c * dLon;
+            const isBorder = c === 0 || c === cols;
             _gridPreviewLayer.addLayer(L.polyline([
                 [originLat, lon],
                 [originLat + rows * dLat, lon],
             ], {
-                color: 'rgba(255,255,255,0.35)',
-                weight: c === 0 || c === cols ? 2 : 1,
-                dashArray: c === 0 || c === cols ? null : '6,4',
+                color: isBorder ? borderColor : innerColor,
+                weight: isBorder ? 2.5 : 1,
+                dashArray: isBorder ? null : '6,4',
                 interactive: false,
             }));
         }
         for (let r = 0; r <= rows; r++) {
             const lat = originLat + r * dLat;
+            const isBorder = r === 0 || r === rows;
             _gridPreviewLayer.addLayer(L.polyline([
                 [lat, originLon],
                 [lat, originLon + cols * dLon],
             ], {
-                color: 'rgba(255,255,255,0.35)',
-                weight: r === 0 || r === rows ? 2 : 1,
-                dashArray: r === 0 || r === rows ? null : '6,4',
+                color: isBorder ? borderColor : innerColor,
+                weight: isBorder ? 2.5 : 1,
+                dashArray: isBorder ? null : '6,4',
                 interactive: false,
             }));
         }

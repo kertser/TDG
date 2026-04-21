@@ -488,8 +488,19 @@ UNIT_TYPE_SPEEDS: dict[str, dict[str, float]] = {
     "construction_engineer_section": {"slow": 0.8, "fast": 2.0},
     "avlb_vehicle":             {"slow": 2.0, "fast": 6.0},   # armored vehicle
     "avlb_section":             {"slow": 2.0, "fast": 6.0},
+    # Aviation (speeds in m/s — bypasses terrain; ~110–250 km/h)
+    "attack_helicopter":        {"slow": 30.0, "fast": 70.0},   # ~108–252 km/h
+    "transport_helicopter":     {"slow": 25.0, "fast": 60.0},   # ~90–216 km/h
+    "recon_uav":                {"slow": 15.0, "fast": 35.0},   # ~54–126 km/h
 }
 DEFAULT_SPEEDS = {"slow": 1.2, "fast": 3.0}  # fallback for unknown types
+
+# Aviation unit types — bypass terrain/water/minefield movement restrictions
+AVIATION_UNIT_TYPES: frozenset[str] = frozenset({
+    "attack_helicopter",
+    "transport_helicopter",
+    "recon_uav",
+})
 
 VALID_SPEED_LABELS = {"slow", "fast"}
 
@@ -508,6 +519,10 @@ UNIT_EYE_HEIGHTS: dict[str, float] = {
     "command_post":       3.0,
     "artillery_battery":  2.5,
     "artillery_platoon":  2.5,
+    # Aviation — high altitude
+    "attack_helicopter":     100.0,
+    "transport_helicopter":  150.0,
+    "recon_uav":             200.0,
 }
 DEFAULT_EYE_HEIGHT = 2.0  # infantry standing height
 

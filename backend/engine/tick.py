@@ -1236,6 +1236,8 @@ _PATH_RECALC_INTERVAL = 5
 WAYPOINT_MOVE_TASK_TYPES = {
     "move", "attack", "advance", "disengage", "withdraw", "resupply",
     "breach", "lay_mines", "construct", "deploy_bridge",
+    # Aviation tasks that involve moving to a destination
+    "air_assault", "casevac", "medevac", "airstrike",
 }
 
 # ── Session-level centroid + static graph cache ──
@@ -1654,7 +1656,8 @@ async def _process_orders(
 
             # Apply move speed from order if specified
             speed_label = task.get("speed")
-            if speed_label and task_type in ("move", "attack", "advance", "resupply", "breach", "lay_mines", "construct", "deploy_bridge"):
+            if speed_label and task_type in ("move", "attack", "advance", "resupply", "breach", "lay_mines", "construct", "deploy_bridge",
+                                              "air_assault", "casevac", "medevac", "airstrike"):
                 speeds = UNIT_TYPE_SPEEDS.get(unit.unit_type, DEFAULT_SPEEDS)
                 if speed_label in speeds:
                     unit.move_speed_mps = speeds[speed_label]
@@ -1895,6 +1898,16 @@ def _order_to_task(order: Order) -> dict | None:
         if any(kw in text for kw in ["resupply", "re-supply", "rearm", "ammo",
                                        "пополн", "боеприпас", "снабж", "боекомплект"]):
             return {"type": "resupply", "order_id": str(order.id)}
+        # Aviation order types
+        if any(kw in text for kw in ["air assault", "air_assault", "heli insert", "high insertion",
+                                      "воздушный десант", "высадить десант"]):
+            return {"type": "air_assault", "order_id": str(order.id)}
+        if any(kw in text for kw in ["casevac", "medevac", "evacuate casualties", "evacuate wounded",
+                                      "эвакуируй раненых", "медэвак"]):
+            return {"type": "casevac", "order_id": str(order.id)}
+        if any(kw in text for kw in ["airstrike", "air strike", "close air support", "attack run",
+                                      "авиаудар", "удар с воздуха"]):
+            return {"type": "airstrike", "order_id": str(order.id)}
 
     return None
 

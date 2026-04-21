@@ -109,6 +109,12 @@ def create_app() -> FastAPI:
     async def get_version():
         return {"version": settings.APP_VERSION, "name": settings.APP_NAME}
 
+    # ── Health check endpoint (for Docker healthcheck) ─
+    @app.get("/health", tags=["meta"])
+    async def health_check():
+        """Simple health check for Docker/k8s."""
+        return {"status": "healthy"}
+
     # ── Serve favicon.ico (browsers auto-request it) ──
     import pathlib
     frontend_dir = pathlib.Path(__file__).resolve().parent.parent / "frontend"

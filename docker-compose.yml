@@ -1,5 +1,12 @@
 name: tdg
 
+# ⚠️  IMPORTANT: The `llm` service uses a Docker Compose profile.
+#    Plain `docker compose down` works because COMPOSE_PROFILES=llm is set in .env.
+#    To explicitly stop all profiles regardless of .env:
+#      .\deploy.ps1 --down                         (Windows)
+#      ./deploy.sh --down                          (Linux)
+#      docker compose --profile llm down --remove-orphans  (manual)
+
 services:
   postgres:
     container_name: tdg-postgres
@@ -28,6 +35,46 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # ── Backend — FastAPI application ───────────────────────────────────────────
+  backend:
+    container_name: tdg-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://tdg:tdg_secret@postgres:5432/tdg
+      DATABASE_URL_SYNC: postgresql://tdg:tdg_secret@postgres:5432/tdg
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Nginx — reverse proxy + frontend static ─────────────────────────────────
+  nginx:
+    container_name: tdg-nginx
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ── Local LLM — llama.cpp server (OpenAI-compatible API) ─────────
   # CPU-only inference with prompt caching tuned for short structured parser prompts.
