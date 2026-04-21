@@ -16,6 +16,8 @@
 
     Optional:
       --llm       (no-op, kept for backward compatibility — LLM always starts)
+      --hot       Quick update: rebuild + restart backend only (for .py changes)
+                  JS/HTML/CSS changes need nothing — nginx serves them directly from disk
       --rebuild   Force no-cache rebuild of images (brings stack down first)
       --clean     Full cleanup: stop containers, remove volumes, remove images,
                   purge build cache — then rebuild and start fresh
@@ -24,6 +26,7 @@
 
 .EXAMPLE
     .\deploy.ps1
+    .\deploy.ps1 --hot       # Update Python files only (~10-30s)
     .\deploy.ps1 --rebuild
     .\deploy.ps1 --clean
     .\deploy.ps1 --down
@@ -34,7 +37,8 @@ param(
     [switch]$rebuild,
     [switch]$clean,
     [switch]$down,
-    [switch]$logs
+    [switch]$logs,
+    [switch]$hot        # Quick update: rebuild + restart backend only (JS/HTML updates need nothing)
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,6 +58,21 @@ function Invoke-Down {
     } else {
         docker compose --profile llm down --remove-orphans
     }
+}
+
+# ── --hot: rebuild + restart backend only (fast Python update) ────────────────
+if ($hot) {
+    Write-Host "⚡ Hot update: rebuilding backend only..." -ForegroundColor Cyan
+    Write-Host "   (JS/HTML changes are live instantly — no action needed for frontend)" -ForegroundColor Gray
+    Write-Host ""
+    docker compose build backend
+    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Build failed." -ForegroundColor Red; exit $LASTEXITCODE }
+    docker compose up -d --no-deps backend
+    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Restart failed." -ForegroundColor Red; exit $LASTEXITCODE }
+    Write-Host ""
+    Write-Host "✅ Backend updated and restarted." -ForegroundColor Green
+    Write-Host "   Logs: docker compose logs -f backend" -ForegroundColor Gray
+    exit 0
 }
 
 # ── --down: stop containers, keep volumes (data preserved) ────────────────────
@@ -178,10 +197,11 @@ Write-Host "  Database:     " -NoNewline; Write-Host "localhost:5432 (tdg / tdg_
 Write-Host "  Redis:        " -NoNewline; Write-Host "localhost:6379"         -ForegroundColor Gray
 Write-Host "  Local LLM:    " -NoNewline; Write-Host "http://localhost:8081 (OpenAI-compatible)" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  To view logs:    " -NoNewline; Write-Host "docker compose logs -f"   -ForegroundColor Cyan
-Write-Host "  To stop:         " -NoNewline; Write-Host ".\deploy.ps1 --down"      -ForegroundColor Cyan
-Write-Host "  To rebuild:      " -NoNewline; Write-Host ".\deploy.ps1 --rebuild"   -ForegroundColor Cyan
-Write-Host "  Full clean:      " -NoNewline; Write-Host ".\deploy.ps1 --clean"     -ForegroundColor Cyan
+  Write-Host "  To view logs:    " -NoNewline; Write-Host "docker compose logs -f"   -ForegroundColor Cyan
+  Write-Host "  To stop:         " -NoNewline; Write-Host ".\deploy.ps1 --down"      -ForegroundColor Cyan
+  Write-Host "  To rebuild:      " -NoNewline; Write-Host ".\deploy.ps1 --rebuild"   -ForegroundColor Cyan
+  Write-Host "  Hot update (.py):" -NoNewline; Write-Host ".\deploy.ps1 --hot"       -ForegroundColor Cyan
+  Write-Host "  Full clean:      " -NoNewline; Write-Host ".\deploy.ps1 --clean"     -ForegroundColor Cyan
 Write-Host ""
 
 # ── Follow logs if requested ─────────────────────────────────────────────────

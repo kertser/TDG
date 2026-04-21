@@ -140,6 +140,15 @@ const KSessionUI = (() => {
                         return;
                     }
                     const data = await resp.json();
+
+                    // ── Update game clock immediately from HTTP response ──
+                    // Don't rely on WebSocket tick_update/state_update which may be
+                    // delayed (Redis pub/sub latency) or lost (WS reconnecting).
+                    if (data.tick !== undefined) {
+                        KMap.setGameTime(data.tick, data.game_time || null);
+                    }
+                    try { KOrders.refreshMeta(); } catch(e) {}
+
                     KGameLog.addEntry(
                         `Turn ${data.tick}: ${data.events_count} events`,
                         'info'
