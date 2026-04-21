@@ -641,7 +641,8 @@ const KUnits = (() => {
                     // Identified enemy (close range or recon): show real name, type, personnel
                     const _identPersKnown = PERSONNEL.hasOwnProperty(u.unit_type);
                     const _identPers = _identPersKnown ? Math.max(0, Math.floor(PERSONNEL[u.unit_type] * (u.strength != null ? u.strength : 1.0))) : null;
-                    const _identPersDisplay = _identPers != null ? `${_identPers}p` : '?p';
+                    // Show ~1p instead of 0p when unit is alive but strength rounds to zero
+                    const _identPersDisplay = _identPers != null ? (_identPers > 0 ? `${_identPers}p` : '~1p') : '?p';
                     const _identStrPct = u.strength != null ? `${Math.round(u.strength * 100)}%` : '?';
                     tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#ef5350;">[IDENTIFIED]</span>`
                         + ` <span style="font-size:10px;color:#aaa;">(${_identPersDisplay})</span>`
@@ -655,7 +656,8 @@ const KUnits = (() => {
                         + `<br><span style="color:${statusColor};font-weight:600;">⚡ ${estimateLabel}</span>`;
                 }
             } else {
-                const _persDisplay = _effPers != null ? `${_effPers}p` : '?p';
+                // Own-side (or admin view): show ~1p instead of 0p for critically wounded living units
+                const _persDisplay = _effPers != null ? (_effPers > 0 ? `${_effPers}p` : '~1p') : '?p';
                 tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${_persDisplay})</span>`
                     + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
                     + `<br>`
@@ -1247,7 +1249,9 @@ const KUnits = (() => {
             // For enemy units with generalized type (fog-of-war), personnel is unknown
             const _persKnown = PERSONNEL.hasOwnProperty(u.unit_type);
             const _effPers = _persKnown ? Math.max(0, Math.floor(pers * (u.strength != null ? u.strength : 1.0))) : null;
-            const _persStr = _persKnown ? `${_effPers}/${pers} personnel` : '? personnel';
+            // Show ~1 instead of 0 for critically wounded but living units
+            const _effPersDisplay = _effPers != null ? (_effPers > 0 ? _effPers : '~1') : '?';
+            const _persStr = _persKnown ? `${_effPersDisplay}/${pers} personnel` : '? personnel';
             html += `<div class="unit-info-name">${u.name}</div>`;
             html += `<div class="unit-info-type">${u.unit_type.replace(/_/g, ' ')} · ${_persStr}</div>`;
         }
@@ -3066,9 +3070,20 @@ const KUnits = (() => {
      */
     function injectPathCache(unitIds, toLat, toLon, pathArr) {
         if (!unitIds || !unitIds.length || !pathArr) return;
+        // Sync the cache epoch so the injected paths are NOT wiped on the very next
+        // _getCachedPath call due to _viewshedTick !== _pathCacheTick mismatch.
+        // Without this, render() called immediately below would clear the cache before
+        // it can be used, producing a straight-line flash on every order.
+        _pathCacheTick = _viewshedTick;
         for (const uid of unitIds) {
             const key = `${uid}_${toLat.toFixed(5)}_${toLon.toFixed(5)}`;
             _pathCache[key] = pathArr;
+            // Also inject waypoints into the unit's current_task so Priority-1
+            // in _drawTrajectory keeps working after the next tick invalidates the cache.
+            const u = allUnitsData.find(x => x.id === uid);
+            if (u && u.current_task) {
+                u.current_task = { ...u.current_task, waypoints: pathArr };
+            }
             // Also store as pending order
             if (!_pendingOrders[uid]) {
                 _pendingOrders[uid] = {

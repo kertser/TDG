@@ -1645,5 +1645,110 @@ Entity codes used (Symbol Set 10):
   130200 = Field Artillery
   130300 = Mortar
   160700 = Logistics/CSS
+  114100 = Aviation (generic)
+  114102 = Attack Helicopter  
+  114200 = UAV
 ```
+
+---
+
+## Recent Updates (April 2026)
+
+### 1. Scenario Builder Grid Preview Fix
+**Issue**: Grid mesh preview rendering invisible white lines on most basemaps.  
+**Fix**: Changed grid line colors from `rgba(255,255,255,0.35)` to bright cyan (`rgba(160,210,255,0.95)` borders, `rgba(130,190,255,0.70)` inner lines). Grid is now clearly visible on all basemap types.
+
+### 2. Aviation & Air-Mobility Support
+**Implementation**: Full aviation unit support with terrain bypass mechanics.
+
+**New Unit Types** (3):
+- `attack_helicopter` — Attack helicopter (70 m/s fast, 30 m/s slow, 100m eye height, 5km detection, 4km fire range)
+- `transport_helicopter` — Transport helicopter (60 m/s fast, 25 m/s slow, 150m eye height, 3km detection, 12-person cargo)
+- `recon_uav` — Reconnaissance UAV (35 m/s fast, 15 m/s slow, 200m eye height, 8km detection, unarmed)
+
+**New Order Types** (4):
+- `air_assault` — Helicopter insertion of troops to landing zone
+- `casevac` / `medevac` — Casualty evacuation by helicopter  
+- `airstrike` — Attack helicopter or CAS attack run
+
+**Movement Engine**:
+- Aviation units bypass ALL terrain movement restrictions (water, minefields, obstacles, slope)
+- No terrain penalty (`terrain_factor = 1.0`, `slope_factor = 1.0`, `obstacle_factor = 1.0`)
+- Movement type checks skip minefield/water/obstacle detection for aviation units
+- Added `AVIATION_UNIT_TYPES` constant to movement.py
+
+**Order Pipeline**:
+- Aviation keywords added to phrasebook: "air assault", "heli insertion", "landing zone", "casevac", "medevac", "airstrike", "воздушный десант", "эвакуируй раненых", "авиаудар"
+- LLM prompts updated with aviation order type examples
+- Response templates (`wilco_air_assault`, `wilco_casevac`, `wilco_airstrike`) in RU/EN
+- Task assignment in tick.py recognizes aviation order types
+
+**Files Changed**:
+- `frontend/config/unit_types.json` — added 3 aviation unit types with SIDC codes (114102, 114100, 114200)
+- `backend/api/units.py` — added aviation speeds to `UNIT_TYPE_SPEEDS` + `AVIATION_UNIT_TYPES` constant + eye heights
+- `backend/schemas/order.py` — added `air_assault`, `casevac`, `medevac`, `airstrike` to `OrderType` enum + 3 response types
+- `backend/engine/movement.py` — aviation terrain bypass logic (skip minefield/water/obstacle checks, terrain/slope factors = 1.0)
+- `backend/engine/tick.py` — aviation task types in `WAYPOINT_MOVE_TASK_TYPES` + order→task mapping keywords
+- `backend/services/response_generator.py` — aviation response type handling
+- `backend/prompts/response_generator.py` — bilingual RU/EN aviation response templates
+- `backend/prompts/order_parser.py` — LLM prompt updated with aviation order types
+- `backend/data/order_phrasebook.toml` — aviation keyword lexicon (air_assault, casevac, airstrike)
+
+### 3. Production Docker Deployment
+**Implementation**: One-command Docker deployment with nginx reverse proxy.
+
+**Files Created**:
+- `Dockerfile` — Multi-stage build (builder + runtime stages). Includes GDAL/rasterio for terrain analysis. Non-root user. Healthcheck endpoint.
+- `docker-entrypoint.sh` — Runs alembic migrations on container start before app launch.
+- `nginx.conf` — Reverse proxy config: serves frontend static at `/`, proxies `/api/*` and `/ws/*` to backend, caching headers.
+- `deploy.ps1` — PowerShell deployment script (Windows) with flags: `--llm`, `--rebuild`, `--down`, `--logs`. Auto-creates .env from template, builds images, starts services, waits for health checks, prints access URLs.
+- `deploy.sh` — Bash deployment script (Linux/Unix) with same functionality as deploy.ps1. Colored output, health check waiting, service status display.
+- `DEPLOY.md` — Comprehensive deployment guide: architecture diagram, commands for both Windows and Linux, configuration, troubleshooting, production hardening.
+
+**Files Modified**:
+- `docker-compose.yml` — Added `backend`, `nginx` services with health checks and dependencies. Duplicate `llm` section removed.
+- `backend/main.py` — Added `/health` endpoint for Docker healthcheck.
+
+**Architecture**:
+```
+Client → Nginx (port 80) → Backend (port 8000) → PostgreSQL + Redis
+                          ↘ Frontend static
+```
+
+**Deployment Command**:
+
+**Windows (PowerShell)**:
+```powershell
+.\deploy.ps1          # Full stack
+.\deploy.ps1 --llm    # With local LLM
+.\deploy.ps1 --down   # Stop & remove
+```
+
+**Linux/Unix (Bash)**:
+```bash
+./deploy.sh           # Full stack
+./deploy.sh --llm     # With local LLM
+./deploy.sh --down    # Stop & remove
+```
+
+**Services**:
+- `nginx` — Reverse proxy + static files (port 80)
+- `backend` — FastAPI app (port 8000, internal)
+- `postgres` — PostgreSQL 16 + PostGIS 3.4 (port 5432)
+- `redis` — Redis 7 (port 6379)
+- `llm` — llama.cpp server (port 8081, optional `--llm` profile)
+
+All services have health checks, restart policies, and proper dependency chains. Backend runs migrations automatically on startup via entrypoint script.
+
+### Testing Status
+- **Scenario Builder**: Grid preview fix manually verified.
+- **Aviation**: Unit types added and configured. Movement bypass logic implemented. Order pipeline integrated. Ready for tactical testing.
+- **Deployment**: Docker build tested locally. Full stack deployment validated with `.\deploy.ps1` (Windows) and `./deploy.sh` (Linux). Health checks functioning. Cross-platform deployment scripts tested.
+
+### Next Steps
+- Run tactical regression tests (`python -m scripts.tactical_tests.run_all`) to validate aviation movement mechanics
+- Production deployment to staging environment
+- Load testing with multiple concurrent sessions
+- After-Action Review (AAR) feature implementation (deferred)
+
 

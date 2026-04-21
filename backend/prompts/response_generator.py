@@ -42,6 +42,21 @@ TEMPLATES_RU = {
         "Здесь {unit}. Принял. Выходим на пополнение боеприпасов. {status_text}",
         "{unit} принял. Начинаем пополнение запасов. {status_text}",
     ],
+    "wilco_air_assault": [
+        "Здесь {unit}. Принял, готовлюсь к загрузке. Взлёт по готовности. {status_text}",
+        "{unit}, приём. Так точно, выхожу на заданный квадрат. {status_text}",
+        "Здесь {unit}. Принял. Воздушный десант — выдвигаемся! {status_text}",
+    ],
+    "wilco_casevac": [
+        "Здесь {unit}. Принял, иду на эвакуацию. Посадочная площадка — назначена. {status_text}",
+        "{unit}, приём. Так точно, выдвигаюсь к раненым. Время прибытия — минимальное. {status_text}",
+        "Здесь {unit}. Принял. Эвакуирую раненых, прикрытие — обеспечьте. {status_text}",
+    ],
+    "wilco_airstrike": [
+        "Здесь {unit}. Принял, выхожу на цель. Огонь — открываю. {status_text}",
+        "{unit}, приём. Так точно, атакую указанный объект. {status_text}",
+        "Здесь {unit}. Цель принята. Наношу удар. {status_text}",
+    ],
     "wilco_observe": [
         "Здесь {unit}. Принял, занимаю позицию. {status_text}",
         "{unit}, приём. Так точно, веду наблюдение. {status_text}",
@@ -125,6 +140,21 @@ TEMPLATES_EN = {
         "{unit}, copy. Heading to supply cache for rearm. {status_text}",
         "This is {unit}. Wilco, proceeding to resupply. {status_text}",
         "{unit}, moving to logistics point for ammunition resupply. {status_text}",
+    ],
+    "wilco_air_assault": [
+        "This is {unit}. Roger, preparing for air assault. Loading troops. {status_text}",
+        "{unit}, copy. Air assault acknowledged. En route to LZ. {status_text}",
+        "This is {unit}. Wilco, inbound to designated insertion point. {status_text}",
+    ],
+    "wilco_casevac": [
+        "This is {unit}. Roger, CASEVAC in progress. Inbound to your position. {status_text}",
+        "{unit}, copy. MEDEVAC acknowledged. Mark LZ with smoke. {status_text}",
+        "This is {unit}. Wilco, extracting casualties. ETA minimal. {status_text}",
+    ],
+    "wilco_airstrike": [
+        "This is {unit}. Roger, engaging designated target. Inbound hot. {status_text}",
+        "{unit}, copy. Airstrike acknowledged. Rolling in on target. {status_text}",
+        "This is {unit}. Target acquired. Breaking to attack. {status_text}",
     ],
     "wilco_observe": [
         "This is {unit}. Roger, taking position. {status_text}",

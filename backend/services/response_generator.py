@@ -134,12 +134,21 @@ class ResponseGenerator:
         if parsed.classification == MessageClassification.command:
             order_type = parsed.order_type.value if parsed.order_type else ""
 
+            # Aviation order types
+            if order_type == "air_assault":
+                return ResponseType.wilco_air_assault, None
+            if order_type in ("casevac", "medevac"):
+                return ResponseType.wilco_casevac, None
+            if order_type == "airstrike":
+                return ResponseType.wilco_airstrike, None
+
             # Fire mission for artillery/mortar → use fire-specific response
             # BUT only if the order is actually a fire order, not observe/standby
             unit_type = unit.get("unit_type", "")
             is_fire_unit = unit_type in (
                 "artillery_battery", "artillery_platoon",
                 "mortar_section", "mortar_team",
+                "attack_helicopter",
             )
             if is_fire_unit and order_type == "fire":
                 return ResponseType.wilco_fire, None

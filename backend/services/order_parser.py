@@ -1459,6 +1459,13 @@ class OrderParser:
                 order_type = "halt"
             elif _has_any(order_detection_lexicon["resupply"]):
                 order_type = "resupply"
+            # ── Aviation orders ──
+            elif _has_any(order_detection_lexicon.get("air_assault", [])):
+                order_type = "air_assault"
+            elif _has_any(order_detection_lexicon.get("casevac", [])):
+                order_type = "casevac"
+            elif _has_any(order_detection_lexicon.get("airstrike", [])):
+                order_type = "airstrike"
             elif _has_regroup_order:
                 order_type = "move"  # regroup = move to rally point
             elif _has_follow_maneuver:

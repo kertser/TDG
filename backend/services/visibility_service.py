@@ -430,7 +430,10 @@ async def get_visible_units(
                 serialized["strength"] = round(raw_strength * 10) / 10
                 serialized["strength_estimate"] = "weakened"
             else:
-                serialized["strength"] = round(raw_strength * 10) / 10
+                # Critical: floor at 0.1 to prevent rounding to 0.0.
+                # Destruction threshold is strength <= 0.01, so a unit here is alive.
+                quantized = round(raw_strength * 10) / 10
+                serialized["strength"] = max(0.1, quantized)
                 serialized["strength_estimate"] = "critical"
             serialized["identified"] = True
         else:
