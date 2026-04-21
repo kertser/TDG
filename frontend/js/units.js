@@ -3070,9 +3070,20 @@ const KUnits = (() => {
      */
     function injectPathCache(unitIds, toLat, toLon, pathArr) {
         if (!unitIds || !unitIds.length || !pathArr) return;
+        // Sync the cache epoch so the injected paths are NOT wiped on the very next
+        // _getCachedPath call due to _viewshedTick !== _pathCacheTick mismatch.
+        // Without this, render() called immediately below would clear the cache before
+        // it can be used, producing a straight-line flash on every order.
+        _pathCacheTick = _viewshedTick;
         for (const uid of unitIds) {
             const key = `${uid}_${toLat.toFixed(5)}_${toLon.toFixed(5)}`;
             _pathCache[key] = pathArr;
+            // Also inject waypoints into the unit's current_task so Priority-1
+            // in _drawTrajectory keeps working after the next tick invalidates the cache.
+            const u = allUnitsData.find(x => x.id === uid);
+            if (u && u.current_task) {
+                u.current_task = { ...u.current_task, waypoints: pathArr };
+            }
             // Also store as pending order
             if (!_pendingOrders[uid]) {
                 _pendingOrders[uid] = {
