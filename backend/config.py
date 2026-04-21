@@ -32,9 +32,9 @@ class Settings(BaseSettings):
 
     # ── OpenAI ────────────────────────────────────────
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4.1"                 # full-power model (ambiguous/complex orders)
-    OPENAI_MODEL_MINI: str = "gpt-4.1-mini"       # mid-tier (intent, reports)
-    OPENAI_MODEL_NANO: str = "gpt-4o-mini"        # cheapest cloud tier (clear-cut orders)
+    OPENAI_MODEL: str = "gpt-5.4-mini"           # full-power model (ambiguous/complex orders)
+    OPENAI_MODEL_MINI: str = "gpt-5-mini"        # mid-tier (intent, reports)
+    OPENAI_MODEL_NANO: str = "gpt-5-nano"        # cheapest cloud tier (clear-cut orders)
 
     # ── Local LLM (triage classifier / air-gapped fallback) ────
     # Local model handles ONLY simple classification tasks (command vs ack vs report).
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # ── Application ───────────────────────────────────
     APP_NAME: str = "TDG Tactical Decision Game Platform"
-    APP_VERSION: str = "0.7.0"
+    APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
     CORS_ORIGINS: str = '["http://localhost:8000","http://localhost:3000","http://127.0.0.1:8000"]'
 
