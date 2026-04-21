@@ -10,8 +10,9 @@ name: tdg
 services:
   postgres:
     container_name: tdg-postgres
-    image: postgis/postgis:16-3.4
-    platform: linux/arm64
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     environment:
       POSTGRES_USER: tdg
       POSTGRES_PASSWORD: tdg_secret
@@ -29,7 +30,6 @@ services:
   redis:
     container_name: tdg-redis
     image: redis:7-alpine
-    platform: linux/arm64
     ports:
       - "6379:6379"
     healthcheck:
@@ -41,7 +41,6 @@ services:
   # ── Backend — FastAPI application ───────────────────────────────────────────
   backend:
     container_name: tdg-backend
-    platform: linux/arm64
     build:
       context: .
       dockerfile: Dockerfile
@@ -72,7 +71,6 @@ services:
   nginx:
     container_name: tdg-nginx
     image: nginx:1.27-alpine
-    platform: linux/arm64
     ports:
       - "80:80"
     volumes:
@@ -103,7 +101,6 @@ services:
   llm:
     image: ghcr.io/ggml-org/llama.cpp:server
     container_name: tdg-llm
-    platform: linux/arm64
     profiles: ["llm"]
     volumes:
       - ./models:/models:ro
