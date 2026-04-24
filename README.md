@@ -12,7 +12,8 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Aviation & Air-Mobility** — 3 aviation unit types (attack helicopter, transport helicopter, recon UAV) with terrain-bypass flight mechanics; aviation-specific order types (air_assault, casevac/medevac, airstrike); high eye heights (100-200m) for superior detection; bilingual EN/RU aviation keywords
 - **Collaborative Overlays** — Real-time synchronized drawing tools (arrows, polylines, rectangles, markers, ellipses, measurement) via WebSocket; shared across all sides
 - **Terrain Intelligence** — Automatic terrain classification from OSM Overpass + ESA WorldCover + Open-Elevation API; 12-type taxonomy with military modifiers; admin manual painting; SSE progress streaming; height tops detection
-- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos, combat role coordination), morale, suppression, ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply, engineer task execution, and targeted logistics support
+- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos, combat role coordination, **defensive posture advantage**), morale, suppression (posture-aware recovery), ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply, engineer task execution, and targeted logistics support
+- **Defensive Posture Advantage** — Defenders always have the upper hand at equal forces (1.77:1 exchange ratio). Attackers suffer −35% fire effectiveness; defenders gain +15%. Suppression recovery is twice as fast for stationary defenders. Flanking degrades defender protection by 25%. A breakthrough window opens when suppression exceeds 60% — rewarding fire-and-movement doctrine.
 - **Combat Role Coordination** — Units attacking the same enemy auto-coordinate: suppress (~40%, covering fire at weapon range), assault (1–2 infantry close in), flank (60° offset approach via covered terrain). Radio announces roles.
 - **Artillery-Infantry Coordination** — Three-tier friendly fire prevention: proactive ceasefire request at 250m, danger-close auto-stop at 50m, area-fire friendly check. Artillery supports both attacking and defending units. Explicit fire request system. Auto-artillery-request on target acquisition.
 - **Tactical Map Objects** — Static battlefield objects: barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, command posts, fuel depots, airfields (rotatable), etc. NATO-style markers with per-side discovery system
@@ -494,9 +495,9 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 8. **Artillery Support** → idle artillery auto-assigned to support attacking or defending units in CoC. Explicit fire requests processed first. Ceasefire coordination with advancing infantry.
 9. **Defense** → dig-in progression for defending units
 10. **Return Fire** → units under attack auto-engage nearest attacker (except disengaging units)
-11. **Combat** → engaged units exchange fire with coordinated roles (suppress/assault/flank). Damage, suppression based on firepower, terrain, ammo. Area fire 150m blast radius. Finite salvos (default 3). Danger close at 50m.
-12. **Suppression Recovery** → units not under fire gradually recover
-13. **Morale** → suppression and casualties erode morale; safety and nearby friendlies restore it; units break below 15%; destroying enemies boosts nearby morale; march fatigue
+11. **Combat** → engaged units exchange fire with coordinated roles (suppress/assault/flank). fire_effectiveness includes posture modifier (attacker ×0.65, defender ×1.15). Damage, suppression based on firepower, terrain, ammo. Flanking reduces defender protection ×0.75. Area fire 150m blast radius. Finite salvos (default 3). Danger close at 50m.
+12. **Suppression Recovery** → units not under fire recover at posture-dependent rates: defenders/stationary 0.05/tick, attacking/advancing 0.02/tick (can't take cover in motion)
+13. **Morale** → suppression and casualties erode morale; defenders get +0.01/tick steadiness; assaulting units under fire suffer additional −0.01/tick; safety and nearby friendlies restore morale; units break below 15%; destroying enemies boosts nearby morale; march fatigue
 14. **Communications** → heavy suppression can degrade comms; offline units continue last task
 15. **Ammo & Resupply** → ammo consumed per fire tick; supply caches and logistics units resupply nearby friendlies
 16. **Events & Reports** → notable state changes logged; auto-reports generated (SPOTREP, SHELREP, CASREP, SITREP, INTSUM)
@@ -525,9 +526,16 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 - Deterministic hash ensures reproducibility for replay
 
 ### Combat
-- `fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod`
+- `fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod × posture_mod`
+- **Posture modifier** (defender advantage, historical basis: NATO 3:1 rule, Dupuy QJM):
+  - Attacking unit: ×**0.65** — advancing under stress, no pre-positioned fires
+  - Defending unit (auto-return fire): ×**1.15** — pre-aimed sectors, range cards, known ground
+  - Artillery / suppressing fire: ×1.0 (unchanged)
+  - Equal units, open terrain: **1.77:1 exchange ratio** in favour of defender → ~3:1 attacker needed to break through
+  - **Breakthrough window**: when defender suppression ≥ 60%, attack penalty fades linearly to zero — suppressing first then assaulting is the correct doctrine
 - Elevation advantage: +15% effectiveness when firing from higher ground
 - **Combat role coordination**: Multiple units attacking the same enemy auto-coordinate — suppress (40%, covering fire at range), assault (1–2 infantry close in), flank (60° offset via covered terrain)
+- **Flanking**: additional ×0.75 to defender's protection — approaching from unfortified side
 - **Area fire**: Artillery/mortar can fire at grid locations — 150m blast radius, damage falls off with distance
 - **Finite salvos**: Fire missions limited to 3 salvos (configurable), then auto-complete
 - **Danger close**: Artillery auto-ceases fire if friendly within 50m of target

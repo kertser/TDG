@@ -2,9 +2,17 @@
 Combat resolution engine.
 
 Uses formulas from AGENTS.MD Section 8.4:
-  fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod
-  damage = fire_effectiveness × DAMAGE_SCALAR / target_protection
-  suppression_inflicted = fire_effectiveness × 0.03
+  fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod × posture_mod
+  damage = fire_effectiveness × DAMAGE_SCALAR / (target_protection × flank_factor)
+  suppression_inflicted = fire_effectiveness × suppression_rate
+
+Posture modifiers (defender advantage):
+  - Attacking units: ×0.65 fire_effectiveness  (no pre-positioned fires, advancing under stress)
+  - Auto-returning defenders: ×1.15 fire_effectiveness  (pre-aimed, range cards, known ground)
+  - Artillery / suppressing fire / idle: ×1.0 (unchanged)
+  - Flanking units: target_protection ×0.75  (approaching from weakest side, enfilading)
+  - Breakthrough window: when defender suppression ≥ 0.60, attack penalty linearly reduces to 0
+    (fire-and-movement doctrine: suppress first, then assault into a weakened defence)
 
 Also accounts for protection bonuses from map objects (entrenchments, pillboxes).
 """
@@ -105,6 +113,23 @@ WEAPON_RANGE = {
 }
 
 DAMAGE_SCALAR = 0.02  # ~2% strength loss per tick under sustained fire
+
+# ── Defensive posture advantage constants ─────────────────────────────────
+# Historical basis: NATO 3:1 attacker-to-defender ratio, Dupuy QJM IDA 1.3–1.5×
+#   ATTACK_POSTURE_MOD  — assaulting units fire ~35% less accurately:
+#       no pre-positioned fires, advancing under stress, crossing open ground
+#   DEFEND_POSTURE_MOD  — defending units fire ~15% more accurately:
+#       pre-aimed sectors, range cards, camouflaged positions on known terrain
+#   FLANK_PROTECTION_REDUCTION — flanking degrades defender cover by 25%:
+#       enfilading fire approaches position from weakest / unfortified side
+#   SUPPRESSION_BREAKTHROUGH_THRESHOLD — above this suppression the attack
+#       penalty linearly fades: heavily-pinned defender cannot react effectively
+#       (models fire-and-movement doctrine: suppress → assault)
+ATTACK_POSTURE_MOD = 0.65
+DEFEND_POSTURE_MOD = 1.15
+FLANK_PROTECTION_REDUCTION = 0.75
+SUPPRESSION_BREAKTHROUGH_THRESHOLD = 0.60
+# ─────────────────────────────────────────────────────────────────────────
 
 # Danger-close radius (meters) — artillery ceases fire if friendlies are this close to target
 DANGER_CLOSE_RADIUS_M = 50.0
@@ -442,6 +467,30 @@ def process_combat(
             # Flanking: slightly reduced effectiveness while maneuvering
             fire_effectiveness *= 0.85
 
+        # ── Posture modifier: defender always has the advantage at equal odds ──
+        # Historical basis: NATO 3:1 rule, Dupuy QJM Inherent Defensive Advantage (IDA)
+        # Exempt: artillery/mortars (fire task, not attack), suppressing-role units (already stationary)
+        is_artillery = attacker.unit_type in ARTILLERY_TYPES
+        is_auto_return = task.get("auto_return_fire", False)
+        task_type_atk = task.get("type", "")
+
+        if not is_artillery and combat_role != "suppress":
+            if task_type_atk in ("attack", "engage", "airstrike") and not is_auto_return:
+                # Breakthrough window: when defender is heavily suppressed, the attack
+                # penalty fades linearly — rewarding fire-and-movement doctrine.
+                tgt_sup = target.suppression or 0.0
+                if tgt_sup >= SUPPRESSION_BREAKTHROUGH_THRESHOLD:
+                    frac = (tgt_sup - SUPPRESSION_BREAKTHROUGH_THRESHOLD) / (
+                        1.0 - SUPPRESSION_BREAKTHROUGH_THRESHOLD
+                    )
+                    posture = ATTACK_POSTURE_MOD + frac * (1.0 - ATTACK_POSTURE_MOD)
+                else:
+                    posture = ATTACK_POSTURE_MOD
+                fire_effectiveness *= posture
+            elif is_auto_return:
+                # Defender returning fire: pre-aimed sectors, range cards, known ground
+                fire_effectiveness *= DEFEND_POSTURE_MOD
+
         # Target protection
         tgt_terrain = terrain.protection_factor(tgt_pos[1], tgt_pos[0])
         tgt_task = target.current_task or {}
@@ -458,6 +507,10 @@ def process_combat(
             if obj_protection > tgt_protection:
                 tgt_protection = obj_protection
 
+        # Flanking degrades defender's effective protection (enfilading fire hits weak side)
+        if combat_role == "flank":
+            tgt_protection *= FLANK_PROTECTION_REDUCTION
+
         # Apply damage
         damage = fire_effectiveness * DAMAGE_SCALAR / tgt_protection
         target.strength = max(0.0, (target.strength or 1.0) - damage)
@@ -466,6 +519,8 @@ def process_combat(
         suppression_rate = 0.03
         if combat_role == "suppress":
             suppression_rate = 0.045  # Suppressing units generate 50% more suppression
+        elif is_auto_return:
+            suppression_rate = 0.04   # Defenders pin attackers more (pre-selected sectors)
         suppression_inflicted = fire_effectiveness * suppression_rate
         target.suppression = min(1.0, (target.suppression or 0.0) + suppression_inflicted)
 
