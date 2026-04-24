@@ -104,13 +104,24 @@ def process_morale(
             delta -= 0.05
 
         # In combat penalty / safe recovery
+        task = unit.current_task
+        task_type = task.get("type") if task else None
+        is_auto_return = (task or {}).get("auto_return_fire", False)
+
         if unit.id in under_fire:
             delta -= 0.01  # additional combat stress
+            # Extra assault stress: advancing into fire without prepared positions
+            if task_type in ("attack", "engage") and not is_auto_return:
+                delta -= 0.01
         else:
             delta += 0.01  # slow recovery when safe
 
+        # Defender steadiness: fighting on known ground, in prepared positions
+        # Small but compounds — a 10-tick defence builds +0.10 morale advantage
+        if task_type == "defend":
+            delta += 0.01
+
         # ── Unit rest/recovery (strength + morale boost when idle & safe) ──
-        task = unit.current_task
         is_resting = (
             unit.id not in under_fire
             and (not task or task.get("type") in ("defend", None))

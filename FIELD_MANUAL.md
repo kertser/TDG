@@ -2199,6 +2199,28 @@ The parser and tactical AI should treat the following command families as doctri
   - **Urban areas**: best protection (1.5×), favors defenders heavily
 - Deny key terrain to the enemy even at cost. Terrain advantage multiplies combat power.
 
+#### C.4.5 Defensive Posture Advantage
+
+**Equal forces: the defender always wins.** This is not a rule-of-thumb but a hard mechanical fact modelled after historical data (Dupuy QJM, NATO 3:1 doctrine, WWII exchange ratios):
+
+| Condition | Effect |
+|---|---|
+| Attacker (assault/engage task) | ×0.65 fire effectiveness — advancing under stress, no pre-positioned fires |
+| Defender (auto-return fire) | ×1.15 fire effectiveness — pre-aimed positions, range cards, known terrain |
+| Defender suppression rate | 0.04/tick (vs attacker 0.03) — pre-selected sectors pin attackers faster |
+| Suppression recovery | Defender 0.05/tick; attacker advancing 0.02/tick — can't take cover in motion |
+| Defender morale | +0.01/tick steadiness bonus (familiar ground, prepared position) |
+| Attacker morale under fire | additional −0.01/tick assault stress |
+| Flank attack vs defender | target protection ×0.75 — enfilading fire hits unfortified side |
+
+**Breakthrough window**: When defender suppression exceeds 60%, the attack penalty linearly reduces to zero by 100% suppression. This models fire-and-movement doctrine: suppress the position until the defender cannot effectively return fire, then assault.
+
+**Implication for planning**:
+- A frontal assault with equal or lesser forces will fail — you will take ~1.77× the casualties you inflict.
+- At 3:1, attackers have a narrow advantage; at 6:1, they can storm fortified positions.
+- The correct sequence: **suppress → suppress more → assault only when defender is pinned**.
+- Flanking reduces defender protection on top of the attacker posture penalty — combined arms attacks (suppress front + flank) are the only reliable way to defeat a prepared defence at near-parity.
+
 ### C.5 Reconnaissance and Security
 
 #### C.5.1 Reconnaissance Principles
