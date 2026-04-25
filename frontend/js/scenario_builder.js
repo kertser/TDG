@@ -18,6 +18,8 @@ const KScenarioBuilder = (() => {
     let _ctxIdx = -1;        // index of unit in context menu
     let _rangePreviewLayer = null; // range preview layer for builder
     let _gridPreviewLayer = null;  // grid preview layer for builder
+    let _pickingOrigin = false;    // true while waiting for map click to set grid origin
+    let _sessionGridWasVisible = false;  // remember KGrid state before builder hid it
 
     // ── Unit type registry (loaded from /config/unit_types.json) ──
     let UNIT_TYPES = {};
@@ -65,8 +67,28 @@ const KScenarioBuilder = (() => {
         // Auto-update grid preview when grid settings change
         ['sb-grid-origin-lat', 'sb-grid-origin-lon', 'sb-grid-cols', 'sb-grid-rows', 'sb-grid-size'].forEach(id => {
             const el = document.getElementById(id);
-            if (el) el.addEventListener('change', () => { if (_active) _updateGridPreview(); });
+            if (el) el.addEventListener('change', () => { if (_active) _updateGridPreview(true); });
         });
+
+        // "Update Grid" button
+        const updateGridBtn = document.getElementById('sb-update-grid-btn');
+        if (updateGridBtn) {
+            updateGridBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!_active) return;
+                _updateGridPreview(true);
+            });
+        }
+
+        // Pick-origin button
+        const pickBtn = document.getElementById('sb-pick-origin-btn');
+        if (pickBtn) {
+            pickBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!_active) return;
+                _setPickingOrigin(!_pickingOrigin);
+            });
+        }
     }
 
     /** Fill the sb-unit-type <select> with entries from UNIT_TYPES. */
@@ -95,7 +117,14 @@ const KScenarioBuilder = (() => {
             _stagedLayer.clearLayers();
             _rangePreviewLayer.clearLayers();
             _gridPreviewLayer.clearLayers();
+        } else {
+            // Remember whether the session grid was visible before builder opened
+            _sessionGridWasVisible = (typeof KGrid !== 'undefined') && KGrid.isVisible();
         }
+
+        // Always hide the session grid while builder is active — only the
+        // builder's preview (driven by the form values) should be visible.
+        if (typeof KGrid !== 'undefined' && KGrid.isVisible()) KGrid.toggle();
 
         _active = true;
         _scenarioId = scenarioId;
@@ -105,8 +134,6 @@ const KScenarioBuilder = (() => {
         if (!_map.hasLayer(_rangePreviewLayer)) _rangePreviewLayer.addTo(_map);
         if (!_map.hasLayer(_gridPreviewLayer)) _gridPreviewLayer.addTo(_map);
 
-        // Keep the session grid visible – don't hide it.
-        // The builder grid preview will only show if there is no session grid.
 
         // Install map click handler
         _map.on('click', _onMapClick);
@@ -130,8 +157,9 @@ const KScenarioBuilder = (() => {
         if (scenarioId) await _loadScenario(scenarioId);
 
         _refreshUnitList();
-        // Render a client-side grid preview from the form values
-        _updateGridPreview();
+        // Render a client-side grid preview from the form values (always force —
+        // the session grid is hidden while builder is active so there is no conflict)
+        _updateGridPreview(true);
     }
 
     function deactivate() {
@@ -139,12 +167,19 @@ const KScenarioBuilder = (() => {
         _scenarioId = null;
         _stagedUnits = [];
         _editingIdx = -1;
+        _setPickingOrigin(false);  // cancel pick mode and restore cursor
         _stagedLayer.clearLayers();
         _rangePreviewLayer.clearLayers();
         _gridPreviewLayer.clearLayers();
         if (_map.hasLayer(_stagedLayer)) _map.removeLayer(_stagedLayer);
         if (_map.hasLayer(_rangePreviewLayer)) _map.removeLayer(_rangePreviewLayer);
         if (_map.hasLayer(_gridPreviewLayer)) _map.removeLayer(_gridPreviewLayer);
+
+        // Restore session grid if it was visible before builder activated
+        if (_sessionGridWasVisible && typeof KGrid !== 'undefined' && !KGrid.isVisible()) {
+            KGrid.toggle();
+        }
+        _sessionGridWasVisible = false;
 
 
         _map.off('click', _onMapClick);
@@ -166,8 +201,54 @@ const KScenarioBuilder = (() => {
     // ── Map Click → Place Unit ───────────────────────
     // ══════════════════════════════════════════════════
 
+    function _setPickingOrigin(active) {
+        _pickingOrigin = active;
+        const btn = document.getElementById('sb-pick-origin-btn');
+        const mapEl = _map && _map.getContainer ? _map.getContainer() : null;
+        if (active) {
+            if (btn) {
+                btn.textContent = '✕ Cancel';
+                btn.style.background = '#1a3a5c';
+                btn.style.color = '#ef9a9a';
+                btn.style.borderColor = '#c62828';
+            }
+            if (mapEl) mapEl.style.cursor = 'crosshair';
+        } else {
+            if (btn) {
+                btn.textContent = '📍 Pick';
+                btn.style.background = '#1a3a5c';
+                btn.style.color = '#64b5f6';
+                btn.style.borderColor = '#1565c0';
+            }
+            if (mapEl) mapEl.style.cursor = '';
+        }
+    }
+
     function _onMapClick(e) {
         if (!_active) return;
+
+        // If picking grid origin, capture this click as the SW corner
+        if (_pickingOrigin) {
+            const latEl = document.getElementById('sb-grid-origin-lat');
+            const lonEl = document.getElementById('sb-grid-origin-lon');
+            if (latEl) latEl.value = e.latlng.lat.toFixed(6);
+            if (lonEl) lonEl.value = e.latlng.lng.toFixed(6);
+            _setPickingOrigin(false);
+            _updateGridPreview(true);  // force show even if session grid exists
+            // Pan to show the grid in view
+            const cols = parseInt(document.getElementById('sb-grid-cols')?.value) || 8;
+            const rows = parseInt(document.getElementById('sb-grid-rows')?.value) || 8;
+            const sizeMt = parseFloat(document.getElementById('sb-grid-size')?.value) || 1000;
+            const latRad = e.latlng.lat * Math.PI / 180;
+            const dLat = (rows * sizeMt) / 111320;
+            const dLon = (cols * sizeMt) / (111320 * Math.cos(latRad));
+            _map.fitBounds([
+                [e.latlng.lat, e.latlng.lng],
+                [e.latlng.lat + dLat, e.latlng.lng + dLon],
+            ], { padding: [30, 30] });
+            return;
+        }
+
         // Don't place if clicking on an existing marker or UI elements
         if (e.originalEvent && e.originalEvent.target.closest &&
             (e.originalEvent.target.closest('.leaflet-marker-icon') ||
@@ -698,10 +779,29 @@ const KScenarioBuilder = (() => {
 
             _renderStagedUnits();
             _refreshUnitList();
-            _updateGridPreview();
+            _updateGridPreview(true);  // force re-render with loaded grid values
 
-            // Pan to scenario area
-            if (_stagedUnits.length > 0) {
+            // Pan/fit to the grid bounds (preferred), falling back to units
+            let centered = false;
+            if (s.grid_settings) {
+                const gs = s.grid_settings;
+                const oLat = parseFloat(gs.origin_lat);
+                const oLon = parseFloat(gs.origin_lon);
+                const cols = parseInt(gs.columns) || 8;
+                const rows = parseInt(gs.rows) || 8;
+                const sizeMt = parseFloat(gs.base_square_size_m) || 1000;
+                if (!isNaN(oLat) && !isNaN(oLon)) {
+                    const latRad = oLat * Math.PI / 180;
+                    const dLat = (rows * sizeMt) / 111320;
+                    const dLon = (cols * sizeMt) / (111320 * Math.cos(latRad));
+                    _map.fitBounds([
+                        [oLat, oLon],
+                        [oLat + dLat, oLon + dLon],
+                    ], { padding: [30, 30] });
+                    centered = true;
+                }
+            }
+            if (!centered && _stagedUnits.length > 0) {
                 const lats = _stagedUnits.map(u => u.lat);
                 const lons = _stagedUnits.map(u => u.lon);
                 _map.fitBounds([
@@ -869,17 +969,21 @@ const KScenarioBuilder = (() => {
     /**
      * Compute and render a quick client-side grid preview from the builder's
      * grid settings form (origin, cols, rows, size). Uses a simple local projection.
+     * @param {boolean} force - if true, show even when a session grid is loaded
      */
-    function _updateGridPreview() {
+    function _updateGridPreview(force = false) {
         if (!_gridPreviewLayer || !_map) return;
         _gridPreviewLayer.clearLayers();
 
-        // If the session already has a grid loaded, don't show the builder's
-        // simplified grid preview — it uses a different projection and causes
-        // visual confusion (two overlapping grids).
-        const sessionGrid = KGrid.getGridGeoJson();
-        if (sessionGrid && sessionGrid.features && sessionGrid.features.length > 0) {
-            return;
+        // Only skip if the session grid is currently *visible* on the map.
+        // When the builder is active, the session grid is toggled off, so
+        // KGrid.isVisible() is false and we always render the builder preview.
+        // force=true bypasses this check entirely.
+        if (!force && typeof KGrid !== 'undefined') {
+            const sessionGrid = KGrid.getGridGeoJson();
+            if (sessionGrid && sessionGrid.features && sessionGrid.features.length > 0 && KGrid.isVisible()) {
+                return;
+            }
         }
 
         const originLat = parseFloat(document.getElementById('sb-grid-origin-lat').value);
@@ -973,6 +1077,8 @@ const KScenarioBuilder = (() => {
         init, activate, deactivate, isActive,
         saveScenario, editUnit, removeUnit,
         getUnitTypes, resetUnitTypes, clearGridPreview,
+        /** Force-render the builder's grid preview (called by grid.js after a KGrid load while builder is active). */
+        forceGridPreview: () => { if (_active) _updateGridPreview(true); },
         // For form callbacks
         confirmUnit: _confirmUnit,
         hideUnitForm: _hideUnitForm,
