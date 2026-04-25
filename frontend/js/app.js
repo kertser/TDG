@@ -70,8 +70,15 @@
                 });
                 const centerLat = (minLat + maxLat) / 2;
                 const centerLng = (minLng + maxLng) / 2;
-                KMap.setOperationCenter(centerLat, centerLng, 13);
-                map.setView([centerLat, centerLng], 13);
+                // fitBounds (non-animated → synchronous) lets Leaflet pick
+                // the correct zoom for any grid size, from tiny 300 m cells
+                // to large 2 km grids.  Padding keeps labels visible.
+                map.fitBounds(
+                    [[minLat, minLng], [maxLat, maxLng]],
+                    { padding: [40, 40], animate: false }
+                );
+                // Store center + computed zoom so the "⊕ Center" button works.
+                KMap.setOperationCenter(centerLat, centerLng, map.getZoom());
             }
         } catch (err) {
             console.warn('Grid center error:', err);

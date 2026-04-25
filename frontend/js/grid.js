@@ -62,10 +62,16 @@ const KGrid = (() => {
             _zoomHandler = () => _updateZoomVisibility(map);
             map.on('zoomend', _zoomHandler);
 
-            // Clear scenario builder grid preview (session grid takes precedence)
+            // If Scenario Builder is active, keep its grid preview and hide the
+            // freshly-loaded session grid — builder always takes visual precedence.
             try {
                 if (typeof KScenarioBuilder !== 'undefined' && KScenarioBuilder.isActive()) {
+                    // Hide the session grid layers we just created
+                    _removeLayers(map);
+                    _visible = false;
+                    // Re-render the builder's preview so it stays on screen
                     KScenarioBuilder.clearGridPreview && KScenarioBuilder.clearGridPreview();
+                    if (typeof KScenarioBuilder.forceGridPreview === 'function') KScenarioBuilder.forceGridPreview();
                 }
             } catch(e) {}
         } catch (err) {
