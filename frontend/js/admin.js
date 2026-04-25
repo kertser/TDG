@@ -608,6 +608,36 @@ const KAdmin = (() => {
 
     async function editScenario(scenarioId) {
         await KScenarioBuilder.activate(scenarioId);
+
+        // Auto-select the session that uses this scenario so CoC, terrain, and
+        // other session-dependent features in the admin panel use the right session.
+        // Do this AFTER builder activation so the session grid / units are correct.
+        try {
+            const token = _getToken();
+            if (token) {
+                const resp = await fetch('/api/sessions', {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (resp.ok) {
+                    const sessions = await resp.json();
+                    const match = sessions.find(s => s.scenario_id === scenarioId);
+                    if (match) {
+                        _adminSelectedSessionId = match.id;
+                        const sel = document.getElementById('admin-session-selector');
+                        if (sel) {
+                            sel.value = match.id;
+                            const info = document.getElementById('admin-selected-session-info');
+                            if (info) info.textContent = `Selected: ${match.id.substring(0, 8)}...`;
+                        }
+                    }
+                    // If no matching session exists yet the builder works on the
+                    // scenario template only — CoC will show "Select a session first".
+                }
+            }
+        } catch(e) {
+            // Non-critical: admin can manually pick the session if needed
+        }
+
         // Switch to builder sub-tab
         document.querySelectorAll('.admin-subtab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.admin-subtab-panel').forEach(p => p.style.display = 'none');

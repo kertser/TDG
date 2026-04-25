@@ -34,6 +34,15 @@ const KMap = (() => {
     let _currentGameTime = null;
 
     function init(elementId = 'map', center = [49.0582, 4.49547], zoom = 13) {
+        // Restore last map position from localStorage (per-browser user preference)
+        const _stored = localStorage.getItem('kshu_map_view');
+        if (_stored) {
+            try {
+                const v = JSON.parse(_stored);
+                if (v.lat && v.lng && v.zoom) { center = [v.lat, v.lng]; zoom = v.zoom; }
+            } catch(e) {}
+        }
+
         map = L.map(elementId, {
             center: center,
             zoom: zoom,
@@ -44,6 +53,14 @@ const KMap = (() => {
 
         // Suppress browser context menu on the map container
         map.getContainer().addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // Persist map view on every move/zoom so the next page load restores it
+        const _saveView = () => {
+            const c = map.getCenter();
+            localStorage.setItem('kshu_map_view', JSON.stringify({ lat: c.lat, lng: c.lng, zoom: map.getZoom() }));
+        };
+        map.on('moveend', _saveView);
+        map.on('zoomend', _saveView);
 
         // ── Middle-button map panning ──────────────────
         _initMiddleButtonPan();
