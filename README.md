@@ -72,9 +72,9 @@ collaborative map drawing, terrain intelligence, and structured order understand
 
 ### Trainer Tools
 
-- **Admin Panel** — Floating window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, area effects placement
+- **Admin Panel** — Floating window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, tactical objects & area effects placement (Objects tab), Red AI agents (Red AI tab)
 - **Trainer Friction Injection** — Inject mid-exercise degradation onto any unit: `breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty` — each with duration (ticks) and magnitude
-- **Adaptive Phrasebook Learning** — Admin-triggered statistical mining of phrasebook proposals from real session data. Cross-session clustering (≥5 sessions, ≥3 users), optional LLM quality judge, human review workflow (approve/reject/apply). Approved proposals written to `order_phrasebook.toml` and hot-reloaded without restart.
+- **Adaptive Phrasebook Learning** — Statistical mining of phrasebook proposals from real session data (in Monitor tab). Cross-session clustering (≥5 sessions, ≥3 users), optional LLM quality judge, human review workflow (approve/reject/apply). Approved proposals written to `order_phrasebook.toml` and hot-reloaded without restart.
 
 ### Interface
 
@@ -447,14 +447,14 @@ Press the admin button (🔑) and enter the admin password to access:
 | Tab | Capabilities |
 |---|---|
 | **Session** | Start/pause/tick controls, session creation wizard (4 steps), delete all units, reset session |
-| **Monitor** | God view (see all units on both sides), unit dashboard with focus/edit/delete/split/merge, debug log toggle (detailed tick-by-tick engine data), **trainer friction injection** |
+| **Monitor** | God view (see all units on both sides), unit dashboard with focus/edit/delete/split/merge, debug log toggle (detailed tick-by-tick engine data), **trainer friction injection**, 🎓 **Learning Analysis** (mine phrasebook proposals, review & apply) |
 | **Builder** | Interactive scenario builder with map-click unit placement, grid configuration, save/load, save session → scenario |
 | **CoC** | Full chain of command hierarchy editor with drag-and-drop reparenting, bulk assign/unassign |
 | **Users** | Manage session participants |
 | **Types** | Unit type editor with live SIDC preview (modify speeds, ranges, personnel, eye heights) |
 | **Terrain** | Analyze terrain (OSM + ESA + elevation), paint cells manually, clear/reload |
-| **Effects** | Place area effects: smoke, fog, fire, chemical clouds (transient polygon hazards) |
-| **Learning** | Trigger phrasebook mining from session order data; review and approve/reject candidate phrasebook expansions; apply approved entries to `order_phrasebook.toml` with live hot-reload |
+| **Objects** | Place tactical obstacles (barbed wire, minefields, entrenchments, etc.), structures (bridges, CPs, depots, airfields), and place area effects (smoke, fog, fire, chemical clouds) |
+| **Red AI** | Create/edit Red AI commander agents (doctrine profiles, mission intent, controlled units), force-decide |
 
 ### Map Objects (Tactical Obstacles & Structures)
 
