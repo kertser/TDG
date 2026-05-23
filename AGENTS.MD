@@ -1163,6 +1163,10 @@ if unit.ammo <= 0:
 | **Phase 9: Reports, Events, Log** | ✅ Complete | Events endpoint + frontend panel. Reports auto-generated: SPOTREP (new contacts), SHELREP (units under fire), CASREP (unit destroyed), SITREP (periodic every 5 ticks), INTSUM (intelligence summary every 10 ticks). Report generator wired into tick loop. Reports persisted to DB and broadcast via WebSocket. Frontend Reports tab with channel filtering (All/SPOTREP/SHELREP/SITREP/INTSUM/CASREP), click-to-locate, export. Bilingual RU/EN. Gamelog combines events+reports+orders. |
 | **Phase 10: Polish & Deployment** | ⚠ Partial | Dev workflow works. Dockerfile/nginx not yet tested in production. |
 | **Phase 11: Terrain Intelligence** | ✅ Complete | TerrainCell/ElevationCell models, OSM Overpass analyzer, ESA WorldCover (optional rasterio), Open-Elevation API, terrain merger, 12-type taxonomy, admin painting, elevation slope/aspect, engine integration (tick loads cells), terrain API (12 endpoints inc. SSE streaming + cell-count), frontend overlay + legend + admin panel. **SSE progress bar** for real-time analysis feedback. **High-res support**: depth 1-4 (333m → 12m cells). **Performance**: O(n) spatial-hash neighbor map, STRtree OSM lookup, concurrent elevation batches, batched DB writes, fast enumerate_cells. |
+| **Tutorial & Onboarding** | ✅ Complete | `frontend/js/tutorial.js` (`KTutorial`): spotlight-based step-by-step tutorial. `startIfNeeded()` auto-shows on first login; `skip()` marks complete. Persisted via `users.tutorial_completed` (migration 008). `POST /api/auth/tutorial-complete` endpoint. `tutorial_completed` returned in `TokenResponse`. |
+| **Objective Control & Deterministic Victory** | ✅ Complete | `backend/engine/objective_control.py`: `process_objective_control()` emits `objective_captured` / `objective_contested` events each tick. `check_deterministic_victory()` checks total annihilation and `objectives_to_win` threshold — fast, no LLM, runs before the LLM referee. Cache per session; call `clear_objective_cache()` on reset. |
+| **Trainer Friction Injection** | ✅ Complete | `POST /api/admin/sessions/{id}/inject-friction` injects degraded-unit scenarios mid-exercise. Friction stored in `unit.capabilities.friction` list as `{type, until_tick, magnitude, comment}`. Types: `breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty`. `DELETE …/inject-friction/{unit_id}` clears all friction. |
+| **Adaptive Phrasebook Learning** | ✅ Complete | `backend/services/learning/` package: `session_analyzer` filters analyzable orders, `phrasebook_miner` statistically mines cross-session proposals (≥5 sessions, ≥3 users, ≥85% LLM agreement), `proposal_store` persists to `learning_proposals` DB table (migration 009) and writes approved proposals to `order_phrasebook.toml` + hot-reloads. Admin APIs: `POST /sessions/{id}/analyze-learning`, `GET /learning/proposals`, `PATCH /learning/proposals/{id}`, `POST /learning/apply`. |
 
 ### Features Implemented Beyond Original Plan
 
@@ -1452,7 +1456,8 @@ KShU/
 │   │   ├── map_object.py          ← Tactical map objects (barbed wire, mines, etc.)
 │   │   ├── chat_message.py        ← Radio chat messages between commanders
 │   │   ├── terrain_cell.py        ← TerrainCell (snail_path → terrain type + modifiers)
-│   │   └── elevation_cell.py      ← ElevationCell (snail_path → height/slope/aspect)
+│   │   ├── elevation_cell.py      ← ElevationCell (snail_path → height/slope/aspect)
+│   │   └── learning_proposal.py   ← LearningProposal: candidate phrasebook entries mined from session data
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py
@@ -1492,6 +1497,11 @@ KShU/
 │   │   ├── report_generator.py   ← Auto-generate tick reports: SPOTREP, SHELREP, CASREP, SITREP, INTSUM
 │   │   ├── debug_logger.py      ← Debug log recording to file (admin toggle, tick timing, combat trace)
 │   │   ├── llm_client.py        ← Unified OpenAI/local LLM client wrapper (model routing, fallback)
+│   │   ├── learning/              ← Adaptive phrasebook learning package
+│   │   │   ├── __init__.py
+│   │   │   ├── session_analyzer.py   ← Extract analyzable orders from sessions for mining
+│   │   │   ├── phrasebook_miner.py   ← Statistical cross-session proposal mining + LLM judge
+│   │   │   └── proposal_store.py     ← Persist proposals to DB; apply approved → TOML + hot-reload
 │   │   └── terrain_analysis/      ← Terrain intelligence package
 │   │       ├── __init__.py
 │   │       ├── service.py         ← Orchestrator: analyze_grid()
@@ -1573,6 +1583,7 @@ KShU/
 │       ├── terrain.js            ← Terrain overlay rendering, legend, elevation heatmap
 │       ├── i18n.js               ← KI18n module: EN/RU translation dictionaries, data-i18n attr binding, real-time lang switch
 │       ├── replay.js             ← KReplay module: session replay with transport controls, timeline, smooth unit animation, AAR
+│       ├── tutorial.js           ← KTutorial module: spotlight onboarding tutorial, auto-shows on first login
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 ├── frontend/
 │   ├── verify_sidc.html          ← SIDC verification page: renders all unit types with milsymbol v2.2.0
