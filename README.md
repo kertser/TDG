@@ -1,4 +1,8 @@
+![TDG](artwork/image1.png)
+
 # TDG — Tactical Decision Game Platform
+
+> **English** | [Русский](README.ru.md)
 
 Web-based multiplayer tactical command/staff exercise platform with AI-controlled opponent forces,
 collaborative map drawing, terrain intelligence, and structured order understanding.
