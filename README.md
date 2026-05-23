@@ -7,40 +7,82 @@
 Web-based multiplayer tactical command/staff exercise platform with AI-controlled opponent forces,
 collaborative map drawing, terrain intelligence, and structured order understanding.
 
+---
+
+## Table of Contents
+
+1. [Features](#features)
+2. [Quick Start](#quick-start)
+3. [Deployment Architecture](#deployment-architecture)
+4. [Environment Configuration](#environment-configuration)
+5. [Development Setup](#development-setup)
+6. [Order Parsing Pipeline](#order-parsing-pipeline)
+7. [Game Rules & Simulation](#game-rules--simulation)
+8. [Unit Types](#unit-types)
+9. [Configuration Files](#configuration-files)
+10. [Testing](#testing)
+11. [API Documentation](#api-documentation)
+12. [Project Structure](#project-structure)
+13. [Tech Stack](#tech-stack)
+
+---
+
 ## Features
 
+### Map & Visualization
+
 - **Interactive Tactical Map** — Leaflet-based map with MIL-STD-2525D military symbols (milsymbol.js), zoom-scaled markers, grid overlay with recursive snail subdivision, height tops (▲) with elevation numbers
-- **Fog of War** — Server-authoritative visibility filtering via PostGIS `ST_DWithin` + terrain-aware LOS viewshed; players only see enemy units within line-of-sight; recon/sniper units in concealment mode are nearly invisible; enemy unit type and echelon masked (only broad category shown)
-- **LOS Viewshed** — Ray-casting based visibility polygons replace simple circles; terrain obstacles (forests, buildings) block line-of-sight; unit-type-specific eye heights; visibility absorption model
-- **Tactical A* Pathfinding** — Terrain-aware movement trajectories over depth-1 terrain cells (~333m resolution); considers terrain cost, slope, minefields, enemy avoidance, cover preference, friendly proximity; speed-mode-aware routing (slow=concealment, fast=speed); waypoints computed immediately on order and recalculated every 5 ticks; smooth Catmull-Rom spline rendering on frontend
-- **Aviation & Air-Mobility** — 3 aviation unit types (attack helicopter, transport helicopter, recon UAV) with terrain-bypass flight mechanics; aviation-specific order types (air_assault, casevac/medevac, airstrike); high eye heights (100-200m) for superior detection; bilingual EN/RU aviation keywords
+- **Fog of War** — Server-authoritative visibility filtering via PostGIS `ST_DWithin` + terrain-aware LOS viewshed; enemy unit type and echelon masked (only broad category shown); recon/sniper units in concealment mode are nearly invisible
+- **LOS Viewshed** — 72-ray cast from unit position; terrain obstacles (forests, buildings) block line-of-sight; unit-type-specific eye heights; visibility absorption model
 - **Collaborative Overlays** — Real-time synchronized drawing tools (arrows, polylines, rectangles, markers, ellipses, measurement) via WebSocket; shared across all sides
+- **Session Replay** — Turn-by-turn playback with transport controls (play/pause, step ±1 tick, speed 0.5×–4×), timeline slider, smooth unit animation, and LLM-generated After-Action Report (AAR)
+- **Internationalization (i18n)** — Full EN/RU UI language switching via `KI18n` module; `data-i18n` HTML attributes; language selector in user settings; real-time re-rendering on language change
+
+### Terrain & Objects
+
 - **Terrain Intelligence** — Automatic terrain classification from OSM Overpass + ESA WorldCover + Open-Elevation API; 12-type taxonomy with military modifiers; admin manual painting; SSE progress streaming; height tops detection
-- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire with finite salvos, combat role coordination, **defensive posture advantage**), morale, suppression (posture-aware recovery), ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply, engineer task execution, and targeted logistics support
-- **Defensive Posture Advantage** — Defenders always have the upper hand at equal forces (1.77:1 exchange ratio). Attackers suffer −35% fire effectiveness; defenders gain +15%. Suppression recovery is twice as fast for stationary defenders. Flanking degrades defender protection by 25%. A breakthrough window opens when suppression exceeds 60% — rewarding fire-and-movement doctrine.
-- **Combat Role Coordination** — Units attacking the same enemy auto-coordinate: suppress (~40%, covering fire at weapon range), assault (1–2 infantry close in), flank (60° offset approach via covered terrain). Radio announces roles.
-- **Artillery-Infantry Coordination** — Three-tier friendly fire prevention: proactive ceasefire request at 250m, danger-close auto-stop at 50m, area-fire friendly check. Artillery supports both attacking and defending units. Explicit fire request system. Auto-artillery-request on target acquisition.
-- **Tactical Map Objects** — Static battlefield objects: barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, command posts, fuel depots, airfields (rotatable), etc. NATO-style markers with per-side discovery system
+- **Tactical A\* Pathfinding** — Terrain-aware movement trajectories over depth-1 cells (~333m resolution); considers terrain cost, slope, minefields, enemy avoidance, cover preference, friendly proximity; speed-mode-aware routing (slow = concealment, fast = speed); Catmull-Rom spline rendering on frontend
+- **Tactical Map Objects** — Barbed wire, minefields, entrenchments, roadblocks, pillboxes, bridges, command posts, fuel depots, airfields (rotatable), etc. NATO-style markers with per-side discovery system
 - **Area Effects** — Transient polygon-based hazards: smoke (blocks detection), fog (reduces visibility), fire (damages units, blocks movement), chemical clouds (heavy infantry damage). All effects decay over time. Combat impact visual effects (explosions).
+
+### Combat Simulation
+
+- **Rules Engine** — Deterministic tick-based simulation: movement (unit-type-specific slow/fast speeds with A* pathfinding), detection (LOS-based with recon concealment), combat (direct + area fire, finite salvos, combat role coordination, **defensive posture advantage**), morale, suppression (posture-aware recovery), ammo, communications, disengage/break contact, defensive dig-in, rest & recovery, resupply, engineer task execution
+- **Defensive Posture Advantage** — Defenders maintain a 1.77:1 exchange ratio at equal forces. Attackers suffer −35% fire effectiveness; defenders gain +15%. Suppression recovery is twice as fast for stationary defenders. Flanking degrades defender protection by 25%. A breakthrough window opens when suppression exceeds 60% — rewarding fire-and-movement doctrine.
+- **Combat Role Coordination** — Units attacking the same enemy auto-coordinate: suppress (~40%, covering fire at weapon range), assault (1–2 infantry close in), flank (60° offset via covered terrain). Radio announces roles.
+- **Artillery-Infantry Coordination** — Three-tier friendly fire prevention: proactive ceasefire request at 250m, danger-close auto-stop at 50m, area-fire friendly check. Artillery supports both attacking and defending units. Explicit fire request system. Auto-artillery-request on target acquisition.
+- **Aviation & Air-Mobility** — 3 aviation unit types (attack helicopter, transport helicopter, recon UAV) with terrain-bypass flight mechanics; aviation-specific order types (air_assault, casevac/medevac, airstrike); high eye heights (100–200m) for superior detection
+
+### Command & Control
+
+- **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge, and support for command-driven reorganization orders
 - **Resupply System** — Supply caches (+10% ammo/tick), logistics units (mobile +8% ammo/tick), field hospitals (+1% strength/tick). Resupply order type with auto-movement to nearest supply source.
-- **Chain of Command** — Hierarchical unit tree with command authority enforcement, unit assignment, drag-and-drop hierarchy editing, split/merge, authority checks, and support for command-driven reorganization orders
-- **Admin Panel** — Floating admin window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, area effects placement
-- **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with tactical assessment, smart formation suggestion, height/coordinate/snail location resolution, immediate task assignment, map-object-aware engineer/logistics handling, and doctrinal parsing of split/merge and support-unit commands
-- **Order Phrasebook** — Data-driven keyword lexicon (`order_phrasebook.toml`) for bilingual command classification, order type detection, speed/formation parsing, engagement rules, location references, and 60+ regression test cases; loaded at runtime by the order parser
-- **Doctrine-Aware Prompting** — Tactical doctrine is loaded from `FIELD_MANUAL.md` and injected by topic so prompts receive only relevant slices such as fires, recon, engineers, logistics, aviation, map objects, or split/merge
-- **Prompt Compression & Retrieval** — 4-layer context packing for local/cloud LLM: task frame, state deltas (not full history), topic-scoped doctrine cards (BM25-like retrieval), dynamically selected few-shot exemplars. Negative context suppression omits empty sections. Deterministic continuity resolution ("same target", "the bridge"). Prompt-result cache with 5min TTL. Static system prefix for llama.cpp KV cache reuse. Typical prompt size: 1292–1648 tokens.
-- **Local LLM Support** — Air-gapped deployment via llama.cpp (OpenAI-compatible API). Docker Compose profile `llm` with CPU-tuned settings: ctx=4096, reasoning off, Q4_K_M quantization, KV cache reuse. Configurable via `LOCAL_MODEL_URL` / `LOCAL_MODEL_NAME` in `.env`. Three parsing modes: `llm_first` (default), `keyword_first` (legacy), `keyword_only` (offline).
-- **Radio Chat** — Tactical radio channel between session commanders with recipient selection, three channel filters (All / 💬 Chat / 📡 Units), and unread indicator. Auto-generated unit radio chatter: idle reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance halt/resume
-- **Reports** — Five auto-generated report types: SPOTREP (enemy contacts), SHELREP (under fire), CASREP (unit destroyed), SITREP (periodic status), INTSUM (intelligence summary). Bilingual RU/EN. Unread badge on sidebar tab.
-- **Session Replay** — Turn-by-turn playback with transport controls (play/pause, step forward/back, speed 0.5×–4×), timeline slider, per-tick unit position rendering with smooth animation, and LLM-generated After-Action Report (AAR)
-- **Internationalization (i18n)** — Full EN/RU UI language switching via `KI18n` module; `data-i18n` HTML attributes for declarative translation; language selector in user settings; real-time re-rendering on language change
-- **Objective Control & Victory** — Deterministic territorial victory check each tick (`objective_control.py`): emits `objective_captured`/`objective_contested` events, detects annihilation, evaluates `objectives_to_win` threshold — all without LLM. LLM-based narrative referee runs every 5 ticks against custom scenario objectives. Game turn limit support. Auto-finish on victory or turn limit.
+- **Radio Chat** — Tactical radio channel with recipient selection, three channel filters (All / 💬 Chat / 📡 Units), unread indicator. Auto-generated unit radio chatter: idle reports, peer support requests, casualty reports, artillery fire exchanges, contact-during-advance halt/resume
+- **Reports** — Five auto-generated types: SPOTREP (enemy contacts), SHELREP (under fire), CASREP (unit destroyed), SITREP (periodic status), INTSUM (intelligence summary). Bilingual RU/EN. Unread badge on sidebar tab.
+- **Objective Control & Victory** — Deterministic territorial check each tick: `objective_captured`/`objective_contested` events, annihilation detection, `objectives_to_win` threshold — all without LLM. LLM-based narrative referee runs every 5 ticks against custom scenario objectives. Game turn limit and auto-finish on victory.
+
+### Order Parsing & AI
+
+- **Order System** — Text order submission with AI-powered parsing (GPT-4.1, bilingual EN/RU), deterministic intent interpretation, 3-tier cost-optimized routing (keyword → nano → full LLM), unit radio responses with tactical assessment, smart formation suggestion, height/coordinate/snail location resolution, immediate task assignment
+- **Order Phrasebook** — Data-driven keyword lexicon (`order_phrasebook.toml`): bilingual command/ack/report keywords, order-type detection patterns, speed/formation parsing, engagement rules, location object patterns, 60+ regression test cases; loaded at runtime
+- **Doctrine-Aware Prompting** — Tactical doctrine loaded from `FIELD_MANUAL.md` and injected by topic (fires, recon, engineers, logistics, aviation, map_objects, split_merge), so each prompt receives only the relevant slice
+- **Prompt Compression & Retrieval** — 4-layer context packing: task frame, state deltas, topic-scoped doctrine cards (BM25-like retrieval), dynamically selected few-shot exemplars. Negative context suppression omits empty sections. Deterministic continuity resolution. Prompt-result cache with 5-min TTL. Typical size: 1 292–1 648 tokens.
+- **Local LLM Support** — Air-gapped deployment via llama.cpp (OpenAI-compatible API). Docker Compose profile `llm` with CPU-tuned settings: ctx=4096, Q4_K_M quantization, KV-cache reuse. Three parsing modes: `llm_first` (default), `keyword_first`, `keyword_only`.
 - **Red AI Opponents** — AI commander agents with 4 doctrine profiles (aggressive/balanced/cautious/defensive), limited knowledge (no Blue leaks), LLM decisions with rule-based fallback
-- **Trainer Friction Injection** — Admin can inject mid-exercise friction onto any unit: `breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty` — each with duration (ticks) and magnitude. Stored in `unit.capabilities.friction`. Clear per-unit or let it expire naturally.
-- **Adaptive Phrasebook Learning** — Admin-triggered statistical mining of command phrasebook proposals from real session data. Cross-session clustering (requires ≥5 sessions, ≥3 users), optional LLM quality judge, human review workflow (approve/reject/apply). Approved proposals are written to `order_phrasebook.toml` and hot-reloaded without restart.
-- **Interactive Tutorial** — Spotlight-based onboarding tutorial auto-shows on first login (`KTutorial`). Step-by-step guided tour with DOM element highlighting. Completion persisted server-side per user; reopenable from settings.
+
+### Trainer Tools
+
+- **Admin Panel** — Floating window with session wizard (4-step: Setup → Participants → Terrain → Done), god view, unit dashboard, scenario builder, CoC editor, terrain analysis controls, unit type editor, debug log, area effects placement
+- **Trainer Friction Injection** — Inject mid-exercise degradation onto any unit: `breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty` — each with duration (ticks) and magnitude
+- **Adaptive Phrasebook Learning** — Admin-triggered statistical mining of phrasebook proposals from real session data. Cross-session clustering (≥5 sessions, ≥3 users), optional LLM quality judge, human review workflow (approve/reject/apply). Approved proposals written to `order_phrasebook.toml` and hot-reloaded without restart.
+
+### Interface
+
+- **Interactive Tutorial** — Spotlight-based onboarding auto-shows on first login (`KTutorial`). Step-by-step guided tour with DOM element highlighting. Completion persisted server-side; reopenable from settings.
 - **Game Log** — Append-only event timeline, reports panel with channel filtering, app log (separated from tactical data)
-- **Editable Config** — Unit type definitions and display constants stored in JSON config files (`unit_types.json`, `units_config.json`) instead of hardcoded JavaScript
+- **Editable Config** — Unit type definitions and display constants in JSON files (`unit_types.json`, `units_config.json`) instead of hardcoded JavaScript
+
+---
 
 ## Quick Start
 
@@ -48,11 +90,10 @@ collaborative map drawing, terrain intelligence, and structured order understand
 
 **One-command Docker deployment** — the easiest way to get started. The local LLM sidecar is included by default.
 
-**Windows (PowerShell)**:
 ```powershell
 # 1. Clone and configure
 git clone <repository-url>
-cd KShU
+Set-Location KShU
 Copy-Item .env.example .env
 # Edit .env: set OPENAI_API_KEY, SECRET_KEY, ADMIN_PASSWORD
 
@@ -63,16 +104,6 @@ Copy-Item .env.example .env
 # Frontend:  http://localhost
 # API docs:  http://localhost/api/docs
 # Local LLM: http://localhost:8081
-```
-
-**Linux/Unix**:
-```bash
-git clone <repository-url>
-cd KShU
-cp .env.example .env
-# Edit .env: set OPENAI_API_KEY, SECRET_KEY, ADMIN_PASSWORD
-chmod +x deploy.sh
-./deploy.sh
 ```
 
 ### Deployment Script Flags
@@ -88,7 +119,6 @@ Both `deploy.ps1` (Windows) and `deploy.sh` (Linux) support identical flags:
 | `--logs` | Follow container logs after start (`Ctrl+C` to exit) |
 
 ```powershell
-# Windows examples
 .\deploy.ps1 --rebuild        # force full rebuild
 .\deploy.ps1 --rebuild --logs # rebuild then tail logs
 .\deploy.ps1 --clean          # nuclear option
@@ -96,6 +126,40 @@ Both `deploy.ps1` (Windows) and `deploy.sh` (Linux) support identical flags:
 ```
 
 > **To disable the local LLM**: comment out `COMPOSE_PROFILES=llm` in your `.env`.
+
+### Data Persistence & Reset
+
+Game data lives in Docker volume `pgdata`. It **survives** `--down` and is reattached on next start.
+
+```powershell
+# Backup before wiping
+docker compose exec postgres pg_dump -U tdg tdg > backup.sql
+
+# Full wipe (destroys data)
+.\deploy.ps1 --clean
+```
+
+### Updates
+
+```powershell
+git pull
+.\deploy.ps1 --rebuild
+```
+
+### Production Hardening
+
+1. **Change all default passwords** in `.env` — `SECRET_KEY`, `ADMIN_PASSWORD`, and database passwords in `docker-compose.yml`
+2. **Enable HTTPS** — use nginx SSL config or a reverse proxy (Traefik, Caddy)
+3. **Resource limits** — add to `docker-compose.yml` backend service:
+   ```yaml
+   deploy:
+     resources:
+       limits:
+         cpus: '2'
+         memory: 4G
+   ```
+4. **Scheduled backups** of the `pgdata` volume
+5. **Monitoring** — Prometheus + Grafana on the `/health` endpoints
 
 ---
 
@@ -127,6 +191,8 @@ All services have health checks, restart policies, and proper dependency chains.
 
 ---
 
+---
+
 ## Environment Configuration
 
 Copy `.env.example` to `.env`. Required settings:
@@ -149,15 +215,12 @@ OPENAI_MODEL_MINI=gpt-4.1-mini
 OPENAI_MODEL_NANO=gpt-4o-mini
 ```
 
-Generate a `SECRET_KEY`:
+Generate a `SECRET_KEY` (PowerShell):
 ```powershell
-# Windows PowerShell
 [Convert]::ToBase64String((1..48 | ForEach-Object { [byte](Get-Random -Max 256) }))
 ```
 
----
-
-## Logs, Health & Troubleshooting
+### Logs & Troubleshooting
 
 ```powershell
 # All service logs
@@ -169,142 +232,71 @@ docker compose logs -f llm
 
 # Service health
 docker compose ps
-curl http://localhost/health
-curl http://localhost:8081/health
+Invoke-WebRequest http://localhost/health
+Invoke-WebRequest http://localhost:8081/health
 ```
 
-**Backend won't start** — check `docker compose logs backend`. Common causes: missing `OPENAI_API_KEY`, database not ready (wait 30s, backend retries automatically), port 8000 already in use.
-
-**Database migrations fail**:
-```powershell
-docker compose exec backend alembic upgrade head
-# or full reset (destroys data):
-.\deploy.ps1 --down
-docker volume rm tdg_pgdata
-.\deploy.ps1
-```
-
-**Nginx 502 Bad Gateway** — backend not healthy yet: `docker compose restart backend`
-
-**Local LLM not responding**:
-```powershell
-docker compose logs llm
-# Warm the model after first start (slow cold load):
-python scripts\warm_local_llm.py
-```
+| Problem | Solution |
+|---|---|
+| Backend won't start | Check `OPENAI_API_KEY`; wait 30 s — backend retries DB connection automatically |
+| Database migrations fail | `docker compose exec backend alembic upgrade head` |
+| Nginx 502 Bad Gateway | Backend not healthy yet: `docker compose restart backend` |
+| Local LLM not responding | `docker compose logs llm`, then `python scripts\warm_local_llm.py` |
 
 ---
 
-## Data Persistence & Reset
-
-Game data lives in Docker volume `pgdata`. It **survives** `--down` and is reattached on next start.
-
-To fully reset (wipe the database):
-
-```powershell
-# Windows — wipes everything including data
-.\deploy.ps1 --clean
-
-# Linux/Unix
-./deploy.sh --clean
-```
-
-Backup the database before wiping:
-```powershell
-docker compose exec postgres pg_dump -U tdg tdg > backup.sql
-```
-
----
-
-## Updates
-
-```powershell
-# Windows
-git pull
-.\deploy.ps1 --rebuild
-
-# Linux/Unix
-git pull
-./deploy.sh --rebuild
-```
-
----
-
-## Production Hardening
-
-1. **Change all default passwords** in `.env` — `SECRET_KEY`, `ADMIN_PASSWORD`, and the database passwords in `docker-compose.yml`
-2. **Enable HTTPS** — use nginx SSL config or a reverse proxy (Traefik, Caddy)
-3. **Resource limits** — add to `docker-compose.yml` backend service:
-   ```yaml
-   deploy:
-     resources:
-       limits:
-         cpus: '2'
-         memory: 4G
-   ```
-4. **Scheduled backups** of the `pgdata` volume
-5. **Monitoring** — Prometheus + Grafana on the `/health` endpoints
-
----
-
-### Development Setup (Alternative)
+## Development Setup
 
 For active development with hot-reload:
 
-
-#### 1. Prerequisites
-- Python 3.12+
-- Docker & Docker Compose
-
-##### 2. Start infrastructure
 ```powershell
+# 1. Start infrastructure (PostgreSQL + Redis)
 docker compose up -d
+
+# 2. Create virtualenv and install dependencies
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# 3. Configure environment
+Copy-Item .env.example .env
+# Edit .env and set OPENAI_API_KEY
+
+# 4. Seed the database (creates tables + sample scenario)
+python -m scripts.seed_scenario
+
+# 5. Start the backend
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+
+# 6. Open http://localhost:8000
 ```
-This launches PostgreSQL + PostGIS (port 5432) and Redis (port 6379).
 
 > **Note:** If upgrading from a previous version that used `kshu` as the DB name,
 > run `docker compose down -v` first to remove the old volume, then `docker compose up -d`.
 
-#### 3. Install Python dependencies
-```powershell
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-#### 4. Configure environment
-```powershell
-Copy-Item .env.example .env
-# Edit .env and set your OPENAI_API_KEY
-```
-
-#### 5. Seed the database (creates tables + sample scenario)
-```powershell
-python -m scripts.seed_scenario
-```
-
-#### 6. Start the backend
-```powershell
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-#### 7. Open the frontend
-Navigate to `http://localhost:8000` in your browser.
-
 ### Local LLM (Optional — Air-Gapped Deployment)
+
 If no `OPENAI_API_KEY` is set, the parser falls back to a local model via llama.cpp:
 
 ```powershell
-# Download model (default: Gemma 3 1B Instruct Q4_K_M, ~800MB)
+# Download model (default: Gemma 3 1B Instruct Q4_K_M, ~800 MB)
 .\scripts\download_model.ps1
 
-# The LLM container starts automatically with the stack (COMPOSE_PROFILES=llm in .env)
-# Or run native (faster on Windows):
-.\tools\llama-cpp\llama-server.exe --model models\model.gguf --alias local --host 127.0.0.1 --port 8081 --ctx-size 4096 --threads 8 --reasoning off --no-webui --mlock
+# Run natively (faster on Windows):
+.\tools\llama-cpp\llama-server.exe `
+    --model models\model.gguf `
+    --alias local `
+    --host 127.0.0.1 `
+    --port 8081 `
+    --ctx-size 4096 `
+    --threads 8 `
+    --reasoning off `
+    --no-webui `
+    --mlock
 ```
 
 Configure in `.env`:
-```ini
+```env
 LOCAL_MODEL_URL=http://localhost:8081/v1
 LOCAL_MODEL_NAME=local
 LLM_PARSING_MODE=llm_first   # or keyword_first, keyword_only
@@ -413,24 +405,14 @@ IntentInterp. LocationResolver  ResponseGen.
 
 ## Doctrine Loading
 
-- `FIELD_MANUAL.md` is the authoritative tactical source.
-- `backend/prompts/tactical_doctrine.py` loads:
-  - full doctrine markers for deep AI reasoning
-  - brief doctrine markers for compact parsing context
-  - topic-scoped snippets (`DOCTRINE:TOPIC:*`) so prompts receive only relevant tactical context
-- Tactical regression should be expanded as scenario packs, not only isolated parser tests. Keep bilingual RU/EN cases for maneuver, fires, engineers, logistics, aviation, split/merge, and map-object interaction.
-- The order parser now selects doctrine by command family, for example:
-  - `fires`
-  - `recon`
-  - `engineers`
-  - `logistics`
-  - `aviation`
-  - `map_objects`
-  - `split_merge`
+- `FIELD_MANUAL.md` is the single authoritative tactical source.
+- `backend/prompts/tactical_doctrine.py` loads: full doctrine markers for deep AI reasoning, brief doctrine markers for compact parsing context, and topic-scoped snippets (`DOCTRINE:TOPIC:*`) so prompts receive only relevant tactical context.
+- Doctrine is selected by command family: `fires` · `recon` · `engineers` · `logistics` · `aviation` · `map_objects` · `split_merge`
+- Tactical regression tests should be expanded as scenario packs (bilingual RU/EN cases for maneuver, fires, engineers, logistics, aviation, split/merge, and map-object interaction), not only isolated parser tests.
 
 ## Order Phrasebook
 
-The keyword parser is driven by `backend/data/order_phrasebook.toml` — a structured TOML file that contains:
+The keyword parser is driven by `backend/data/order_phrasebook.toml` — a structured TOML file containing:
 
 - **Classification lexicon** — bilingual command/ack/report/status-request keywords
 - **Order detection patterns** — standby, coordination, fire requests, breach, mining, bridge deployment, construction, smoke, split/merge, air mobility, screening, withdrawal, disengage, resupply, and more
@@ -440,7 +422,6 @@ The keyword parser is driven by `backend/data/order_phrasebook.toml` — a struc
 - **Location object patterns** — minefields, barbed wire, bridges, pillboxes, command posts, supply caches, etc.
 - **60+ regression test cases** — `[[case]]` entries with expected classification, order type, location refs, speed, and map object type; validated by the test suite
 
-The phrasebook is loaded at startup by `backend/services/order_phrasebook.py` and consumed by the order parser for deterministic keyword matching before any LLM call.
 
 ## Usage
 
@@ -448,31 +429,35 @@ The phrasebook is loaded at startup by `backend/services/order_phrasebook.py` an
 2. On first login an **interactive tutorial** walks you through the interface step by step; dismiss at any time or replay it from user settings
 3. Click a session from the list to join (sessions are created by the admin)
 4. Click **Start Session** to initialize units from the scenario
-5. Military unit symbols appear on the map (filtered by your side's fog of war)
-6. Use the **map control panel** (top-right) to toggle drawing tools, grid, units, overlays, contacts, labels, and terrain
-7. **Draw overlays**: select a tool (arrow, polyline, rectangle, marker, ellipse, measure) and draw on the map; overlays sync in real-time via WebSocket
-8. **Command units**: left-click to select, shift+click for multi-select, left-drag for rubber-band mass selection, alt+click to cycle stacked units; right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign)
-9. **Submit orders** in the **📡 Orders** tab of the bottom command panel (select units first, or click **👥 All**)
-10. **Radio chat** in the **📻 Radio** tab — send tactical messages to specific commanders or broadcast to all; filter by channel (All / 💬 Chat / 📡 Units)
-11. **Advance simulation** by clicking **Execute Orders** — units move along A*-optimized paths, detect enemies, fight with coordinated roles, and report back via radio
-12. View events and reports in the sidebar tabs (**Events**, **Reports** with unread badge); click the **📋 session name** for scenario briefing
-13. Reference **height tops** in orders: *"Move toward height 170"* / *"Выдвинуться к высоте 170"*
-14. **Switch language**: open user settings and select English or Russian — the entire UI updates in real-time
-15. **Replay a session**: hover the game clock (bottom-right) and click **Replay** to load turn-by-turn playback; use transport controls to step through ticks or auto-play; click **📊 AAR** to generate an AI-written After-Action Report
+5. Use the **map control panel** (top-right) to toggle drawing tools, grid, units, overlays, contacts, labels, and terrain
+6. **Draw overlays**: select a tool (arrow, polyline, rectangle, marker, ellipse, measure) and draw on the map; overlays sync in real-time via WebSocket
+7. **Command units**: left-click to select, shift+click for multi-select, left-drag for rubber-band mass selection, alt+click to cycle stacked units; right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign)
+8. **Submit orders** in the **📡 Orders** tab of the bottom command panel (select units first, or click **👥 All**)
+9. **Radio chat** in the **📻 Radio** tab — send tactical messages to specific commanders or broadcast to all; filter by channel (All / 💬 Chat / 📡 Units)
+10. **Advance simulation** by clicking **Execute Orders** — units move along A*-optimized paths, detect enemies, fight with coordinated roles, and report back via radio
+11. View events and reports in the sidebar tabs (**Events**, **Reports** with unread badge); click the **📋 session name** for scenario briefing
+12. Reference **height tops** in orders: *"Move toward height 170"*
+13. **Switch language**: open user settings and select English or Russian — the entire UI updates in real-time
+14. **Replay a session**: hover the game clock (bottom-right) and click **Replay** to load turn-by-turn playback; use transport controls to step through ticks or auto-play; click **📊 AAR** to generate an AI-written After-Action Report
 
 ### Admin Panel
+
 Press the admin button (🔑) and enter the admin password to access:
-- **Session** — start/pause/tick controls, session creation wizard (4 steps), delete all units, reset session
-- **Monitor** — god view (see all units on both sides), unit dashboard with focus/edit/delete/split/merge, debug log toggle (detailed tick-by-tick engine data), **trainer friction injection** (degrade any unit mid-exercise: breakdown, comms failure, ammo shortage, etc.)
-- **Builder** — interactive scenario builder with map-click unit placement, grid configuration, save/load, save session → scenario
-- **CoC** — full chain of command hierarchy editor with drag-and-drop reparenting, bulk assign/unassign
-- **Users** — manage session participants
-- **Types** — unit type editor with live SIDC preview (modify speeds, ranges, personnel, eye heights)
-- **Terrain** — analyze terrain (OSM + ESA + elevation), paint cells manually, clear/reload
-- **Effects** — place area effects: smoke, fog, fire, chemical clouds (transient polygon hazards)
-- **Learning** — trigger phrasebook mining from session order data; review and approve/reject candidate phrasebook expansions; apply approved entries to `order_phrasebook.toml` with live hot-reload
+
+| Tab | Capabilities |
+|---|---|
+| **Session** | Start/pause/tick controls, session creation wizard (4 steps), delete all units, reset session |
+| **Monitor** | God view (see all units on both sides), unit dashboard with focus/edit/delete/split/merge, debug log toggle (detailed tick-by-tick engine data), **trainer friction injection** |
+| **Builder** | Interactive scenario builder with map-click unit placement, grid configuration, save/load, save session → scenario |
+| **CoC** | Full chain of command hierarchy editor with drag-and-drop reparenting, bulk assign/unassign |
+| **Users** | Manage session participants |
+| **Types** | Unit type editor with live SIDC preview (modify speeds, ranges, personnel, eye heights) |
+| **Terrain** | Analyze terrain (OSM + ESA + elevation), paint cells manually, clear/reload |
+| **Effects** | Place area effects: smoke, fog, fire, chemical clouds (transient polygon hazards) |
+| **Learning** | Trigger phrasebook mining from session order data; review and approve/reject candidate phrasebook expansions; apply approved entries to `order_phrasebook.toml` with live hot-reload |
 
 ### Map Objects (Tactical Obstacles & Structures)
+
 When admin panel is open:
 - Place obstacles (barbed wire, minefields, entrenchments, AT ditches, dragon's teeth) and structures (pillboxes, bridges, command posts, fuel depots, airfields, observation towers, etc.)
 - **Airfield rotation**: drag the orange ↻ handle at the runway end to rotate to any angle
@@ -481,6 +466,7 @@ When admin panel is open:
 - Objects have per-side discovery: obstacles hidden by default, revealed when a unit's LOS reaches them
 
 ### Terrain Intelligence
+
 From the admin panel's terrain tab:
 1. Select analysis depth (1–4, where depth 2 ≈ 111m cells)
 2. Click **Analyze** — progress streams via SSE in real-time
@@ -490,70 +476,101 @@ From the admin panel's terrain tab:
 6. **Height tops** (▲) automatically detected and displayed on map with elevation numbers
 7. A* pathfinding graph auto-built and persisted after terrain analysis
 
+---
+
 ## Game Rules & Simulation
 
 ### Tick-Based Simulation
-The game advances in discrete ticks (default: 1 minute of game time per tick). Each tick processes:
-1. **Red AI** → AI agents make decisions for Red-controlled units
-2. **Orders** → validated orders assign tasks to units; immediate task assignment on confirmation
-3. **Pathfinding** → A* waypoints computed for all moving units (terrain-aware, enemy-avoiding)
-4. **Movement** → units follow A* waypoints at type-specific speeds modified by terrain, slope, suppression, morale, and weather. Units halt at discovered minefields and rivers without bridges. Contact-during-advance: moving units halt on enemy detection and request orders.
-5. **Detection** → LOS-based visibility checks between opposing sides; new contacts created/updated; recon concealment applied
-6. **Map Object Discovery** → units reveal hidden obstacles/structures within their LOS
-7. **Stale Contacts** → old contacts decay and eventually expire
-8. **Artillery Support** → idle artillery auto-assigned to support attacking or defending units in CoC. Explicit fire requests processed first. Ceasefire coordination with advancing infantry.
-9. **Defense** → dig-in progression for defending units
-10. **Return Fire** → units under attack auto-engage nearest attacker (except disengaging units)
-11. **Combat** → engaged units exchange fire with coordinated roles (suppress/assault/flank). fire_effectiveness includes posture modifier (attacker ×0.65, defender ×1.15). Damage, suppression based on firepower, terrain, ammo. Flanking reduces defender protection ×0.75. Area fire 150m blast radius. Finite salvos (default 3). Danger close at 50m.
-12. **Suppression Recovery** → units not under fire recover at posture-dependent rates: defenders/stationary 0.05/tick, attacking/advancing 0.02/tick (can't take cover in motion)
-13. **Morale** → suppression and casualties erode morale; defenders get +0.01/tick steadiness; assaulting units under fire suffer additional −0.01/tick; safety and nearby friendlies restore morale; units break below 15%; destroying enemies boosts nearby morale; march fatigue
-14. **Communications** → heavy suppression can degrade comms; offline units continue last task
-15. **Ammo & Resupply** → ammo consumed per fire tick; supply caches and logistics units resupply nearby friendlies
-16. **Events & Reports** → notable state changes logged; auto-reports generated (SPOTREP, SHELREP, CASREP, SITREP, INTSUM)
-17. **Radio Chatter** → idle unit reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance messages
-18. **Area Effects** → fire/chemical cloud damage applied; effect durations tick down; expired effects removed
-19. **Victory Check** → Deterministic objective-control check first (annihilation + objective threshold, no LLM); then LLM evaluates custom victory conditions every 5 ticks; turn limit checked
-20. **Broadcast** → updated state pushed to all connected clients via WebSocket
+
+By default, 1 minute of game time per tick. Processing sequence:
+
+| # | Phase | Description |
+|---|---|---|
+| 1 | **Red AI** | AI agents make decisions for Red-controlled units |
+| 2 | **Orders** | Validated orders assign tasks; immediate task assignment on confirmation |
+| 3 | **Pathfinding** | A* waypoints computed for all moving units (terrain-aware, enemy-avoiding) |
+| 4 | **Movement** | Units follow A* waypoints at type-specific speeds; halt at discovered minefields and rivers without bridges; moving units halt on enemy detection and request orders |
+| 5 | **Detection** | LOS-based visibility checks; new contacts created/updated; recon concealment applied |
+| 6 | **Map Object Discovery** | Units reveal hidden obstacles/structures within their LOS |
+| 7 | **Stale Contacts** | Old contacts decay and eventually expire |
+| 8 | **Artillery Support** | Idle artillery auto-assigned to support attacking/defending units in CoC; explicit fire requests processed first; ceasefire coordination with advancing infantry |
+| 9 | **Defense** | Dig-in progression for defending units |
+| 10 | **Return Fire** | Units under attack auto-engage nearest attacker (except disengaging units) |
+| 11 | **Combat** | Coordinated roles (suppress/assault/flank); area fire 150m blast radius; finite salvos (default 3); danger close at 50m |
+| 12 | **Suppression Recovery** | Defenders/stationary: 0.05/tick; attackers/advancing: 0.02/tick |
+| 13 | **Morale** | Suppression and casualties erode morale; safety, nearby friendlies, and enemy kills restore it; march fatigue; units break below 15% |
+| 14 | **Communications** | Heavy suppression degrades comms; offline units continue last task |
+| 15 | **Ammo & Resupply** | Ammo consumed per fire tick; supply caches and logistics units resupply nearby friendlies |
+| 16 | **Events & Reports** | Notable state changes logged; auto-reports generated (SPOTREP, SHELREP, CASREP, SITREP, INTSUM) |
+| 17 | **Radio Chatter** | Idle unit reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance messages |
+| 18 | **Area Effects** | Fire/chemical cloud damage applied; effect durations tick down; expired effects removed |
+| 19 | **Victory Check** | Deterministic objective-control check (annihilation + objective threshold, no LLM); LLM evaluates custom victory conditions every 5 ticks; turn limit checked |
+| 20 | **Broadcast** | Updated state pushed to all connected clients via WebSocket |
 
 ### Movement
-- Each unit type has unique **slow** (tactical) and **fast** (rapid) movement speeds in m/s
-- **Aviation units bypass all terrain** — helicopters and UAVs fly over water, minefields, obstacles, and steep terrain without penalty
+
+```
+effective_speed = base_speed × terrain_factor × slope_factor
+                × (1 - suppression × 0.7) × morale_factor × weather_mod
+```
+
+| Terrain | Factor |
+|---|---|
+| Road | 1.0 |
+| Open | 0.8 |
+| Fields | 0.7 |
+| Forest | 0.5 |
+| Urban | 0.4 |
+| Marsh | 0.3 |
+| Water | 0.05 |
+
+Slope penalty: `max(0.2, 1.0 - slope_deg/45)` — steep terrain dramatically slows movement.
+
+**Aviation units bypass all terrain** — helicopters and UAVs fly over water, minefields, obstacles, and steep terrain without penalty.
+
 - **Tactical A* pathfinding**: ground units navigate terrain-aware paths that avoid minefields, enemy observation, and impassable terrain
-- Speed mode affects routing: **slow** prefers concealed routes (forest, urban), **fast** prefers roads and open terrain
-- `effective_speed = base_speed × terrain_factor × slope_factor × (1 - suppression × 0.7) × morale_factor × weather_mod`
-- **Terrain factors**: road=1.0, open=0.8, forest=0.5, urban=0.4, water=0.05, fields=0.7, marsh=0.3, etc.
-- **Slope penalty**: `max(0.2, 1.0 - slope_deg/45)` — steep terrain dramatically slows movement
-- Map objects affect movement: minefields damage/slow, barbed wire slows, etc.
+- **Speed mode affects routing**: slow prefers concealed routes (forest, urban); fast prefers roads and open terrain
 - Ground units halt before discovered minefields (request engineers) and at water without bridges
 - **Contact during advance**: moving (non-attack) units halt on enemy detection and request orders; resume after 3 ticks if no new orders
 
 ### Detection & LOS
-- **Viewshed-based**: 72-ray cast from unit position, terrain obstacles (forests, buildings) block view
-- **Eye height**: unit-type-specific (observation post=8m, tanks=3m, infantry=2m default)
-- **Detection probability**: `base_prob × (1 - distance/range) × posture_mod × recon_bonus × concealment`
-- **Recon concealment**: Stationary recon/sniper/OP units are nearly invisible (max 300m detection range, 10% base probability, 25% cap)
-- Deterministic hash ensures reproducibility for replay
+
+```
+detection_probability = base_prob × (1 - distance/range) × posture_mod × recon_bonus × concealment
+```
+
+- **Viewshed-based**: 72-ray cast; terrain obstacles block view; unit-type-specific eye heights (observation post=8m, tanks=3m, infantry=2m default)
+- **Recon concealment**: Stationary recon/sniper/OP units nearly invisible (max 300m detection range, 10% base probability, 25% cap)
+- Deterministic BLAKE2b hash ensures reproducibility for replay
 
 ### Combat
-- `fire_effectiveness = base_firepower × strength × ammo_factor × (1 - suppression) × terrain_mod × posture_mod`
-- **Posture modifier** (defender advantage, historical basis: NATO 3:1 rule, Dupuy QJM):
-  - Attacking unit: ×**0.65** — advancing under stress, no pre-positioned fires
-  - Defending unit (auto-return fire): ×**1.15** — pre-aimed sectors, range cards, known ground
-  - Artillery / suppressing fire: ×1.0 (unchanged)
-  - Equal units, open terrain: **1.77:1 exchange ratio** in favour of defender → ~3:1 attacker needed to break through
-  - **Breakthrough window**: when defender suppression ≥ 60%, attack penalty fades linearly to zero — suppressing first then assaulting is the correct doctrine
-- Elevation advantage: +15% effectiveness when firing from higher ground
-- **Combat role coordination**: Multiple units attacking the same enemy auto-coordinate — suppress (40%, covering fire at range), assault (1–2 infantry close in), flank (60° offset via covered terrain)
-- **Flanking**: additional ×0.75 to defender's protection — approaching from unfortified side
+
+```
+fire_effectiveness = base_firepower × strength × ammo_factor
+                   × (1 - suppression) × terrain_mod × posture_mod
+```
+
+**Posture modifier** (defender advantage, historical basis: NATO 3:1 rule, Dupuy QJM):
+
+| Situation | Modifier |
+|---|---|
+| Attacking unit | ×**0.65** — advancing under stress, no pre-positioned fires |
+| Defending unit (auto-return fire) | ×**1.15** — pre-aimed sectors, range cards, known ground |
+| Artillery / suppressing fire | ×1.0 (unchanged) |
+| Equal units, open terrain | **1.77:1 exchange ratio** in favour of defender |
+| Defender suppression ≥ 60% | Attack penalty fades linearly to zero (**breakthrough window**) |
+
+- **Flanking**: ×0.75 to defender's protection — approaching from unfortified side
+- **Elevation advantage**: +15% fire effectiveness when firing from higher ground
+- **Combat role coordination**: Multiple attackers auto-coordinate — suppress (40%, covering fire at range), assault (1–2 infantry close in), flank (60° offset via covered terrain)
 - **Area fire**: Artillery/mortar can fire at grid locations — 150m blast radius, damage falls off with distance
 - **Finite salvos**: Fire missions limited to 3 salvos (configurable), then auto-complete
 - **Danger close**: Artillery auto-ceases fire if friendly within 50m of target
 - **Ceasefire coordination**: Infantry approaching a friendly bombardment zone (250m) halts and requests cease-fire; artillery finishes last salvo, infantry resumes
-- **Artillery support**: Auto-assigned to support both attacking and defending units in the CoC. Explicit fire requests override standby orders. Auto-request on target acquisition.
-- Indirect fire units (mortars, artillery) have extended range shown as dashed circles
-- **Auto-return fire**: Units under attack with no orders engage nearest attacker (except disengaging units)
 
-### Unit Types
+---
+
+## Unit Types
 43 unit types defined in `frontend/config/unit_types.json`, each with:
 - MIL-STD-2525D SIDC codes (Blue + Red variants)
 - Slow/fast movement speeds (m/s)
@@ -563,16 +580,23 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 - Special capabilities (aviation terrain bypass, cargo capacity, etc.)
 
 **Air Defence units** (4 types):
-- **MANPADS Team / Section** — 4–8 personnel, 3–3.5km fire range
-- **SAM Section** — 12 personnel, 8km fire range, 10km detection
-- **AA Gun Section** — 10 personnel, 2.5km fire range
+
+| Type | Personnel | Fire Range |
+|---|---|---|
+| MANPADS Team | 4 | 3 km |
+| MANPADS Section | 8 | 3.5 km |
+| SAM Section | 12 | 8 km (10 km detection) |
+| AA Gun Section | 10 | 2.5 km |
 
 **Aviation units** (3 types):
-- **Attack Helicopter** — 70 m/s fast, 5km detection, 4km fire range, 100m eye height
-- **Transport Helicopter** — 60 m/s fast, 3km detection, 12-person cargo, 150m eye height
-- **Recon UAV** — 35 m/s fast, 8km detection, unarmed, 200m eye height
 
-Aviation units bypass all terrain restrictions (water, minefields, obstacles, slope) and are handled by special order types: `air_assault` (helicopter insertion), `casevac`/`medevac` (casualty evacuation), `airstrike` (attack run).
+| Type | Max Speed | Detection | Fire Range | Eye Height |
+|---|---|---|---|---|
+| Attack Helicopter | 70 m/s | 5 km | 4 km | 100 m |
+| Transport Helicopter | 60 m/s | 3 km | — (12-person cargo) | 150 m |
+| Recon UAV | 35 m/s | 8 km | — (unarmed) | 200 m |
+
+Aviation order types: `air_assault` (helicopter insertion), `casevac`/`medevac` (casualty evacuation), `airstrike` (attack run).
 
 ## Configuration Files
 
@@ -587,45 +611,56 @@ Aviation units bypass all terrain restrictions (water, minefields, obstacles, sl
 | `docker-compose.yml` | Multi-container orchestration (postgres, redis, backend, nginx, llm) |
 | `nginx.conf` | Reverse proxy configuration for production deployment |
 
+---
+
 ## Testing
 
 ### Tactical Scenario Tests
+
 Automated tactical scenario tests validate engine behavior (movement, detection, combat, coordination):
 
 ```powershell
 # Run all tactical scenarios (requires running backend infrastructure)
 python -m scripts.tactical_tests.run_all
-
-# The test runner will:
-# 1. Create a test session with units and orders
-# 2. Execute the specified number of ticks
-# 3. Evaluate assertions (events, detections, unit state)
-# 4. Generate an HTML report: tactical_test_report.html
+# Output: tactical_test_report.html
 ```
 
-**10 test scenarios** covering:
-- Basic movement (unit-type-specific speeds)
-- Armored breakthrough (combined arms)
-- Defensive stand (dig-in, return fire)
-- Combined arms coordination
-- Recon infiltration (concealment)
-- Meeting engagement (mutual detection)
-- Urban combat (terrain effects)
-- Night operations (visibility modifiers)
-- River crossing (bridge requirements)
-- Withdraw under pressure (morale, disengage)
+**10 test scenarios:**
+
+| Scenario | What it validates |
+|---|---|
+| Basic movement | Unit-type-specific speeds |
+| Armored breakthrough | Combined arms coordination |
+| Defensive stand | Dig-in, return fire |
+| Combined arms | Multi-role coordination |
+| Recon infiltration | Concealment mechanics |
+| Meeting engagement | Mutual detection |
+| Urban combat | Terrain effects |
+| Night operations | Visibility modifiers |
+| River crossing | Bridge requirements |
+| Withdraw under pressure | Morale, disengage |
 
 ### Order Phrasebook Regression
-The `order_phrasebook.toml` file contains 60+ `[[case]]` entries that serve as regression tests for the keyword parser. Each case specifies input text and expected outputs (classification, order type, locations, speed, map object type). These are validated by the test suite to prevent parser regressions.
+
+The `order_phrasebook.toml` file contains **60+ `[[case]]` entries** that serve as regression tests for the keyword parser. Each case specifies input text and expected outputs (classification, order type, locations, speed, map object type). These are validated by the test suite to prevent parser regressions.
 
 See `scripts/tactical_tests/` for scenario definitions and the test framework.
 
+---
+
 ## API Documentation
+
 FastAPI auto-generates interactive docs:
-- **Production**: `http://localhost/api/docs` (Swagger UI), `http://localhost/api/redoc` (ReDoc)
-- **Development**: `http://localhost:8000/docs` (Swagger UI), `http://localhost:8000/redoc` (ReDoc)
+
+| Environment | Swagger UI | ReDoc |
+|---|---|---|
+| Production | `http://localhost/api/docs` | `http://localhost/api/redoc` |
+| Development | `http://localhost:8000/docs` | `http://localhost:8000/redoc` |
+
+---
 
 ## Project Structure
+
 See `AGENTS.MD` for full architecture, domain model, and implementation roadmap.
 
 ```
@@ -633,40 +668,71 @@ KShU/
 ├── AGENTS.MD                       # Architecture & implementation guide
 ├── FIELD_MANUAL.md                 # Tactical doctrine source
 ├── README.md
-├── Task.MD                         # Original project requirements
+├── README.ru.md
 ├── requirements.txt
 ├── docker-compose.yml              # PostgreSQL+PostGIS, Redis, backend, nginx, llama.cpp
 ├── Dockerfile                      # Backend multi-stage build
 ├── docker-entrypoint.sh            # Runs migrations on container start
 ├── nginx.conf                      # Reverse proxy + static serving config
 ├── deploy.ps1                      # One-command deployment script (Windows PowerShell)
-├── deploy.sh                       # One-command deployment script (Linux/Unix Bash)
 ├── alembic.ini
 ├── .env
+│
 ├── backend/
 │   ├── main.py                     # FastAPI app factory
 │   ├── config.py                   # Pydantic settings
 │   ├── database.py                 # Async SQLAlchemy engine
+│   │
 │   ├── models/                     # SQLAlchemy models (16 tables incl. learning_proposals)
+│   │   ├── unit.py / order.py / session.py / scenario.py
+│   │   ├── map_object.py           # Tactical map objects (obstacles, structures)
+│   │   ├── terrain_cell.py         # TerrainCell (snail_path → terrain type + modifiers)
+│   │   ├── elevation_cell.py       # ElevationCell (height/slope/aspect)
+│   │   └── learning_proposal.py    # Candidate phrasebook entries mined from sessions
+│   │
 │   ├── api/                        # REST + WebSocket endpoints
+│   │   ├── admin.py                # Session mgmt, god view, unit CRUD, CoC
+│   │   ├── orders.py / units.py / sessions.py / scenarios.py
+│   │   ├── map_objects.py          # Tactical object CRUD
+│   │   ├── terrain.py              # Terrain analysis, painting, pathfinding endpoints
+│   │   └── websocket.py            # WebSocket hub with Redis pub/sub
+│   │
 │   ├── engine/                     # Deterministic rules engine (tick processing)
-│   ├── services/                   # Business logic (grid, orders, visibility, pathfinding, etc.)
-│   │   ├── order_parser.py         # 3-tier LLM routing (keyword→nano→full)
+│   │   ├── tick.py                 # Main tick orchestrator
+│   │   ├── movement.py / detection.py / combat.py
+│   │   ├── morale.py / suppression.py / comms.py / ammo.py
+│   │   ├── defense.py              # Dig-in progression
+│   │   ├── engineering.py          # Engineer unit interactions with tactical objects
+│   │   ├── map_objects.py          # Area effect definitions and impact on units
+│   │   ├── radio_chatter.py        # Auto-generated unit radio messages
+│   │   ├── resupply.py             # Resupply engine
+│   │   ├── intent_cascade.py       # HQ order intent propagation to subordinates
+│   │   ├── geo_utils.py            # Geographic utilities (single source of truth)
+│   │   └── _rng.py                 # Deterministic BLAKE2b RNG for reproducible replay
+│   │
+│   ├── services/
+│   │   ├── order_parser.py         # 3-tier LLM routing (keyword → nano → full)
 │   │   ├── order_phrasebook.py     # TOML phrasebook loader
 │   │   ├── pathfinding_service.py  # Tactical A* over terrain cells
 │   │   ├── retrieval_context.py    # Prompt compression & doctrine retrieval
 │   │   ├── local_triage.py         # Local LLM triage classifier
 │   │   ├── los_service.py          # LOS viewshed ray casting
-│   │   ├── learning/               # Adaptive phrasebook mining (session_analyzer, phrasebook_miner, proposal_store)
+│   │   ├── visibility_service.py   # Fog-of-war, command authority, unit serialization
+│   │   ├── report_generator.py     # Auto-generate 5 report types per tick
+│   │   ├── learning/               # Adaptive phrasebook mining
 │   │   └── terrain_analysis/       # OSM + ESA + elevation analyzers
+│   │
 │   ├── data/
 │   │   └── order_phrasebook.toml   # Bilingual keyword lexicon + regression cases
 │   ├── prompts/                    # LLM prompt templates
 │   ├── schemas/                    # Pydantic v2 schemas
 │   └── tests/                      # Unit & integration tests
+│
 ├── frontend/
 │   ├── index.html
-│   ├── config/                     # unit_types.json, units_config.json
+│   ├── config/
+│   │   ├── unit_types.json         # Unit type registry (SIDC, speeds, personnel)
+│   │   └── units_config.json       # Display/behavior constants
 │   ├── css/style.css
 │   └── js/
 │       ├── app.js                  # Main entry, WS handlers
@@ -681,15 +747,23 @@ KShU/
 │       ├── map_objects.js          # Tactical objects (mines, wire, bridges, etc.)
 │       ├── overlays.js             # Drawing tools
 │       ├── dialogs.js              # Themed confirm/alert/prompt modals
-│       └── ...                     # contacts, events, reports, grid, symbols, etc.
+│       └── contacts.js / events.js / reports.js / grid.js / symbols.js
+│
 ├── scripts/
 │   ├── seed_scenario.py            # DB seed script
 │   ├── download_model.ps1          # Download local LLM model
 │   └── tactical_tests/             # Automated tactical scenario framework
+│       ├── runner.py               # Creates sessions, injects orders, runs ticks
+│       ├── run_all.py              # CLI entry point; generates HTML report
+│       └── scenarios/              # 10 tactical scenario files (s01–s10)
+│
 └── models/                         # Local LLM model files (GGUF)
 ```
 
+---
+
 ## Tech Stack
+
 | Layer | Technology |
 |---|---|
 | Frontend | Leaflet 1.9, Leaflet.Editable, milsymbol.js, Vanilla JS |
