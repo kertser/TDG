@@ -43,6 +43,7 @@
                 <div class="user-dropdown-sep"></div>
                 <div class="user-dropdown-item" id="user-menu-rename">✏️ Rename</div>
                 <div class="user-dropdown-item" id="user-menu-settings">⚙️ Settings</div>
+                <div class="user-dropdown-item" id="user-menu-tutorial">🎓 Tutorial</div>
                 <div class="user-dropdown-sep"></div>
                 <div class="user-dropdown-item user-dropdown-danger" id="user-menu-logout">🚪 Logout</div>
             </div>
@@ -323,6 +324,89 @@
                         </div>
                     </div>
 
+                    <!-- ⚔ OPORD Builder -->
+                    <div class="admin-section">
+                        <h4 style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                            <span>⚔ OPORD</span>
+                            <button onclick="KScenarioBuilder.saveOpord()" style="font-size:10px;padding:2px 8px;background:#1a3a5c;color:#ffd700;border:1px solid #b8860b;border-radius:3px;cursor:pointer;">💾 Save OPORD</button>
+                        </h4>
+
+                        <!-- §1 Обстановка / Situation -->
+                        <div class="sb-opord-item">
+                            <div class="sb-opord-hdr" onclick="KScenarioBuilder.toggleOpordSection('sb-opord-s1')">
+                                <span>§1 Обстановка / Situation</span><span class="sb-opord-chev">▼</span>
+                            </div>
+                            <div class="sb-opord-body" id="sb-opord-s1">
+                                <label class="sb-opord-lbl">Theater &amp; Enemy</label>
+                                <textarea id="sb-opord-theater" rows="3" placeholder="Describe terrain, weather, enemy forces (size, composition, disposition, capabilities)..."></textarea>
+                                <label class="sb-opord-lbl" style="margin-top:4px;">Friendly Forces &amp; Attachments</label>
+                                <textarea id="sb-opord-friendly" rows="2" placeholder="Higher unit mission, adjacent units, attachments/OPCON..."></textarea>
+                            </div>
+                        </div>
+
+                        <!-- §2 Задача / Mission (5W) -->
+                        <div class="sb-opord-item">
+                            <div class="sb-opord-hdr" onclick="KScenarioBuilder.toggleOpordSection('sb-opord-s2')">
+                                <span>§2 Задача / Mission (5W)</span><span class="sb-opord-chev">▼</span>
+                            </div>
+                            <div class="sb-opord-body" id="sb-opord-s2" style="display:none;">
+                                <div class="sb-opord-5w">
+                                    <label>Who</label><input type="text" id="sb-opord-who" placeholder="Unit designated" />
+                                    <label>What</label><input type="text" id="sb-opord-what" placeholder="Task to be performed" />
+                                    <label>When</label><input type="text" id="sb-opord-when" placeholder="Time / conditions" />
+                                    <label>Where</label><input type="text" id="sb-opord-where" placeholder="Location / grid" />
+                                    <label>Why</label><input type="text" id="sb-opord-why" placeholder="Purpose / end state" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- §3 Выполнение / Execution -->
+                        <div class="sb-opord-item">
+                            <div class="sb-opord-hdr" onclick="KScenarioBuilder.toggleOpordSection('sb-opord-s3')">
+                                <span>§3 Выполнение / Execution</span><span class="sb-opord-chev">▼</span>
+                            </div>
+                            <div class="sb-opord-body" id="sb-opord-s3" style="display:none;">
+                                <label class="sb-opord-lbl">Commander's Intent</label>
+                                <textarea id="sb-opord-intent" rows="2" placeholder="End state, key tasks, risk..."></textarea>
+                                <label class="sb-opord-lbl" style="margin-top:4px;">Concept of Operations</label>
+                                <textarea id="sb-opord-concept" rows="3" placeholder="Scheme of maneuver, main effort, fires, tasks to subordinate units..."></textarea>
+                                <label class="sb-opord-lbl" style="margin-top:4px;">Coordinating Instructions</label>
+                                <textarea id="sb-opord-coord" rows="2" placeholder="Time schedule, ROE, fire control measures, boundaries..."></textarea>
+                            </div>
+                        </div>
+
+                        <!-- §4 Тыловое обеспечение / Service Support -->
+                        <div class="sb-opord-item">
+                            <div class="sb-opord-hdr" onclick="KScenarioBuilder.toggleOpordSection('sb-opord-s4')">
+                                <span>§4 Тыловое обеспечение / Service Support</span><span class="sb-opord-chev">▼</span>
+                            </div>
+                            <div class="sb-opord-body" id="sb-opord-s4" style="display:none;">
+                                <div class="sb-opord-5w">
+                                    <label>Ammo</label><input type="text" id="sb-opord-ammo" placeholder="Class V – ammunition policy" />
+                                    <label>Fuel</label><input type="text" id="sb-opord-fuel" placeholder="Class III – fuel resupply plan" />
+                                    <label>Medical</label><input type="text" id="sb-opord-medical" placeholder="CASEVAC / MEDEVAC plan, aid stations" />
+                                    <label>Maintenance</label><input type="text" id="sb-opord-maint" placeholder="Recovery, repair priority" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- §5 Управление и связь / Command & Signal -->
+                        <div class="sb-opord-item">
+                            <div class="sb-opord-hdr" onclick="KScenarioBuilder.toggleOpordSection('sb-opord-s5')">
+                                <span>§5 Управление и связь / Command &amp; Signal</span><span class="sb-opord-chev">▼</span>
+                            </div>
+                            <div class="sb-opord-body" id="sb-opord-s5" style="display:none;">
+                                <div class="sb-opord-5w">
+                                    <label>HQ Location</label><input type="text" id="sb-opord-hq" placeholder="CP location / grid" />
+                                    <label>Radio Nets</label><input type="text" id="sb-opord-nets" placeholder="Primary / alternate frequencies or channels" />
+                                    <label>Reporting</label><input type="text" id="sb-opord-reporting" placeholder="SITREP / SPOTREP schedule and format" />
+                                    <label>Succession</label><input type="text" id="sb-opord-succession" placeholder="Command succession in case of WIA/KIA" />
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
                     <div class="admin-section">
                         <h4>Grid Settings</h4>
                         <div style="display:grid;grid-template-columns:max-content max-content max-content auto;gap:4px 6px;align-items:center;">
@@ -547,6 +631,19 @@
                     <div id="admin-debug-log-viewer" style="display:none;margin-top:4px;">
                         <textarea id="admin-debug-log-contents" readonly style="width:100%;height:200px;background:#0a0a0a;color:#00ff88;font-family:monospace;font-size:10px;border:1px solid #333;resize:vertical;white-space:pre;overflow-wrap:normal;overflow-x:auto;"></textarea>
                     </div>
+                </div>
+
+                <!-- Learning / Adaptive Phrasebook -->
+                <div class="admin-section">
+                    <h4>🎓 Learning Analysis</h4>
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;">Mine phrasebook proposals from completed session orders. Human review required before applying.</div>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">
+                        <button id="admin-analyze-learning" class="admin-btn" title="Analyze all sessions for phrasebook candidate patterns">🔍 Analyze Sessions</button>
+                        <button id="admin-load-proposals" class="admin-btn" title="Show pending proposals for review">📋 View Proposals</button>
+                        <button id="admin-apply-proposals" class="admin-btn" style="background:#1b5e20;color:#a5d6a7;" title="Apply all approved proposals to phrasebook TOML">✅ Apply Approved</button>
+                    </div>
+                    <div id="admin-learning-status" class="admin-info" style="font-size:10px;"></div>
+                    <div id="admin-proposals-list" style="max-height:400px;overflow-y:auto;margin-top:4px;"></div>
                 </div>
             </div>
 
@@ -1396,7 +1493,7 @@
                         <li><b>Height reference</b> — <code>Move toward height 170</code> or <code>Выдвинуться к высоте 170</code></li>
                     </ul>
                     <p style="margin-top:4px;">You can also set move targets via <b>right-click → Move (🐢 Slow / ⚡ Fast)</b> on a unit, then click a destination on the map. Units acknowledge orders via radio with a tactical assessment.</p>
-                    <p style="margin-top:4px;"><b>Speed modes</b> affect pathfinding: <b>🐢 Slow</b> routes through concealed terrain (forest, urban); <b>⚡ Fast</b> routes via roads and open ground.</p>
+                    <p style="margin-top:4px;"><b>Speed modes</b> affect pathfinding: <b>🐢 Slow</b> routes through concealed terrain (forest, urban, scrub); <b>⚡ Fast</b> routes via roads and open ground.</p>
                 </div>
 
                 <div class="rules-section">
@@ -1568,21 +1665,21 @@
                         <li><b>Ссылка на высоту</b> — <code>Выдвинуться к высоте 170</code> или <code>Move toward height 170</code></li>
                     </ul>
                     <p style="margin-top:4px;">Также можно задать цель движения через <b>правый клик → Move (🐢 Slow / ⚡ Fast)</b> по юниту, затем клик по карте. Подразделения подтверждают приказы по радио с тактической оценкой.</p>
-                    <p style="margin-top:4px;"><b>Режимы скорости</b> влияют на прокладку маршрута: <b>🐢 Slow</b> — маршрут через скрытную местность (лес, город); <b>⚡ Fast</b> — маршрут по дорогам и открытой местности.</p>
+                    <p style="margin-top:4px;"><b>Режимы скорости</b> влияют на прокладку маршрута: <b>🐢 Slow</b> — маршрут через скрытную местность (лес, город, кустарник); <b>⚡ Fast</b> — маршрут по дорогам и открытой местности.</p>
                 </div>
 
                 <div class="rules-section">
                     <div class="rules-section-title">Туман войны и обнаружение</div>
                     <p>Вы видите противника только в пределах <b>прямой видимости</b> (LOS) ваших подразделений. Обнаружение использует трассировку лучей: объекты местности (леса, здания, холмы) блокируют видимость. Обнаруженные контакты отображаются с ограниченной информацией — <b>тип обобщён</b> (например, «пехота» вместо точного типа), <b>численность скрыта</b> (нет индикатора размера на символе), <b>состояние приблизительно</b> (полная / сниженная / ослабленная / критическая боеспособность). Численность персонала отображается как «?» для обнаруженного противника.</p>
                     <p>Собственные подразделения всегда полностью видимы со всей статистикой. Круги контактов появляются для обнаруженных врагов и исчезают при устаревании контакта.</p>
-                    <p><b>Замаскированные разведчики/снайперы</b> (неподвижные, не стреляющие) крайне трудно обнаружить — противник должен приблизиться на ~120–300м в зависимости от местности и погоды. Лучшая маскировка — в лесу (~120м дальность обнаружения).</p>
+                    <p><b>Замаскированные разведчики/снайперы</b> (неподвижные, не стреляющие) крайне трудно обнаружить — противник должен приблизиться на ~120-300м в зависимости от местности и погоды. Лучшая маскировка — в лесу (~120м дальность обнаружения).</p>
                 </div>
 
                 <div class="rules-section">
                     <div class="rules-section-title">Местность и тактические объекты</div>
                     <p>Карта содержит <b>данные о местности</b> (12 типов: дорога, открытая, лес, городская, вода, поля, болото, пустыня, кустарник, мост, горы, сад), которые влияют на скорость движения, видимость, защиту и боевую эффективность. <b>Высоты</b> (▲) отмечают вершины с числами высоты — используйте их в приказах.</p>
                     <p><b>Тактические объекты</b> включают проволочные заграждения, минные поля, окопы, завалы на дорогах, ДОТы, мосты и другое. Некоторые объекты скрыты до обнаружения вашими подразделениями. Минные поля наносят урон и замедляют; проволока замедляет движение; окопы дают защиту.</p>
-                    <p><b>Зональные эффекты</b>: Дым (блокирует обнаружение ×0.1), Туман (снижает видимость ×0.15), Огонь (урон 3%/ход, блокирует движение), Химическое облако (тяжёлый урон 5–6%/ход пехоте). Все эффекты временные и рассеиваются за несколько ходов.</p>
+                    <p><b>Зональные эффекты</b>: Дым (блокирует обнаружение ×0.1), Туман (снижает видимость ×0.15), Огонь (урон 3%/ход, блокирует движение), Химическое облако (тяжёлый урон 5-6%/ход пехоте). Все эффекты временные и рассеиваются со временем.</p>
                 </div>
 
                 <div class="rules-section">
@@ -1598,18 +1695,18 @@
                         <li><b>Бой</b> — Вступившие в бой подразделения обмениваются огнём. Урон снижает боеспособность; огонь вызывает подавление. Преимущество высоты повышает эффективность (+15%). <b>Опасная близость</b>: артиллерия прекращает огонь, если дружественные подразделения в пределах 50м от цели.</li>
                         <li><b>Координация артиллерии</b> — Артиллерия автоматически поддерживает атакующих <b>и обороняющихся</b> союзников. Пехота, приближающаяся к зоне обстрела (250м), останавливается и запрашивает прекращение огня — артиллерия завершает последний залп, пехота подтверждает и возобновляет движение. <b>Явные запросы огня</b> отменяют режим ожидания.</li>
                         <li><b>Огонь по площади</b> — Артиллерия/миномёт могут вести огонь по <b>координатам сетки</b> (не только по конкретным целям). Радиус поражения: 150м, урон убывает с расстоянием. <b>Ограниченные залпы</b>: огневые задачи ограничены 3 залпами.</li>
-                        <li><b>Зональные эффекты</b> — Временные опасные зоны на карте: <b>Дым</b> (блокирует обнаружение), <b>Туман</b> (снижает видимость), <b>Огонь</b> (урон 3%/ход, блокирует движение), <b>Химическое облако</b> (тяжёлый урон 5–6%/ход пехоте). Все эффекты рассеиваются со временем.</li>
+                        <li><b>Зональные эффекты</b> — Временные опасные зоны на карте: <b>Дым</b> (блокирует обнаружение), <b>Туман</b> (снижает видимость), <b>Огонь</b> (урон 3%/ход, блокирует движение), <b>Химическое облако</b> (тяжёлый урон 5-6%/ход пехоте). Все эффекты рассеиваются со временем.</li>
                         <li><b>Выход из боя</b> — Приказ <b>разорвать контакт</b>: подразделение прекращает бой, быстро перемещается к ближайшему укрытию (лес, город, кустарник в радиусе 800м), затем занимает оборону. Отходящие юниты НЕ ведут ответный огонь автоматически.</li>
                         <li><b>Оборонительная позиция</b> — Подразделения, получившие приказ <b>оборонять</b>, постепенно окапываются (3 хода на уровень, максимум 5 уровней). Более высокие уровни дают большую защиту. Окопы и городская местность добавляют бонусы.</li>
-                        <li><b>Снабжение</b> — Склады снабжения пополняют ближайшие юниты (+10% б/к за ход). Логистические подразделения — мобильные пункты снабжения (+8% б/к за ход). Полевые госпитали восстанавливают боеспособность (+1%/ход). Приказ <code>Пополнить боекомплект</code> — автоматическое движение к ближайшему источнику снабжения.</li>
-                        <li><b>Отдых и восстановление</b> — Подразделения вне боя медленно восстанавливают боеспособность (+0.3%/ход, +0.8%/ход после 5 ходов отдыха) и мораль. Это реорганизация, а не пополнение личным составом.</li>
-                        <li><b>Дымовые завесы</b> — Артиллерия и миномёты могут ставить дымовые завесы (правый клик → 🌫 Fire Smoke). Дым резко снижает видимость в районе на ~3 минуты.</li>
-                        <li><b>Мораль</b> — Потери и подавление подрывают мораль. Близкие союзники обеспечивают взаимную поддержку. Подразделения с моралью ниже 15% ломаются и отступают. Уничтожение врагов повышает мораль ближайших подразделений. Длительные марши (>10 ходов) вызывают усталость.</li>
-                        <li><b>Связь</b> — Сильное подавление может нарушить связь, задерживая доставку приказов. Подразделения без связи продолжают последнюю задачу.</li>
-                        <li><b>Боеприпасы</b> — Стрельба расходует боеприпасы. Подразделения без боеприпасов не могут вести огонь.</li>
-                        <li><b>Ответный огонь</b> — Подразделения под атакой без приказов автоматически открывают ответный огонь по ближайшему противнику (кроме отходящих).</li>
-                        <li><b>Доклады о потерях</b> — После уничтожения вражеского подразделения все участвовавшие юниты автоматически докладывают обстановку и потери по радио.</li>
-                        <li><b>Оценка победы</b> — ИИ оценивает условия победы каждые 5 ходов. Игра также заканчивается при достижении лимита ходов.</li>
+                        <li><b>Снабжение</b> — Склады снабжения пополняют ближайшие юниты (+10% ammo/tick). Logistics units act as mobile supply points (+8% ammo/tick). Field hospitals restore strength (+1%/tick). Order <code>Resupply</code> to auto-move to nearest supply source.</li>
+                        <li><b>Rest &amp; Recovery</b> — Units out of combat (idle or defending, not under fire) slowly recover strength (+0.3%/tick, +0.8%/tick after 5 rest ticks) and morale. This represents reorganization, not replacement of personnel.</li>
+                        <li><b>Smoke Screens</b> — Artillery and mortar units can fire smoke rounds (right-click → 🌫 Fire Smoke). Smoke drastically reduces visibility in an area for ~3 minutes, blocking detection and reducing combat effectiveness for units inside.</li>
+                        <li><b>Мораль</b> — Casualties and suppression erode morale. Nearby friendlies provide mutual support. Units with morale below 15% break and retreat. Destroying enemies boosts nearby units' morale. Long marches (>10 ticks) cause fatigue.</li>
+                        <li><b>Communications</b> — Heavy suppression can degrade comms, delaying orders. Offline units continue their last task.</li>
+                        <li><b>Ammo</b> — Firing consumes ammunition. Units without ammo cannot engage.</li>
+                        <li><b>Return Fire</b> — Units under attack with no orders automatically engage their nearest attacker (except disengaging units).</li>
+                        <li><b>Casualty Reports</b> — After an enemy unit is destroyed, all involved units automatically report their situation and casualties over the radio.</li>
+                        <li><b>Victory Evaluation</b> — AI evaluates victory conditions every 5 turns. Game also ends when the turn limit is reached.</li>
                     </ul>
                 </div>
 
@@ -1618,8 +1715,8 @@
                     <p>Условия сценария влияют на игровой процесс:</p>
                     <ul>
                         <li><b>Погода</b> — Ясно, Дождь (−30% видимость, −20% движение), Сильный дождь/шторм (−60% видимость, −40% движение), Туман (−70% видимость), Снег (−40% видимость, −30% движение).</li>
-                        <li><b>Ночь</b> — С 21:00 до 05:00 видимость снижается до 30%. Рассвет/сумерки (05:00–07:00, 19:00–21:00) — до 60%. Подразделения с ПНВ страдают вдвое меньше.</li>
-                        <li><b>Осадки</b> — Дополнительный дождь или снег суммируется с погодными эффектами, ещё больше снижая видимость и движение.</li>
+                        <li><b>Night-time</b> — Between 21:00–05:00, visibility is reduced to 30%. Dawn/dusk (05:00–07:00, 19:00–21:00) reduces visibility to 60%. Units with NVG capability suffer half the night penalty.</li>
+                        <li><b>Precipitation</b> — Additional rain or snow stacks with weather effects, further reducing visibility and movement.</li>
                     </ul>
                 </div>
 
@@ -1627,15 +1724,15 @@
                     <div class="rules-section-title">Специальные команды</div>
                     <ul>
                         <li><b>Выход из боя / Разорвать контакт</b> — Приказ на отход к ближайшей укрытой местности (лес, город, кустарник в радиусе 800м). Подразделение движется на высокой скорости, не ведёт ответный огонь, при прибытии переходит к обороне.</li>
-                        <li><b>Готовность / Наблюдение</b> — <code>Будьте готовы к огневой поддержке по запросу</code> переводит артиллерию в режим ожидания (НЕ открывает огонь немедленно). Подразделение ожидает явных команд на открытие огня.</li>
-                        <li><b>Запрос огня</b> — Пехота может запросить артиллерийскую поддержку: <code>Запросить огонь по позиции противника</code>. Артиллерия в режиме ожидания реагирует на явные запросы огня.</li>
-                        <li><b>Пополнение</b> — <code>Пополнить боекомплект</code> или <code>Resupply</code> — автоматическое движение к ближайшему складу или логистическому подразделению, пополнение до 95% боекомплекта.</li>
-                        <li><b>Ссылка на высоту</b> — <code>Выдвинуться к высоте 170</code> или <code>Move toward height 170</code> — определяет ближайшую вершину с указанной высотой.</li>
-                        <li><b>Расформирование</b> — Правый клик → ⛔ Disband Unit. Окончательно удаляет подразделение из игры (при невосполнимых потерях).</li>
-                        <li><b>Отмена приказов</b> — Нажмите ⊘ в командной панели для отмены всех приказов выбранных подразделений (или всех, если ничего не выбрано).</li>
-                        <li><b>Поэтапные приказы</b> — Условные приказы: <i>«После захвата C6-6-8 выдвинуться к D4»</i>. Последующие этапы хранятся в очереди приказов и активируются при выполнении условий.</li>
-                        <li><b>Дымовая завеса</b> — Правый клик по артиллерии/миномёту → 🌫 Fire Smoke → клик на карте для постановки дымовой завесы.</li>
-                        <li><b>Огонь по площади</b> — Приказ артиллерии/миномёту вести огонь по координатам сетки (например, <code>Огонь по B4-3</code>). Поражает всех врагов в радиусе 150м. Ограничен 3 залпами.</li>
+                        <li><b>Standby / Observe</b> — <code>Get ready for fire support on request</code> puts artillery on standby (does NOT fire immediately). Unit waits for explicit fire commands.</li>
+                        <li><b>Request Fire</b> — Infantry can request CoC artillery support: <code>Request fire on enemy position</code>. Artillery on standby responds to explicit fire requests.</li>
+                        <li><b>Resupply</b> — <code>Resupply</code> or <code>Пополнить боекомплект</code> — unit auto-moves to nearest supply cache or logistics unit, resupplies until 95% ammo.</li>
+                        <li><b>Height Reference</b> — <code>Move toward height 170</code> или <code>Выдвинуться к высоте 170</code> — определяет ближайшую вершину с указанной высотой.</li>
+                        <li><b>Disband Unit</b> — Right-click → ⛔ Disband Unit. Permanently removes a unit from the game (for units with unsustainable losses).</li>
+                        <li><b>Cancel Orders</b> — Click ⊘ in the command panel to cancel all orders for selected units (or all your units if none selected).</li>
+                        <li><b>Phased Orders</b> — Issue conditional orders: <i>"After capturing C6-6-8, advance to D4"</i>. Subsequent phases are stored in the unit's order queue and activate when conditions are met.</li>
+                        <li><b>Fire Smoke</b> — Right-click an artillery/mortar unit → 🌫 Fire Smoke → click the map to place smoke screen.</li>
+                        <li><b>Area Fire</b> — Order artillery/mortar to fire at a grid location (e.g., <code>Fire at B4-3</code>). Damages all enemies within 150m blast radius. Limited to 3 salvos.</li>
                     </ul>
                 </div>
 
@@ -1693,6 +1790,7 @@
     <script src="/js/terrain.js"></script>
     <script src="/js/map_objects.js"></script>
     <script src="/js/replay.js"></script>
+    <script src="/js/tutorial.js"></script>
     <script src="/js/admin.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/app.js"></script>

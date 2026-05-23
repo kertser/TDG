@@ -88,6 +88,14 @@ async def run_red_agents(
         if ticks_since < interval:
             continue
 
+        # ── Script mode: deterministic, no LLM ───────────────────────────
+        doctrine = agent.doctrine_profile or {}
+        if doctrine.get("script_mode"):
+            script_events = await _run_script_mode(agent, tick, db, session_id, grid_service)
+            events.extend(script_events)
+            agent.last_decision_tick = tick
+            continue
+
         try:
             # Build knowledge state (Red-side only)
             knowledge = await build_knowledge_state(
@@ -214,5 +222,86 @@ async def run_red_agents(
     return events
 
 
+# ── Script-mode helper ────────────────────────────────────────────────────────
 
+async def _run_script_mode(
+    agent: "RedAgent",
+    tick: int,
+    db: AsyncSession,
+    session_id: uuid.UUID,
+    grid_service,
+) -> list[dict]:
+    """
+    Deterministic Red AI — no LLM, follows a pre-defined script of actions
+    stored in agent.doctrine_profile["script"] as a list of step dicts.
+
+    Each step:
+      {"from_tick": 0, "to_tick": 5, "action": "defend", "target_snail": "B4"}
+    """
+    events = []
+    doctrine = agent.doctrine_profile or {}
+    script: list[dict] = doctrine.get("script", [])
+    if not script:
+        return events
+
+    # Find the active step
+    step = next((s for s in script if s.get("from_tick", 0) <= tick <= s.get("to_tick", 9999)), None)
+    if not step:
+        return events
+
+    action = step.get("action", "defend")
+    target_snail = step.get("target_snail")
+    controlled_ids = agent.controlled_unit_ids or []
+
+    from backend.models.unit import Unit
+    from backend.models.order import Order, OrderStatus, OrderSide
+
+    orders_created = 0
+    for uid_raw in controlled_ids:
+        try:
+            uid = uuid.UUID(str(uid_raw))
+        except (ValueError, AttributeError):
+            continue
+
+        # Resolve snail path to lat/lon if grid service available
+        parsed_order: dict = {"type": action, "speed": "slow", "source": "red_ai_script"}
+        target_loc = None
+        if target_snail and grid_service:
+            try:
+                center = grid_service.snail_to_center(target_snail)
+                target_loc = {"lat": center.y, "lon": center.x}
+                parsed_order["target_location"] = target_loc
+                parsed_order["target_snail"] = target_snail
+            except Exception:
+                pass
+
+        order = Order(
+            session_id=session_id,
+            issued_by_user_id=None,
+            issued_by_side=OrderSide.red,
+            target_unit_ids=[uid],
+            order_type=action,
+            original_text=f"[Script] {action} → {target_snail or 'hold'} (tick {tick})",
+            parsed_order=parsed_order,
+            status=OrderStatus.validated,
+        )
+        db.add(order)
+        orders_created += 1
+
+    if orders_created:
+        events.append({
+            "event_type": "red_ai_decision",
+            "text_summary": f"Red AI '{agent.name}' (script) issued {orders_created} orders: {action}",
+            "payload": {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "orders_count": orders_created,
+                "posture": "script",
+                "script_action": action,
+                "target_snail": target_snail,
+            },
+        })
+        logger.info("Red AI (script) '%s' issued %d orders: %s → %s at tick %d",
+                    agent.name, orders_created, action, target_snail, tick)
+    return events
 

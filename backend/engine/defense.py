@@ -48,6 +48,11 @@ def process_defense(all_units: list, map_objects: list | None = None) -> list[di
                 unit.current_task = task
             continue
 
+        # §0.5 — update heading from task.facing_deg so flanking math stays correct
+        facing = task.get("facing_deg")
+        if facing is not None and isinstance(facing, (int, float)):
+            unit.heading_deg = facing
+
         # Increment dig-in ticks
         dig_ticks = task.get("dig_in_ticks", 0) + 1
         old_level = task.get("dig_in_level", 0)

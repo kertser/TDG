@@ -216,6 +216,8 @@
 
         KWebSocket.on('tick_update', (data) => {
             KGameLog.addEntry(`Turn ${data.tick}`, 'info');
+            // Tutorial event
+            document.dispatchEvent(new CustomEvent('kshu:tick-advanced', { detail: { tick: data.tick } }));
             // Update game clock on turn
             KMap.setGameTime(data.tick, data.game_time || null);
             // Clear pending orders — they've been executed by the tick

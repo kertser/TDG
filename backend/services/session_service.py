@@ -22,6 +22,17 @@ from backend.models.grid import GridDefinition
 from backend.models.red_agent import RedAgent
 
 
+def _ensure_fuel_initialized(unit: Unit) -> None:
+    """Set fuel=1.0 in capabilities for vehicle/aviation unit types if not already set."""
+    from backend.engine.movement import FUEL_CONSUMING_UNIT_TYPES
+    if unit.unit_type not in FUEL_CONSUMING_UNIT_TYPES:
+        return
+    caps = dict(unit.capabilities or {})
+    if "fuel" not in caps:
+        caps["fuel"] = 1.0
+        unit.capabilities = caps
+
+
 def _resolve_unit_position(unit_data: dict, grid_settings: dict | None) -> Point | None:
     """
     Resolve unit position.  If the unit has grid-relative offsets
@@ -115,6 +126,8 @@ async def initialize_session_from_scenario(
                     detection_range_m=unit_data.get("detection_range_m", 1500),
                     capabilities=unit_data.get("capabilities"),
                 )
+                # Ensure fuel is initialised for vehicle/aviation unit types
+                _ensure_fuel_initialized(unit)
                 db.add(unit)
                 await db.flush()
                 unit_name_to_id[unit_data["name"]] = unit.id

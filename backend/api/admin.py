@@ -25,6 +25,9 @@ from backend.models.red_agent import RedAgent
 from backend.models.grid import GridDefinition
 from backend.models.user import User
 from backend.services.visibility_service import get_visible_units
+from backend.services.learning.session_analyzer import extract_analyzable_orders
+from backend.services.learning.phrasebook_miner import mine_proposals
+from backend.services.learning.proposal_store import save_proposals, append_to_toml, hot_reload_phrasebook
 
 router = APIRouter()
 
@@ -1731,3 +1734,205 @@ async def clear_debug_log():
     clear_log()
     return {"cleared": True}
 
+
+# ── Trainer Friction Injection (#12) ─────────────────────────────────────────
+
+class FrictionRequest(BaseModel):
+    unit_id: uuid.UUID
+    friction_type: str   # breakdown|comms_failure|position_error|ammo_shortage|fuel_depletion|commander_casualty
+    duration_ticks: int = 5
+    magnitude: float = 1.0   # 0.0–1.0
+    comment: str = ""
+
+
+@router.post("/sessions/{session_id}/inject-friction")
+async def inject_friction(
+    session_id: uuid.UUID,
+    body: FrictionRequest,
+    db: DB,
+):
+    """Inject a trainer friction event onto a unit for N ticks."""
+    unit = await db.get(Unit, body.unit_id)
+    if not unit or str(unit.session_id) != str(session_id):
+        raise HTTPException(404, "Unit not found in session")
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    caps = dict(unit.capabilities or {})
+    friction_list = list(caps.get("friction") or [])
+    friction_list.append({
+        "type": body.friction_type,
+        "until_tick": session.tick + body.duration_ticks,
+        "magnitude": body.magnitude,
+        "comment": body.comment,
+    })
+    caps["friction"] = friction_list
+    unit.capabilities = caps
+    await db.commit()
+    return {"ok": True, "unit_id": str(unit.id), "friction_type": body.friction_type,
+            "until_tick": session.tick + body.duration_ticks}
+
+
+@router.delete("/sessions/{session_id}/inject-friction/{unit_id}")
+async def clear_friction(session_id: uuid.UUID, unit_id: uuid.UUID, db: DB):
+    """Clear all friction effects from a unit."""
+    unit = await db.get(Unit, unit_id)
+    if not unit or str(unit.session_id) != str(session_id):
+        raise HTTPException(404, "Unit not found in session")
+    caps = dict(unit.capabilities or {})
+    caps.pop("friction", None)
+    unit.capabilities = caps
+    await db.commit()
+    return {"ok": True}
+
+
+# ── Learning / Adaptive Phrasebook ───────────────────────────────────────────
+
+class ApplyProposalsRequest(BaseModel):
+    proposal_ids: list[uuid.UUID]
+
+
+@router.post("/sessions/{session_id}/analyze-learning")
+async def analyze_session_learning(session_id: uuid.UUID, db: DB):
+    """
+    Mine phrasebook proposals from ALL sessions (using this session as trigger).
+    Runs synchronously (may take a few seconds for large datasets).
+    Returns {proposals_created, auto_rejected}.
+    """
+    from backend.models.order import Order
+    from backend.models.session import Session as GameSession
+    from backend.services.learning.session_analyzer import extract_analyzable_orders
+    from backend.services.learning.phrasebook_miner import mine_proposals
+    from backend.services.learning.proposal_store import save_proposals
+
+    # Load orders from ALL sessions
+    all_sessions_result = await db.execute(select(GameSession))
+    all_sessions = list(all_sessions_result.scalars().all())
+
+    per_session_orders: list[list[dict]] = []
+    for sess in all_sessions:
+        result = await db.execute(
+            select(Order).where(Order.session_id == sess.id)
+        )
+        orders = list(result.scalars().all())
+        analyzed = extract_analyzable_orders(str(sess.id), orders)
+        if analyzed:
+            per_session_orders.append(analyzed)
+
+    if not per_session_orders:
+        return {"proposals_created": 0, "auto_rejected": 0, "message": "No analyzable orders found"}
+
+    # Mine proposals
+    raw_proposals = mine_proposals(per_session_orders)
+
+    # Optional LLM judge (only if API key available)
+    judged_proposals = []
+    try:
+        from backend.services.llm_client import get_openai_client  # type: ignore
+        client = get_openai_client()
+        from backend.services.learning.phrasebook_miner import llm_judge
+        for prop in raw_proposals:
+            judged = await llm_judge(prop, client)
+            judged_proposals.append(judged)
+    except Exception:
+        judged_proposals = raw_proposals  # skip LLM judge if unavailable
+
+    saved, auto_rejected = await save_proposals(judged_proposals, db)
+    return {
+        "proposals_created": saved,
+        "auto_rejected":     auto_rejected,
+        "pending":           saved - auto_rejected,
+    }
+
+
+@router.get("/learning/proposals")
+async def list_learning_proposals(status: str = "pending", db: DB = None):
+    """List proposals for human review. Does not return auto_rejected."""
+    from backend.models.learning_proposal import LearningProposal, ProposalStatus
+    filter_status = None
+    try:
+        filter_status = ProposalStatus(status)
+    except ValueError:
+        raise HTTPException(400, f"Unknown status: {status}")
+    if filter_status == ProposalStatus.auto_rejected:
+        raise HTTPException(403, "auto_rejected proposals are not shown")
+
+    result = await db.execute(
+        select(LearningProposal)
+        .where(LearningProposal.status == filter_status)
+        .order_by(LearningProposal.created_at.desc())
+        .limit(50)
+    )
+    proposals = list(result.scalars().all())
+
+    return [
+        {
+            "id":                  str(p.id),
+            "proposal_type":       p.proposal_type.value if p.proposal_type else p.proposal_type,
+            "target_file":         p.target_file,
+            "proposed_text":       p.proposed_text,
+            "rationale":           p.rationale,
+            "example_texts":       p.example_texts or [],
+            "confidence":          p.confidence,
+            "cross_session_count": p.cross_session_count,
+            "unique_user_count":   p.unique_user_count,
+            "llm_judge_score":     p.llm_judge_score,
+            "llm_judge_reasoning": p.llm_judge_reasoning,
+            "status":              p.status.value if p.status else p.status,
+            "created_at":          p.created_at.isoformat() if p.created_at else None,
+        }
+        for p in proposals
+    ]
+
+
+@router.patch("/learning/proposals/{proposal_id}")
+async def update_proposal_status(
+    proposal_id: uuid.UUID,
+    body: dict,
+    db: DB,
+):
+    """Admin approves or rejects a proposal. body = {"status": "approved"|"rejected"}"""
+    from backend.models.learning_proposal import LearningProposal, ProposalStatus
+
+    proposal = await db.get(LearningProposal, proposal_id)
+    if not proposal:
+        raise HTTPException(404, "Proposal not found")
+
+    new_status_str = body.get("status", "")
+    try:
+        new_status = ProposalStatus(new_status_str)
+    except ValueError:
+        raise HTTPException(400, f"Invalid status: {new_status_str}")
+    if new_status not in (ProposalStatus.approved, ProposalStatus.rejected):
+        raise HTTPException(400, "Can only set status to approved or rejected")
+
+    proposal.status = new_status
+    await db.commit()
+    return {"ok": True, "id": str(proposal_id), "status": new_status.value}
+
+
+@router.post("/learning/apply")
+async def apply_proposals(body: ApplyProposalsRequest, db: DB):
+    """
+    Apply ONLY 'approved' proposals — writes to TOML and hot-reloads phrasebook.
+    """
+    from datetime import datetime, timezone
+    from backend.models.learning_proposal import LearningProposal, ProposalStatus
+    from backend.services.learning.proposal_store import append_to_toml, hot_reload_phrasebook
+
+    applied = []
+    for pid in body.proposal_ids:
+        proposal = await db.get(LearningProposal, pid)
+        if not proposal:
+            raise HTTPException(404, f"Proposal {pid} not found")
+        if proposal.status != ProposalStatus.approved:
+            raise HTTPException(400, f"Proposal {pid} is not in 'approved' status")
+
+        append_to_toml(proposal.proposed_text)
+        proposal.status = ProposalStatus.applied
+        proposal.applied_at = datetime.now(timezone.utc)
+        applied.append(str(pid))
+
+    await db.commit()
+    hot_reload_phrasebook()
+    return {"applied": len(applied), "proposal_ids": applied}

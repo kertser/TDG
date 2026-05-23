@@ -345,6 +345,25 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     blue_units = [u for u in all_units if not u.is_destroyed and u.side.value == "blue"]
     red_units = [u for u in all_units if not u.is_destroyed and u.side.value == "red"]
 
+    # ── 1a. Battlefield friction (morale freeze, comms decay, nav drift) ──
+    friction_events = _apply_friction(all_units, tick)
+    all_events.extend(friction_events)
+
+    # ── 1a2. Intent cascade: propagate HQ orders to direct subordinates ──
+    from backend.engine.intent_cascade import process_intent_cascade
+    _explicitly_ordered = {
+        str(evt["actor_unit_id"])
+        for evt in order_events
+        if evt.get("event_type") == "order_issued"
+        and evt.get("actor_unit_id")
+        and not (evt.get("payload") or {}).get("cascade")
+    }
+    cascade_events = process_intent_cascade(all_units, tick, _explicitly_ordered)
+    all_events.extend(cascade_events)
+
+    # Initialise deterministic victory result slot (evaluated after step 5c)
+    _det_victory: dict | None = None
+
     # ── 1b. Resolve attack targets from contacts ──────────────
     # For units with attack/engage task but no target_location, find the nearest
     # known enemy contact and set it as the movement target so they advance.
@@ -536,6 +555,10 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     _t_waypoints = time.monotonic() - _t0
     if _debug:
         dlog(f"  [1.5] Waypoints: {_t_waypoints:.2f}s")
+
+    # ── 1.9. Overwatch: units in overwatch position auto-engage enemies ──
+    overwatch_events = _process_overwatch(all_units, terrain, tick)
+    all_events.extend(overwatch_events)
 
     # ── 2. Execute movement (with obstacle effects) ──────────
     _t0 = time.monotonic()
@@ -737,6 +760,15 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                     new_task["path_calc_tick"] = -999
 
                 unit.current_task = new_task
+
+    # ── 3d. Air defense: MANPADS / SAM engage aviation units ─────────────
+    ad_events = _process_air_defense(all_units, terrain, tick)
+    all_events.extend(ad_events)
+
+    # ── 3e. LZ/PZ risk: aviation units at hot landing zones ──────────────
+    from backend.engine.map_objects import process_lz_risk
+    lz_events = process_lz_risk(all_units, map_objects_list, tick)
+    all_events.extend(lz_events)
 
     # ── 4. Decay stale contacts ──────────────────────────────────
     result = await db.execute(
@@ -945,6 +977,19 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
             target_uid = task.get("target_unit_id")
             if target_uid and str(target_uid) in destroyed_ids:
                 u.current_task = None
+
+    # ── 5d. Objective control + deterministic (no-LLM) victory check ────
+    from backend.engine.objective_control import (
+        process_objective_control,
+        check_deterministic_victory as _check_det_victory,
+    )
+    obj_ctrl_events = process_objective_control(
+        all_units, scenario, grid_service, tick, _sid_str
+    )
+    all_events.extend(obj_ctrl_events)
+    _det_victory = _check_det_victory(
+        all_units, scenario, tick, obj_ctrl_events, _sid_str
+    )
 
     # ── 6. Suppression recovery ──────────────────────────────
     process_suppression_recovery(all_units, under_fire)
@@ -1160,6 +1205,20 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
     game_finished = False
     victory_result = None
 
+    # ── 11b-i. Deterministic victory check result (evaluated at step 5d) ──
+    if _det_victory and _det_victory.get("winner"):
+        session.status = SessionStatus.finished
+        game_finished = True
+        all_events.append({
+            "event_type": "game_finished",
+            "text_summary": _det_victory.get("summary", "Victory conditions met."),
+            "payload": {
+                "reason": "deterministic_victory",
+                "winner": _det_victory["winner"],
+                "detail": _det_victory.get("detail", ""),
+            },
+        })
+
     if turn_limit and session.tick >= turn_limit:
         session.status = SessionStatus.finished
         game_finished = True
@@ -1169,8 +1228,8 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
             "payload": {"reason": "turn_limit", "turn_limit": turn_limit},
         })
 
-    # ── 11c. Evaluate victory conditions (AI referee) ────────────
-    if scenario and scenario.objectives and isinstance(scenario.objectives, dict):
+    # ── 11c. Evaluate victory conditions (AI referee, only if not already decided) ──
+    if not game_finished and scenario and scenario.objectives and isinstance(scenario.objectives, dict):
         victory_blue_cond = scenario.objectives.get("victory_blue")
         victory_red_cond = scenario.objectives.get("victory_red")
         if victory_blue_cond or victory_red_cond:
@@ -1204,6 +1263,41 @@ async def run_tick(session_id: uuid.UUID, db: AsyncSession) -> dict:
                         "detail": victory_result.get("detail", ""),
                     },
                 })
+
+    # ── 10d. Tick snapshot for replay (every N ticks) ────────────
+    _SNAPSHOT_INTERVAL = 5
+    if tick % _SNAPSHOT_INTERVAL == 0:
+        _snap_units = []
+        for _u in all_units:
+            if _u.position is None:
+                continue
+            try:
+                _u_pt = to_shape(_u.position)
+                _u_side = _u.side.value if hasattr(_u.side, "value") else str(_u.side)
+                _snap_units.append({
+                    "unit_id": str(_u.id),
+                    "lat": _u_pt.y,
+                    "lon": _u_pt.x,
+                    "side": _u_side,
+                    "name": _u.name,
+                    "strength": _u.strength,
+                    "is_destroyed": _u.is_destroyed,
+                    "task_type": (_u.current_task or {}).get("type"),
+                    "heading_deg": _u.heading_deg,
+                })
+            except Exception:
+                pass
+        if _snap_units:
+            db.add(Event(
+                session_id=session_id,
+                tick=tick,
+                game_timestamp=game_time,
+                event_type="tick_snapshot",
+                visibility="admin",
+                actor_unit_id=None,
+                payload={"units": _snap_units, "tick": tick},
+                text_summary=None,
+            ))
 
     await db.flush()
 
@@ -1523,6 +1617,314 @@ def _apply_waypoint_results(all_units: list, results: dict):
         unit.current_task = new_task
 
 
+# ── Overwatch processing ──────────────────────────────────────────────────────
+
+_OVERWATCH_WEAPONS_RANGE_DEFAULT = 1500.0  # m — fallback
+
+def _process_overwatch(all_units: list, terrain, tick: int) -> list[dict]:
+    """
+    Units with task.type == "overwatch" auto-fire at enemies who enter their sector.
+
+    Overwatch task fields:
+      sector_center_bearing: float (compass degrees, 0–360) — centre of covered arc
+      sector_width_deg: float (degrees, e.g. 60) — half-arc on each side
+      max_range_m: float (optional) — max engagement range
+      overwatch_side: str — attacking side identifier (filled from unit.side)
+
+    Firing logic:
+      - If an enemy unit is within max_range_m AND within the sector arc:
+        → assign a fire task to this unit toward the enemy (2 salvos).
+        → if already firing, skip (don't interrupt ongoing fire).
+    """
+    from backend.engine.combat import WEAPON_RANGE, BASE_FIREPOWER, _get_position
+    events = []
+
+    # Pre-index all units by position for quick lookup
+    units_by_side: dict[str, list] = {}
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        side = u.side.value if hasattr(u.side, "value") else str(u.side)
+        units_by_side.setdefault(side, []).append(u)
+
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        task = unit.current_task
+        if not task or task.get("type") != "overwatch":
+            continue
+
+        # Don't interrupt ongoing fire from a previous overwatch trigger
+        if task.get("overwatch_firing"):
+            continue
+
+        pos = _get_position(unit)
+        if pos is None:
+            continue
+        u_lat, u_lon = pos
+
+        sector_bearing = float(task.get("sector_center_bearing", 0.0))
+        sector_width = float(task.get("sector_width_deg", 60.0))
+        max_range = float(task.get("max_range_m") or WEAPON_RANGE.get(unit.unit_type, _OVERWATCH_WEAPONS_RANGE_DEFAULT))
+
+        unit_side = unit.side.value if hasattr(unit.side, "value") else str(unit.side)
+        enemy_side = "red" if unit_side == "blue" else "blue"
+
+        for enemy in units_by_side.get(enemy_side, []):
+            e_pos = _get_position(enemy)
+            if e_pos is None:
+                continue
+            e_lat, e_lon = e_pos
+            dlat = (e_lat - u_lat) * _M_PER_DEG_LAT
+            dlon = (e_lon - u_lon) * _M_PER_DEG_LON_48
+            dist = (dlat * dlat + dlon * dlon) ** 0.5
+            if dist > max_range:
+                continue
+
+            # Bearing from unit to enemy (compass degrees, 0=north)
+            bearing_to_enemy = math.degrees(math.atan2(dlon, dlat)) % 360.0
+            # Angular distance from sector centre
+            angle_diff = abs(bearing_to_enemy - sector_bearing)
+            if angle_diff > 180.0:
+                angle_diff = 360.0 - angle_diff
+            if angle_diff > sector_width / 2.0:
+                continue  # enemy outside sector arc
+
+            # Enemy in sector and in range — trigger fire
+            new_task = dict(task)
+            new_task["overwatch_firing"] = True
+            new_task["overwatch_fire_target_id"] = str(enemy.id)
+            new_task["target_unit_id"] = str(enemy.id)
+            new_task["target_location"] = {"lat": e_lat, "lon": e_lon}
+            new_task["salvos_remaining"] = 2
+            unit.current_task = new_task
+
+            events.append({
+                "event_type": "overwatch_engaged",
+                "actor_unit_id": unit.id,
+                "target_unit_id": enemy.id,
+                "text_summary": (
+                    f"{unit.name} (overwatch) engaging {enemy.name} at "
+                    f"{dist:.0f}m bearing {bearing_to_enemy:.0f}°"
+                ),
+                "payload": {
+                    "overwatch": True,
+                    "dist_m": round(dist, 1),
+                    "bearing": round(bearing_to_enemy, 1),
+                    "sector_bearing": sector_bearing,
+                },
+                "visibility": unit_side,
+            })
+            break  # engage first visible enemy per tick
+
+    return events
+
+
+# ── Air defense processing ────────────────────────────────────────────────────
+
+AVIATION_UNIT_TYPES_SET = {
+    "attack_helicopter", "transport_helicopter", "recon_uav",
+}
+
+AD_UNIT_TYPES = {
+    "manpads_team", "manpads_section",
+    "sam_section", "sam_battery",
+    "aa_gun_section",
+}
+
+AD_RANGE_M = {
+    "manpads_team": 3000,
+    "manpads_section": 3500,
+    "sam_section": 8000,
+    "sam_battery": 12000,
+    "aa_gun_section": 2500,
+}
+
+AD_HIT_PROBABILITY = {
+    "manpads_team": 0.55,
+    "manpads_section": 0.65,
+    "sam_section": 0.75,
+    "sam_battery": 0.80,
+    "aa_gun_section": 0.45,
+}
+
+def _process_air_defense(all_units: list, terrain, tick: int) -> list[dict]:
+    """
+    Air-defense units (MANPADS/SAM) engage aviation units within range.
+
+    Deterministic roll: hash(tick, ad_id, target_id) mod 100 < hit_pct
+    One shot per AD unit per tick.  On hit: target.strength -= 0.3 (critical hit to rotary).
+    """
+    from backend.engine._rng import deterministic_roll
+    events = []
+
+    for ad_unit in all_units:
+        if ad_unit.is_destroyed:
+            continue
+        if ad_unit.unit_type not in AD_UNIT_TYPES:
+            continue
+        if ad_unit.ammo is not None and ad_unit.ammo <= 0.05:
+            continue
+
+        ad_pos = None
+        if ad_unit.position:
+            try:
+                from geoalchemy2.shape import to_shape
+                pt = to_shape(ad_unit.position)
+                ad_pos = (pt.y, pt.x)
+            except Exception:
+                continue
+        if ad_pos is None:
+            continue
+
+        ad_side = ad_unit.side.value if hasattr(ad_unit.side, "value") else str(ad_unit.side)
+        range_m = AD_RANGE_M.get(ad_unit.unit_type, 3000)
+        hit_prob = AD_HIT_PROBABILITY.get(ad_unit.unit_type, 0.5)
+
+        for target in all_units:
+            if target.is_destroyed:
+                continue
+            if target.unit_type not in AVIATION_UNIT_TYPES_SET:
+                continue
+            t_side = target.side.value if hasattr(target.side, "value") else str(target.side)
+            if t_side == ad_side:
+                continue  # friendly aviation
+
+            if target.position is None:
+                continue
+            try:
+                from geoalchemy2.shape import to_shape as _ts
+                t_pt = _ts(target.position)
+                t_lat, t_lon = t_pt.y, t_pt.x
+            except Exception:
+                continue
+
+            dlat = (t_lat - ad_pos[0]) * _M_PER_DEG_LAT
+            dlon = (t_lon - ad_pos[1]) * _M_PER_DEG_LON_48
+            dist = (dlat * dlat + dlon * dlon) ** 0.5
+            if dist > range_m:
+                continue
+
+            # Deterministic hit roll
+            roll = deterministic_roll(tick, str(ad_unit.id), str(target.id), 100) / 100.0
+            if roll < hit_prob:
+                damage = 0.30  # aviation absorbs one hit poorly
+                target.strength = max(0.0, (target.strength or 1.0) - damage)
+                target.suppression = min(1.0, (target.suppression or 0.0) + 0.5)
+                if ad_unit.ammo is not None:
+                    ad_unit.ammo = max(0.0, ad_unit.ammo - 0.15)
+                destroyed = target.strength <= 0.0
+                if destroyed:
+                    target.is_destroyed = True
+                events.append({
+                    "event_type": "unit_destroyed" if destroyed else "combat",
+                    "actor_unit_id": ad_unit.id,
+                    "target_unit_id": target.id,
+                    "text_summary": (
+                        f"{ad_unit.name} shot down {target.name}!"
+                        if destroyed else
+                        f"{ad_unit.name} scored hit on {target.name} ({dist:.0f}m)"
+                    ),
+                    "payload": {
+                        "air_defense": True,
+                        "dist_m": round(dist, 1),
+                        "damage": round(damage, 3),
+                        "destroyed": destroyed,
+                    },
+                    "visibility": "all",
+                })
+            break  # one engagement per AD unit per tick
+
+    return events
+
+
+# ── Battlefield friction ──────────────────────────────────────────────────────
+
+def _apply_friction(all_units: list, tick: int) -> list[dict]:
+    """
+    Simulate fog-of-war and battlefield friction once per tick (right after unit load).
+
+    Three effects:
+      1. Morale freeze   — units below 0.10 morale refuse offensive tasks and halt.
+      2. Comms decay     — units with comms_status == 'offline' for >10 ticks lose
+                          their current task (orders don't get through).
+      3. Suppression drift — heavily suppressed units (>0.80) get a small deterministic
+                            jitter added to their nav target, degrading movement accuracy.
+    """
+    from backend.engine._rng import deterministic_roll
+
+    events: list[dict] = []
+
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+
+        side = unit.side.value if hasattr(unit.side, "value") else str(unit.side)
+
+        # ── Effect 1: morale freeze ─────────────────────────────────────
+        morale = unit.morale if unit.morale is not None else 1.0
+        if morale < 0.10 and unit.current_task:
+            task_type = (unit.current_task or {}).get("type", "")
+            if task_type not in ("halt", "defend", "disengage", "withdraw"):
+                unit.current_task = {"type": "halt", "friction_freeze": True}
+                events.append({
+                    "event_type": "friction_morale_freeze",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} frozen by critical morale ({morale:.0%})",
+                    "visibility": side,
+                    "payload": {"morale": round(morale, 2)},
+                })
+                continue
+
+        # ── Effect 2: comms offline → order decay after prolonged cut-off ──
+        comms_val = ""
+        if unit.comms_status is not None:
+            comms_val = (
+                unit.comms_status.value
+                if hasattr(unit.comms_status, "value")
+                else str(unit.comms_status)
+            )
+        if comms_val == "offline" and unit.current_task:
+            task = unit.current_task
+            # Use path_calc_tick as a proxy for when the order was issued
+            task_tick = task.get("issued_tick") or task.get("path_calc_tick")
+            if task_tick is not None and isinstance(task_tick, int) and tick - task_tick > 10:
+                unit.current_task = None
+                events.append({
+                    "event_type": "friction_comms_order_decay",
+                    "actor_unit_id": unit.id,
+                    "text_summary": (
+                        f"{unit.name} lost orders — comms offline for >{10} ticks"
+                    ),
+                    "visibility": side,
+                    "payload": {},
+                })
+                continue
+
+        # ── Effect 3: nav drift under heavy suppression ─────────────────
+        supp = unit.suppression if unit.suppression is not None else 0.0
+        if supp > 0.80 and unit.current_task:
+            task = unit.current_task
+            task_type = task.get("type", "")
+            target = task.get("target_location")
+            if task_type in ("move", "attack", "advance") and target:
+                roll = deterministic_roll(tick, str(unit.id), "friction_drift")
+                # Probability scales from 0 at supp=0.80 up to ~20 % at supp=1.0
+                if roll < (supp - 0.80) * 1.0:
+                    jitter_lat = (deterministic_roll(tick, str(unit.id), "jlat") - 0.5) * 0.0009  # ±~50 m
+                    jitter_lon = (deterministic_roll(tick, str(unit.id), "jlon") - 0.5) * 0.0012
+                    new_task = dict(task)
+                    new_task["target_location"] = {
+                        "lat": float(target.get("lat", 0.0)) + jitter_lat,
+                        "lon": float(target.get("lon", 0.0)) + jitter_lon,
+                    }
+                    new_task.pop("waypoints", None)
+                    new_task["path_calc_tick"] = -999
+                    unit.current_task = new_task
+
+    return events
+
+
 async def _process_orders(
     session_id: uuid.UUID,
     tick: int,
@@ -1599,6 +2001,46 @@ async def _process_orders(
             continue
 
         task_type = task.get("type", "")
+        parsed_order_data = order.parsed_order or {}
+
+        # ── §7 FRAGO: patch existing task instead of replacing ────
+        if parsed_order_data.get("is_frago") and parsed_order_data.get("frago_patch") and unit.current_task:
+            patch = parsed_order_data["frago_patch"]
+            current_task = dict(unit.current_task)
+            for key, val in patch.items():
+                if val is not None:
+                    current_task[key] = val
+            if any(k in patch for k in ("target_location", "target_snail", "target_unit_id")):
+                current_task.pop("waypoints", None)
+                current_task["path_calc_tick"] = -999
+            unit.current_task = current_task
+            order.status = OrderStatus.completed
+            events.append({
+                "event_type": "order_issued",
+                "actor_unit_id": unit_uuid,
+                "text_summary": f"{unit.name} received FRAGO — task updated",
+                "payload": {"order_id": str(order.id), "patch": patch},
+            })
+            processed_order_ids.add(str(order.id))
+            continue
+
+        if task_type == "warno":
+            # WARNO: Warning Order — unit enters readiness state, small ammo/morale bonus
+            warned_for = task.get("warning_for") or parsed_order_data.get("warning_for")
+            caps = dict(unit.capabilities or {})
+            caps["warno_state"] = {"warned_for": warned_for, "since_tick": tick}
+            unit.capabilities = caps
+            unit.ammo = min(1.0, (unit.ammo or 0.8) + 0.01)
+            unit.morale = min(1.0, (unit.morale or 0.8) + 0.01)
+            order.status = OrderStatus.completed
+            events.append({
+                "event_type": "order_issued",
+                "actor_unit_id": unit_uuid,
+                "text_summary": f"{unit.name} received WARNO — preparing for {warned_for or 'upcoming mission'}",
+                "payload": {"order_id": str(order.id), "task": task},
+            })
+            processed_order_ids.add(str(order.id))
+            continue
 
         if task_type == "halt":
             # Halt: clear current task
@@ -1653,6 +2095,13 @@ async def _process_orders(
         else:
             # Assign the task
             unit.current_task = task
+
+            # ── §9 WARNO bonus: unit was pre-warned → +morale on real order ──
+            caps_now = dict(unit.capabilities or {})
+            warno_state = caps_now.pop("warno_state", None)
+            if warno_state and warno_state.get("warned_for") == task_type:
+                unit.morale = min(1.0, (unit.morale or 0.8) + 0.05)
+                unit.capabilities = caps_now  # save with warno_state removed
 
             # Apply move speed from order if specified
             speed_label = task.get("speed")
@@ -1908,6 +2357,18 @@ def _order_to_task(order: Order) -> dict | None:
         if any(kw in text for kw in ["airstrike", "air strike", "close air support", "attack run",
                                       "авиаудар", "удар с воздуха"]):
             return {"type": "airstrike", "order_id": str(order.id)}
+        # §4 Overwatch
+        if any(kw in text for kw in ["overwatch position", "take overwatch", "рубеж перекрытия",
+                                      "при обнаружении противника"]):
+            return {"type": "overwatch", "order_id": str(order.id)}
+        # §7 WARNO
+        if any(kw in text for kw in ["warno", "warning order", "варно", "await execute order",
+                                      "ждите боевого приказа"]):
+            return {"type": "warno", "order_id": str(order.id)}
+        # §6 Decontaminate
+        if any(kw in text for kw in ["decontaminate", "дезактивац", "химическое заражение",
+                                      "ликвидируйте заражение", "провести дезактивацию"]):
+            return {"type": "decontaminate", "order_id": str(order.id)}
 
     return None
 

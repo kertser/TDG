@@ -28,6 +28,10 @@ LOGISTICS_UNIT_AMMO_RATE = 0.08    # ammo restored per tick from logistics unit
 LOGISTICS_UNIT_STRENGTH_RATE = 0.003
 RESUPPLY_COMPLETE_THRESHOLD = 0.95 # ammo level at which resupply is considered complete
 
+# Fuel resupply rates (matching §5 in plan)
+SUPPLY_CACHE_FUEL_RATE   = 0.08    # fuel restored per tick from supply cache
+LOGISTICS_UNIT_FUEL_RATE = 0.06    # fuel restored per tick from logistics unit
+
 # Unit types that can act as mobile supply points
 LOGISTICS_UNIT_TYPES = {
     "logistics_platoon", "logistics_section",
@@ -229,6 +233,14 @@ def process_resupply(
                 strength = unit.strength if unit.strength is not None else 1.0
                 if strength < 1.0:
                     unit.strength = min(1.0, strength + SUPPLY_CACHE_STRENGTH_RATE)
+                # Fuel resupply from supply cache
+                from backend.engine.movement import FUEL_CONSUMING_UNIT_TYPES
+                if unit.unit_type in FUEL_CONSUMING_UNIT_TYPES:
+                    caps = dict(unit.capabilities or {})
+                    old_fuel = float(caps.get("fuel", 1.0))
+                    if old_fuel < 1.0:
+                        caps["fuel"] = min(1.0, old_fuel + SUPPLY_CACHE_FUEL_RATE)
+                        unit.capabilities = caps
                 resupplied_from_cache = True
                 if old_ammo < 0.5 and ammo >= 0.5:
                     events.append({
@@ -256,6 +268,14 @@ def process_resupply(
                     strength = unit.strength if unit.strength is not None else 1.0
                     if strength < 1.0:
                         unit.strength = min(1.0, strength + LOGISTICS_UNIT_STRENGTH_RATE)
+                    # Fuel resupply from logistics unit
+                    from backend.engine.movement import FUEL_CONSUMING_UNIT_TYPES
+                    if unit.unit_type in FUEL_CONSUMING_UNIT_TYPES:
+                        caps = dict(unit.capabilities or {})
+                        old_fuel = float(caps.get("fuel", 1.0))
+                        if old_fuel < 1.0:
+                            caps["fuel"] = min(1.0, old_fuel + LOGISTICS_UNIT_FUEL_RATE)
+                            unit.capabilities = caps
                     if old_ammo < 0.5 and ammo >= 0.5:
                         events.append({
                             "event_type": "resupply",

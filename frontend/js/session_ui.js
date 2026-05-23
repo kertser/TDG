@@ -59,6 +59,11 @@ const KSessionUI = (() => {
             if (renameBtn) renameBtn.addEventListener('click', _renameCurrentUser);
             const settingsBtn = document.getElementById('user-menu-settings');
             if (settingsBtn) settingsBtn.addEventListener('click', _openSettings);
+            const tutorialBtn = document.getElementById('user-menu-tutorial');
+            if (tutorialBtn) tutorialBtn.addEventListener('click', () => {
+                userDropdown.style.display = 'none';
+                if (typeof KTutorial !== 'undefined') KTutorial.start();
+            });
             const menuLogout = document.getElementById('user-menu-logout');
             if (menuLogout) menuLogout.addEventListener('click', () => { userDropdown.style.display = 'none'; _doLogout(); });
         }
@@ -340,11 +345,15 @@ const KSessionUI = (() => {
         document.getElementById('auth-panel').style.display = 'none';
         document.getElementById('session-panel').style.display = 'block';
 
-
         // Show admin topbar button (any logged-in user can see it;
         // the password gate inside the admin tab handles security)
         const adminTopBtn = document.getElementById('admin-topbar-btn');
         if (adminTopBtn) adminTopBtn.style.display = '';
+
+        // Auto-start tutorial for new users
+        if (!data.tutorial_completed) {
+            if (typeof KTutorial !== 'undefined') KTutorial.startIfNeeded();
+        }
 
         loadSessions();
     }

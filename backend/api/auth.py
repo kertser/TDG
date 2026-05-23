@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from backend.api.deps import DB
+from backend.api.deps import DB, get_current_user, CurrentUser
 from backend.config import settings
 from backend.models.user import User
 
@@ -39,6 +39,7 @@ class TokenResponse(BaseModel):
     user_id: str
     display_name: str
     token: str
+    tutorial_completed: bool = False
 
 
 def _create_token(user_id: str) -> str:
@@ -71,7 +72,12 @@ async def register(body: RegisterRequest, db: DB):
     db.add(user)
     await db.flush()
     token = _create_token(str(user.id))
-    return TokenResponse(user_id=str(user.id), display_name=user.display_name, token=token)
+    return TokenResponse(
+        user_id=str(user.id),
+        display_name=user.display_name,
+        token=token,
+        tutorial_completed=False,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -95,5 +101,18 @@ async def login(body: LoginRequest, db: DB):
             raise HTTPException(status_code=401, detail="Invalid password")
 
     token = _create_token(str(user.id))
-    return TokenResponse(user_id=str(user.id), display_name=user.display_name, token=token)
+    return TokenResponse(
+        user_id=str(user.id),
+        display_name=user.display_name,
+        token=token,
+        tutorial_completed=bool(user.tutorial_completed),
+    )
+
+
+@router.post("/tutorial-complete")
+async def mark_tutorial_complete(db: DB, current_user: CurrentUser):
+    """Mark the current user's tutorial as completed."""
+    current_user.tutorial_completed = True
+    await db.commit()
+    return {"ok": True}
 

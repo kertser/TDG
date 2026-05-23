@@ -1358,6 +1358,15 @@ class OrderParser:
             # "check fire" / "cease fire" / "прекратить огонь" → halt (cease fire)
             _cease_fire_kw = ["check fire", "cease fire", "прекратить огонь", "прекрати огонь"]
             _has_cease_fire = _has_any(_cease_fire_kw)
+            # Fire observer: designate_target / adjust_fire (§3)
+            _has_designate_target = _has_any(order_detection_lexicon.get("designate_target", []))
+            _has_adjust_fire_kw   = _has_any(order_detection_lexicon.get("adjust_fire", []))
+            # §4 Overwatch / рубеж перекрытия (positional auto-fire)
+            _has_overwatch_pos = _has_any(order_detection_lexicon.get("overwatch_position", []))
+            # §7 WARNO / warning order
+            _has_warno_order = _has_any(order_detection_lexicon.get("warno_order", []))
+            # §6 Decontaminate / CBRN
+            _has_decontaminate_order = _has_any(order_detection_lexicon.get("decontaminate", []))
 
             # Determine order type — logic order matters!
             # 1. Standby for support → observe
@@ -1373,6 +1382,15 @@ class OrderParser:
             elif _has_cease_fire:
                 # "Check fire", "Cease fire", "Прекратить огонь" → halt (stop shooting)
                 order_type = "halt"
+            elif _has_warno_order:
+                # WARNO / "warning order follows" — preparatory order
+                order_type = "warno"
+            elif _has_designate_target:
+                # "Mark target for artillery" -> designate_target
+                order_type = "designate_target"
+            elif _has_adjust_fire_kw and not _has_fire_adjustment:
+                # "Correct fire", adjust -> adjust_fire
+                order_type = "adjust_fire"
             elif _has_split_order:
                 order_type = "split"
             elif _has_merge_order:
@@ -1383,6 +1401,9 @@ class OrderParser:
                 order_type = "lay_mines"
             elif _has_deploy_bridge_order:
                 order_type = "deploy_bridge"
+            elif _has_decontaminate_order:
+                # Engineer CBRN decontamination (§6)
+                order_type = "decontaminate"
             elif _has_construct_order:
                 order_type = "construct"
             elif _has_smoke_fire_order and _is_request_fire:
@@ -1393,6 +1414,9 @@ class OrderParser:
                 # "Request artillery support", "Direct artillery at enemy" → request_fire
                 # This creates a fire request to CoC artillery
                 order_type = "request_fire"
+            elif _has_overwatch_pos:
+                # Positional overwatch — hold and auto-fire in sector
+                order_type = "overwatch"
             elif _has_support_by_fire:
                 order_type = "support"
                 maneuver_kind = "support_by_fire"
@@ -1403,9 +1427,677 @@ class OrderParser:
                 # Direct fire commands → fire
                 order_type = "fire"
             elif _has_fire_adjustment:
-                # "Adjust fire", "Корректировка", "Fire for effect" → fire
-                order_type = "fire"
+                # "Adjust fire", "Корректировка", "Fire for effect" → adjust_fire
+                order_type = "adjust_fire"
             elif _has_fire_direction:
+                # "Concentrate fire on", "Сосредоточить огонь" → fire
+                order_type = "fire"
+            elif _has_any(order_detection_lexicon["suppression"]):
+                # Suppression orders → fire
+                order_type = "fire"
+            elif not _is_coordination and _has_any(order_detection_lexicon["fire_support_general"]):
+                # "Request artillery support on grid X" → fire (but not if it's coordination)
+                order_type = "fire"
+            elif _has_any(order_detection_lexicon["fire_at_will_attack"]):
+                # "Hit any enemy target in your sight" → engage (fire at targets of opportunity)
+                order_type = "attack"
+                engagement_rules = "fire_at_will"
+            elif _is_coordination and coordination_unit_refs:
+                order_type = "support"
+            elif _has_screen_mission:
+                order_type = "observe"
+            elif _has_flank_maneuver and _has_enemy_reference:
+                order_type = "attack"
+                maneuver_kind = "flank"
+            elif _has_delay_mission:
+                order_type = "disengage"
+            elif re.search(r"\bdisengage\b", text_lower):
+                order_type = "disengage"
+            elif _has_halt_order:
+                order_type = "halt"
+            elif _has_defend_order:
+                order_type = "defend"
+            # Check attack/eliminate BEFORE move: "Move to X. Eliminate enemy" should be attack
+            elif _has_any(order_detection_lexicon["attack"]):
+                order_type = "attack"
+            elif _has_air_mobility_order:
+                order_type = "move"
+            elif _has_screen_mission or _has_any(order_detection_lexicon["observe"]):
+                order_type = "observe"
+            elif (
+                re.search(r"\bmove\b", text_lower) is not None
+                or _has_any(order_detection_lexicon["move"])
+            ):
+                order_type = "move"
+                if _has_follow_maneuver:
+                    maneuver_kind = "follow"
+                elif _has_bounding_maneuver:
+                    maneuver_kind = "bounding"
+            elif _has_any(order_detection_lexicon["simple_defend"]):
+                order_type = "defend"
+            elif _has_any(order_detection_lexicon["disengage"]):
+                order_type = "disengage"
+            elif _has_withdraw_order:
+                order_type = "withdraw"
+            elif _has_any(order_detection_lexicon["halt"]):
+                order_type = "halt"
+            elif _has_any(order_detection_lexicon["resupply"]):
+                order_type = "resupply"
+            # ── Aviation orders ──
+            elif _has_any(order_detection_lexicon.get("air_assault", [])):
+                order_type = "air_assault"
+            elif _has_any(order_detection_lexicon.get("casevac", [])):
+                order_type = "casevac"
+            elif _has_any(order_detection_lexicon.get("airstrike", [])):
+                order_type = "airstrike"
+            elif _has_regroup_order:
+                order_type = "move"  # regroup = move to rally point
+            elif _has_follow_maneuver:
+                order_type = "move"
+                maneuver_kind = "follow"
+
+            # ── Fallback: command with location but no order type → move ──
+            # Colloquial phrases like "давай к F7-5-6" are commands but don't
+            # match any specific order detection, yet having a location implies movement.
+            if order_type is None and classification == MessageClassification.command:
+                _has_loc = bool(location_refs) if 'location_refs' in dir() else False
+                if not _has_loc:
+                    # Pre-check for locations in text (snail or grid patterns)
+                    _has_loc = bool(re.search(r'[A-Za-z]\d+(?:-\d)', text))
+                if _has_loc:
+                    order_type = "move"
+
+        # Extract snail/grid references with regex
+        location_refs = []
+        # Match patterns like B8-2-4, C7-8-3, A1-1
+        snail_pattern = re.compile(r'[A-Za-z]\d+(?:-\d){1,3}')
+        for m in snail_pattern.finditer(text):
+            location_refs.append({
+                "source_text": m.group(),
+                "ref_type": "snail",
+                "normalized": m.group().upper(),
+            })
+        # Match grid squares like B8, C7
+        grid_pattern = re.compile(r'\b([A-Za-z])(\d{1,2})\b')
+        for m in grid_pattern.finditer(text):
+            full = m.group().upper()
+            # Don't duplicate if already caught as snail
+            if not any(lr["normalized"].startswith(full) for lr in location_refs):
+                location_refs.append({
+                    "source_text": m.group(),
+                    "ref_type": "grid",
+                    "normalized": full,
+                })
+
+        # Match coordinate patterns: "48.8566,2.3522" or "48.8566, 2.3522"
+        # Also "координаты 48.8566, 2.3522", "coords 48.8566 2.3522"
+        coord_pattern = re.compile(
+            r'(?:координат\w*|coords?|точк\w*|point)?\s*'
+            r'(-?\d{1,3}\.\d{2,8})\s*[,;\s]\s*(-?\d{1,3}\.\d{2,8})',
+            re.IGNORECASE,
+        )
+        for m in coord_pattern.finditer(text):
+            coord_str = f"{m.group(1)},{m.group(2)}"
+            # Don't duplicate
+            if not any(lr["normalized"] == coord_str for lr in location_refs):
+                location_refs.append({
+                    "source_text": m.group().strip(),
+                    "ref_type": "coordinate",
+                    "normalized": coord_str,
+                })
+
+        # Match height/elevation references: "height 170", "высота 170", "выс. 250"
+        height_pattern = re.compile(
+            r'(?:height|hill|elevation|высот[аыеу]|выс\.?|отм\.?|отметк[аеу])\s*(\d+(?:\.\d+)?)',
+            re.IGNORECASE,
+        )
+        for m in height_pattern.finditer(text):
+            height_val = m.group(1)
+            height_norm = f"height {height_val}"
+            if not any(lr["normalized"] == height_norm for lr in location_refs):
+                location_refs.append({
+                    "source_text": m.group().strip(),
+                    "ref_type": "height",
+                    "normalized": height_norm,
+                })
+
+        # Match named map objects: airfield, bridge, hospital, fuel depot, etc.
+        obj_pattern = re.compile(
+            r'\b(airfield|bridge|fuel\s+depot|hospital|command\s+post|supply\s+cache'
+            r'|observation\s+tower|pillbox|roadblock|bunker|crossing|minefield'
+            r'|trench|entrenchment|wire|smoke(?:\s+screen)?|anti-tank\s+ditch'
+            r'|аэродром|мост|переправ\w*|госпиталь|медпункт|склад|заправк\w*'
+            r'|кп|командный\s+пункт|вышк\w*|дот|дзот|блокпост|минн\w+\s+пол\w*'
+            r'|окоп\w*|транше\w*|проволок\w*|дым\w*|противотанков\w+\s+ров\w*)\b',
+            re.IGNORECASE,
+        )
+        for m in obj_pattern.finditer(text):
+            obj_text = m.group().strip()
+            if not any(lr["source_text"].lower() == obj_text.lower() for lr in location_refs):
+                location_refs.append({
+                    "source_text": obj_text,
+                    "ref_type": "map_object",
+                    "normalized": obj_text.lower(),
+                })
+
+        map_object_patterns = location_lexicon["map_object_patterns"]
+        for entry in map_object_patterns:
+            candidate_type = entry["name"]
+            patterns = entry["patterns"]
+            if any(pattern in text_lower for pattern in patterns):
+                map_object_type = candidate_type
+                break
+
+        if order_type == "lay_mines" and map_object_type is None:
+            map_object_type = "minefield"
+
+        has_resolved_location = any(
+            lr["ref_type"] in {"snail", "grid", "coordinate", "height", "map_object"}
+            for lr in location_refs
+        )
+        implied_contact_target = (
+            _has_enemy_reference
+            or _has_any(order_detection_lexicon["implied_contact_target"])
+        )
+        if (
+            classification == MessageClassification.command
+            and order_type in ("attack", "fire", "request_fire")
+            and not has_resolved_location
+            and implied_contact_target
+        ):
+            location_refs.append({
+                "source_text": "current contact",
+                "ref_type": "contact_target",
+                "normalized": "current_contact",
+            })
+
+        # ── Implicit target from "на цель" / "по цели" / "at the target" ──
+        # When no explicit location is given but text says "at the target" / "на цель",
+        # this means "at the enemy we've been tracking" → resolve from nearest contact.
+        _target_phrases_ru = order_detection_lexicon["target_phrases_ru"]
+        _target_phrases_en = order_detection_lexicon["target_phrases_en"]
+        _has_explicit_location = any(lr["ref_type"] in ("snail", "grid", "coordinate", "height")
+                                     for lr in location_refs)
+        if not _has_explicit_location:
+            _target_match = None
+            for phrase in _target_phrases_ru + _target_phrases_en:
+                if phrase in text_lower:
+                    _target_match = phrase
+                    break
+            if _target_match:
+                location_refs.append({
+                    "source_text": _target_match,
+                    "ref_type": "contact_target",
+                    "normalized": "nearest_enemy_contact",
+                })
+            elif (
+                classification == MessageClassification.command
+                and order_type in ("attack", "request_fire", "support")
+                and _has_any(order_detection_lexicon["enemy_reference"])
+                and _has_any(order_detection_lexicon["flank_contact_target"])
+            ):
+                location_refs.append({
+                    "source_text": "enemy contact",
+                    "ref_type": "contact_target",
+                    "normalized": "nearest_enemy_contact",
+                })
+
+        # Extract target unit references from text
+        # Look for common patterns: "1st Platoon", "Первый взвод", "Recon Team", etc.
+        target_unit_refs = []
+        # English ordinal + unit patterns
+        en_unit_pat = re.compile(
+            r'\b(\d+(?:st|nd|rd|th)\s+(?:platoon|company|section|team|squad|battery|group)'
+            r'(?:,?\s*[A-Z]\s+(?:company|battalion|brigade))?)\b',
+            re.IGNORECASE,
+        )
+        for m in en_unit_pat.finditer(text):
+            target_unit_refs.append(m.group().strip().rstrip(","))
+
+        # Russian unit patterns: "первый/второй/... взвод/рота/..."
+        ru_unit_pat = re.compile(
+            r'(?:перв\w+|втор\w+|трет\w+|четвёрт\w+|четверт\w+|пят\w+|шест\w+'
+            r'|седьм\w+|восьм\w+|девят\w+|десят\w+)\s+'
+            r'(?:взвод\w*|рот\w*|отделени\w*|групп\w*|команд\w*|батаре\w*|секци\w*)',
+            re.IGNORECASE,
+        )
+        for m in ru_unit_pat.finditer(text):
+            target_unit_refs.append(m.group().strip())
+
+        # Named units: "Recon Team", "Mortar Section", "Tank Platoon"
+        named_pat = re.compile(
+            r'\b((?:recon|mortar|tank|sniper|engineer|artillery|logistics|observation|combat'
+            r'|infantry|mechanized|aviation|air|helicopter|drone|medevac)\s+'
+            r'(?:team|section|platoon|company|squad|battery|group|flight|wing|pair)'
+            r'(?:\s+\d+)?)\b',
+            re.IGNORECASE,
+        )
+        for m in named_pat.finditer(text):
+            ref = m.group().strip()
+            if ref not in target_unit_refs:
+                target_unit_refs.append(ref)
+
+        # Custom callsign patterns: "A-squad", "C-squad", "Alpha", etc.
+        callsign_pat = re.compile(
+            r'\b([A-Za-z]-(?:squad|team|section|platoon|group))\b',
+            re.IGNORECASE,
+        )
+        for m in callsign_pat.finditer(text):
+            ref = m.group().strip()
+            if ref not in target_unit_refs:
+                target_unit_refs.append(ref)
+
+        # Also match standalone known unit names (e.g. "Mortar" alone)
+        standalone_pat = re.compile(
+            r'\b(Mortar|Sniper|Recon|Artillery|HQ|Logistics|Aviation|Air|Drone|Medevac'
+            r'|Штаб|Миномёт|Миномет|Разведка|Артиллерия|Авиация|Логистика|БПЛА)\b',
+            re.IGNORECASE,
+        )
+        for m in standalone_pat.finditer(text):
+            ref = m.group().strip()
+            if ref not in target_unit_refs:
+                target_unit_refs.append(ref)
+
+        # Russian named: "разведгруппа", "миномётная секция"
+        ru_named_pat = re.compile(
+            r'\b((?:развед\w*|миномёт\w*|минометн\w*|танк\w*|снайпер\w*|сапёрн\w*'
+            r'|артиллер\w*|инженерн\w*|логист\w*|авиац\w*|вертол[её]т\w*|бпла\w*)'
+            r'\s*(?:группа|секция|взвод|рота|команда|звено|экипаж)?)\b',
+            re.IGNORECASE,
+        )
+        for m in ru_named_pat.finditer(text):
+            ref = m.group().strip()
+            if ref and ref not in target_unit_refs and len(ref) > 3:
+                target_unit_refs.append(ref)
+
+        # Sender ref (for ack/report messages)
+        sender_ref = None
+        sender_match = re.search(r'(?:здесь|this is)\s+(.+?)(?:[,\.!]|приём|$)', text_lower)
+        if sender_match:
+            sender_ref = sender_match.group(1).strip()
+
+        from backend.schemas.order import LocationRefRaw
+        # Speed detection — comprehensive EN/RU
+        speed = None
+        # Slow/cautious patterns
+        slow_kw = speed_lexicon["slow"]
+        fast_kw = speed_lexicon["fast"]
+        if any(kw in text_lower for kw in slow_kw):
+            speed = "slow"
+        elif any(kw in text_lower for kw in fast_kw):
+            speed = "fast"
+
+        # ── Formation detection ─────────────────────────────────
+        formation = None
+        formation_map = {
+            pattern: form_name
+            for form_name, patterns in formation_lexicon["patterns"].items()
+            for pattern in patterns
+        }
+        # Check formation patterns (check longer patterns first)
+        for pattern, form_name in sorted(formation_map.items(), key=lambda x: -len(x[0])):
+            if pattern in text_lower:
+                formation = form_name
+                break
+        if not formation:
+            if _has_any(formation_lexicon["maneuver_side_left"]):
+                formation = "echelon_left"
+                maneuver_side = "left"
+            elif _has_any(formation_lexicon["maneuver_side_right"]):
+                formation = "echelon_right"
+                maneuver_side = "right"
+        elif formation == "echelon_left":
+            maneuver_side = maneuver_side or "left"
+        elif formation == "echelon_right":
+            maneuver_side = maneuver_side or "right"
+
+        if (
+            formation == "line"
+            and order_type in ("withdraw", "disengage")
+            and re.search(r"\b(?:to|toward|towards|along)\s+line\s+[a-z]\d", text_lower)
+        ):
+            formation = None
+
+        # Also look for explicit formation commands
+        import re as _re
+        _formation_prefixes = "|".join(
+            _re.escape(prefix)
+            for prefix in sorted(formation_lexicon["explicit_prefixes"], key=len, reverse=True)
+        )
+        _formation_targets = "|".join(
+            _re.escape(pattern)
+            for pattern in sorted(formation_map, key=len, reverse=True)
+        )
+        form_cmd = _re.search(
+            rf'(?:{_formation_prefixes})\s*[:=]?\s*({_formation_targets})',
+            text_lower,
+        )
+        if form_cmd and not formation:
+            matched_form = form_cmd.group(1).strip()
+            for pattern, form_name in formation_map.items():
+                if pattern in matched_form:
+                    formation = form_name
+                    break
+
+        # Engagement rules
+        engagement_rules = None
+        if _has_any(engagement_lexicon["hold_fire"]):
+            engagement_rules = "hold_fire"
+        elif _has_any(engagement_lexicon["fire_at_will"]):
+            engagement_rules = "fire_at_will"
+        elif _has_any(engagement_lexicon["return_fire_only"]):
+            engagement_rules = "return_fire_only"
+
+        # ── Support target ref: extract the unit being supported in standby orders ──
+        # e.g. "be ready to support C-squad's targets" → support_target_ref = "C-squad"
+        # e.g. "Будьте готовы поддержать огнём по целям, которые вам передаст C-squad" → "C-squad"
+        support_target_ref = None
+        merge_target_ref = None
+        split_ratio = None
+        _is_standby_check = (classification == MessageClassification.command
+                             and order_type == "observe"
+                             and _has_any(order_detection_lexicon["standby_support_markers"]))
+        if _is_standby_check or order_type in ("observe", "support", "resupply", "request_fire"):
+            # Look for patterns like "support X", "поддержать X", "targets from X",
+            # "которые вам передаст X", "целям X", "work with X"
+            import re as _re2
+            support_patterns = [
+                # EN: "support [unit]", "support [unit]'s targets"
+                r'support\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon))?)',
+                r"([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon))?)'s\s+(?:targets?|coordinates?|data)",
+                r'targets?\s+from\s+([A-Za-z][\w-]+)',
+                r'work\s+with\s+([A-Za-z][\w-]+)',
+                r'coordinate\s+with\s+([A-Za-z][\w-]+)',
+                r'resupply\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'rearm\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'escort\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                # RU: "поддержать X", "целям от X", "передаст X"
+                r'поддержать\s+(?:огнём\s+)?(?:по\s+)?(?:целям[,\s]*)?(?:которые\s+)?(?:вам\s+)?(?:передаст|укажет|назначит)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'поддержать\s+огнём\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)?)',
+                r'поддержать\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'снабд(?:и|ить|ите)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'подвез(?:и|ите)\s+(?:боеприпасы|бк|снабжение)?\s*(?:к|для)?\s*([A-Za-zА-Яа-яё][\w-]+)',
+                r'передаст\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'укажет\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'целям\s+(?:от\s+)?([A-Za-zА-Яа-яё][\w-]+)',
+                r'по\s+команде\s+([A-Za-zА-Яа-яё][\w-]+)',
+            ]
+            for pat in support_patterns:
+                m2 = _re2.search(pat, text, _re2.IGNORECASE)
+                if m2:
+                    candidate = m2.group(1).strip().rstrip(".,;!")
+                    # Don't pick up generic words as unit refs
+                    generic = {"огнём", "fire", "support", "targets", "целям", "all", "any",
+                               "the", "вам", "ваши", "your", "his", "their"}
+                    if candidate.lower() not in generic and len(candidate) > 1:
+                        support_target_ref = candidate
+                        break
+
+        if order_type == "merge":
+            import re as _re_merge
+            merge_patterns = [
+                r'merge\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
+                r'join\s+up\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
+                r'combine\s+with\s+([A-Za-z][\w-]+(?:\s+[A-Za-z][\w-]+)*)',
+                r'соедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'объедини(?:сь|тесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-ZazlА-Яа-яё][\w-]+)*)',
+                r'слей(?:ся|тесь)\s+с\s+([A-ZazlА-Яа-яё][\w-]+(?:\s+[A-ZazlА-Яа-яё][\w-]+)*)',
+            ]
+            for pat in merge_patterns:
+                match = _re_merge.search(pat, text, _re_merge.IGNORECASE)
+                if match:
+                    raw_ref = match.group(1).strip().rstrip(".,;!")
+                    # Truncate at conjunctions: "C-squad and continue..." → "C-squad"
+                    raw_ref = _re_merge.split(
+                        r'\b(?:and|и|then|чтобы)\b', raw_ref, maxsplit=1, flags=_re_merge.IGNORECASE
+                    )[0].strip().rstrip(".,;!")
+                    merge_target_ref = raw_ref
+                    break
+
+        if order_type == "split":
+            import re as _re_split
+            ratio_patterns = [
+                (r'(\d{1,2})\s*%', lambda m: max(0.1, min(0.9, int(m.group(1)) / 100.0))),
+                (r'half|one half|половин', lambda _m: 0.5),
+                (r'one third|third|треть', lambda _m: 1 / 3),
+                (r'two thirds|две трети', lambda _m: 2 / 3),
+                (r'quarter|четверт', lambda _m: 0.25),
+            ]
+            for pat, builder in ratio_patterns:
+                match = _re_split.search(pat, text_lower, _re_split.IGNORECASE)
+                if match:
+                    split_ratio = round(builder(match), 2)
+                    break
+
+        # ── Coordination refs: units mentioned for liaison / support, not as recipients ──
+        if classification == MessageClassification.command:
+            import re as _re3
+
+            coord_patterns = [
+                r'coordinate\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'link\s+up\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'liaise\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'contact\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'work\s+with\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'свяж(?:ись|итесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'скоординиру(?:й|йте)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'договор(?:ись|итесь)\s+с\s+([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                # Fire direction: "наведите артиллерию Art1 на цель" / "direct artillery Art1 at target"
+                r'навед(?:и|ите)\s+(?:артиллери\w*|миномёт\w*|минометн\w*|огонь)\s+([A-Za-zА-Яа-яё][\w-]+)',
+                r'direct\s+(?:artillery|mortar|fire(?:\s+from)?)\s+([A-Za-z][\w-]+)',
+                r'call\s+(?:in\s+)?(?:fire\s+from|artillery\s+from|strikes?\s+from)\s+([A-Za-z][\w-]+)',
+            ]
+            for pat in coord_patterns:
+                for match in _re3.finditer(pat, text, _re3.IGNORECASE):
+                    candidate = match.group(1).strip().rstrip(".,;!")
+                    candidate = _re3.split(
+                        r'\b(?:и|and|then|чтобы|for|to|with|с\s+ними)\b',
+                        candidate,
+                        maxsplit=1,
+                        flags=_re3.IGNORECASE,
+                    )[0].strip().rstrip(".,;!")
+                    if candidate and candidate not in coordination_unit_refs:
+                        coordination_unit_refs.append(candidate)
+
+            follow_patterns = [
+                r'follow\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'trail\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'keep\s+behind\s+([A-Za-z][\w-]+(?:\s+(?:team|squad|section|platoon|battery|group))?)',
+                r'следуй(?:те)?\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'следовать\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'иди(?:те)?\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'двигай(?:ся|тесь|те)?\s+(?:вслед\s+)?за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'держ(?:ись|итесь|аться)\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+                r'вслед\s+за\s+(?:группой\s+)?([A-Za-zА-Яа-яё][\w-]+(?:\s+[A-Za-zА-Яа-яё][\w-]+)*)',
+            ]
+            for pat in follow_patterns:
+                for match in _re3.finditer(pat, text, _re3.IGNORECASE):
+                    candidate = match.group(1).strip().rstrip(".,;!")
+                    candidate = _re3.split(
+                        r'\b(?:и|and|then|keeping|maintaining|maintain|with|слева|справа|left|right)\b',
+                        candidate,
+                        maxsplit=1,
+                        flags=_re3.IGNORECASE,
+                    )[0].strip().rstrip(".,;!")
+                    if candidate and candidate not in coordination_unit_refs:
+                        coordination_unit_refs.append(candidate)
+                        maneuver_kind = maneuver_kind or "follow"
+
+            # Do not confuse the addressed unit with the coordination partner.
+            addressed_refs = {ref.lower() for ref in target_unit_refs}
+            coordination_unit_refs = [
+                ref for ref in coordination_unit_refs
+                if ref.lower() not in addressed_refs
+            ]
+
+            # If the text refers to "the mortars"/"artillery" generically, ensure
+            # a canonical ref survives the addressed-refs filter above.
+            if _has_any(order_detection_lexicon["generic_mortar"]):
+                if not any("мином" in ref.lower() or "mortar" in ref.lower() for ref in coordination_unit_refs):
+                    coordination_unit_refs.append("Mortar")
+            elif _has_any(order_detection_lexicon["generic_artillery"]):
+                if not any("артилл" in ref.lower() or "artillery" in ref.lower() for ref in coordination_unit_refs):
+                    coordination_unit_refs.append("Artillery")
+
+
+            if _has_any(order_detection_lexicon["coordination_covering_fire"]):
+                coordination_kind = "covering_fire"
+            elif _has_any(order_detection_lexicon["coordination_fire_support"]):
+                coordination_kind = "fire_support"
+            elif coordination_unit_refs:
+                coordination_kind = "coordination"
+
+        if maneuver_kind == "flank" and maneuver_side is None:
+            if _has_any(formation_lexicon["maneuver_side_left"]):
+                maneuver_side = "left"
+            elif _has_any(formation_lexicon["maneuver_side_right"]):
+                maneuver_side = "right"
+
+        if maneuver_kind is None and _has_follow_maneuver and coordination_unit_refs:
+            maneuver_kind = "follow"
+        if maneuver_kind is None and _has_flank_maneuver:
+            maneuver_kind = "flank"
+        if maneuver_kind is None and _has_bounding_maneuver:
+            maneuver_kind = "bounding"
+        if maneuver_kind is None and _has_support_by_fire:
+            maneuver_kind = "support_by_fire"
+
+        return ParsedOrderData(
+            classification=classification,
+            language=lang,
+            target_unit_refs=target_unit_refs,
+            sender_ref=sender_ref,
+            order_type=order_type,
+            status_request_focus=status_request_focus,
+            location_refs=[LocationRefRaw(**lr) for lr in location_refs],
+            speed=speed,
+            formation=formation,
+            engagement_rules=engagement_rules,
+            support_target_ref=support_target_ref,
+            merge_target_ref=merge_target_ref,
+            split_ratio=split_ratio,
+            map_object_type=map_object_type,
+            coordination_unit_refs=coordination_unit_refs,
+            coordination_kind=coordination_kind,
+            maneuver_kind=maneuver_kind,
+            maneuver_side=maneuver_side,
+            confidence=self._compute_keyword_confidence(
+                classification, order_type, location_refs,
+                target_unit_refs, speed, engagement_rules, formation,
+                original_text=text,
+            ),
+            ambiguities=["Parsed by keyword fallback — no LLM"],
+        )
+
+    @staticmethod
+    def _compute_keyword_confidence(
+        classification: MessageClassification,
+        order_type: str | None,
+        location_refs: list[dict],
+        target_unit_refs: list[str],
+        speed: str | None,
+        engagement_rules: str | None,
+        formation: str | None = None,
+        original_text: str = "",
+    ) -> float:
+        """
+        Compute confidence score for keyword-parsed result.
+
+        Higher confidence when more elements are successfully extracted.
+        This drives the 3-tier model routing decision.
+
+        Complex or ambiguous commands should have LOW confidence to trigger LLM parsing.
+        """
+        if classification == MessageClassification.unclear:
+            return 0.15
+
+        conf = 0.45  # base: classification was determined
+
+        # Acknowledgments and status reports are easy to identify
+        if classification == MessageClassification.acknowledgment:
+            return 0.90  # very clear pattern
+        if classification == MessageClassification.status_report:
+            return 0.85
+
+        # Status requests are also clear
+        if classification == MessageClassification.status_request:
+            conf = 0.80
+            if target_unit_refs:
+                conf += 0.10
+            return min(conf, 0.95)
+
+        # For commands: confidence depends on how much was extracted
+        if classification == MessageClassification.command:
+            if order_type:
+                conf += 0.15  # order type identified
+            if location_refs:
+                # Snail/coordinate refs are high-quality matches
+                has_precise = any(
+                    lr["ref_type"] in ("snail", "coordinate")
+                    for lr in location_refs
+                )
+                conf += 0.15 if has_precise else 0.08
+            if target_unit_refs:
+                conf += 0.10  # unit identified
+            if speed:
+                conf += 0.03
+            if engagement_rules:
+                conf += 0.03
+            if formation:
+                conf += 0.03
+
+            # ── Reduce confidence for complex/ambiguous commands ──
+            # Multi-verb commands (move + attack, advance + eliminate, etc.) should
+            # be sent to LLM for proper intent resolution.
+            text_lower = original_text.lower()
+
+            # Check for multiple action verbs in the same command
+            move_verbs = ["move", "advance", "proceed", "выдвигай", "двигай", "марш", "движен",
+                          "rally", "regroup", "перегруппируй"]
+            attack_verbs = ["attack", "engage", "eliminate", "destroy", "neutralize",
+                           "fire", "shoot", "suppress", "assault", "storm",
+                           "атак", "уничтож", "ликвидир", "поразить", "огонь", "подавить",
+                           "штурмуй"]
+            defend_verbs = ["defend", "hold", "fortify", "entrench", "dig in",
+                           "оборон", "удержи", "окопай", "укрепи"]
+            observe_verbs = ["observe", "recon", "scout", "screen", "overwatch",
+                            "наблюда", "разведк", "прикрой наблюдением"]
+            engineer_verbs = ["breach", "mine", "bridge", "construct", "build",
+                             "разминир", "минируй", "мост", "построй"]
+            # Coordination/leadership verbs indicate complex multi-unit orders
+            coord_verbs = ["coordinate", "lead", "organize", "direct", "command",
+                          "координируй", "организуй", "возглав", "руковод", "командуй"]
+
+            has_move = any(v in text_lower for v in move_verbs)
+            has_attack = any(v in text_lower for v in attack_verbs)
+            has_defend = any(v in text_lower for v in defend_verbs)
+            has_observe = any(v in text_lower for v in observe_verbs)
+            has_coord = any(v in text_lower for v in coord_verbs)
+            has_engineer = any(v in text_lower for v in engineer_verbs)
+
+            verb_count = sum([has_move, has_attack, has_defend, has_observe, has_engineer])
+
+            if verb_count >= 2:
+                # Multiple action verbs → complex command → reduce confidence
+                # This ensures LLM parses the intent correctly
+                conf = min(conf, 0.65)  # cap at 0.65 to trigger nano model
+
+            # Coordination orders are inherently complex — always send to LLM
+            if has_coord:
+                conf = min(conf, 0.50)  # cap at 0.50 to trigger full model
+
+            # Compound/sequential commands → force full model
+            from backend.services.local_triage import detect_compound_keyword
+            if detect_compound_keyword(original_text):
+                conf = min(conf, 0.40)  # cap well below nano threshold
+
+            # Long commands (>50 chars) are more likely to be complex
+            if len(original_text) > 50:
+                conf -= 0.05
+
+            # Commands with multiple sentences are complex
+            if original_text.count('.') >= 2:
+                conf -= 0.10
                 # "Concentrate fire on", "Сосредоточить огонь" → fire
                 order_type = "fire"
             elif _has_any(order_detection_lexicon["suppression"]):

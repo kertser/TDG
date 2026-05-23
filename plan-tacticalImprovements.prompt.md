@@ -9,27 +9,37 @@
 
 ## Статус реализации
 
+> Последнее обновление: 23 мая 2026
+
 | # | Пункт | Приоритет | Сложность | Статус |
 |---|---|---|---|---|
-| 1 | Направление атаки (heading_deg) | Быстрая победа | Low | ⬜ |
-| 2 | Дальность связи (comms range) | Быстрая победа | Low | ⬜ |
-| 3 | Цикл ФО→Огонь (Observer→Fire) | Стратегический | High | ⬜ |
-| 4 | Overwatch / Рубеж перекрытия | Стратегический | High | ⬜ |
-| 5 | Топливо (Fuel system) | Быстрая победа | Low | ⬜ |
-| 6 | Дезактивация РХБЗ | Перспектива | Low | ⬜ |
-| 7 | ФРАГО | Средний | Medium | ⬜ |
-| 8 | Каскадирование замысла | Стратегический | High | ⬜ |
-| 9 | ВАРНО | Перспектива | Low | ⬜ |
-| 10 | Контроль объектов / Захват рубежа | Средний | Medium | ⬜ |
-| 11 | ААР / Replay | Средний | Medium | ⬜ |
-| 12 | Инъекция трения | Средний | Low | ⬜ |
-| 13 | Скриптованный Red AI | Перспектива | Medium | ⬜ |
-| 14 | OPORD Builder | Перспектива | Low | ⬜ |
-| 15 | LZ/PZ риск высадки | Перспектива | Medium | ⬜ |
-| 16 | ПВО (Air Defense) | Стратегический | Medium | ⬜ |
-| 17 | Адаптивное самообучение | Маховик качества | High | ⬜ |
-| 18 | Tutorial / Onboarding (новые пункты ниже) | Критичный для UX | Medium | ⬜ |
-| 19 | Cross-cutting corrections (см. §0) | Обязательно | — | ⬜ |
+| 0 | Cross-cutting utils (geo_utils, _rng, JSONB pattern) | Обязательно | — | ✅ `geo_utils.py`, `_rng.py` созданы; `detection.py` мигрирован |
+| 1 | Направление атаки (heading_deg) | Быстрая победа | Low | ✅ `_compute_flank_factor` в `combat.py`; flank/rear/frontal modifiers; `planar_offset_m` для расчёта угла |
+| 2 | Дальность связи (comms range) | Быстрая победа | Low | ✅ `comms.py` переписан с relay-chain logic; range lookup by unit_type; degradation/relay events |
+| 3 | Цикл ФО→Огонь (Observer→Fire) | Стратегический | High | ✅ `process_target_designation` + `marked_target` в `unit.capabilities`; `designate_target`/`adjust_fire` OrderType; parser + phrasebook + response templates; tick-интегрирован в `combat.py`; DESIGNATION_STALE_TICKS; geo_utils jitter |
+| 4 | Overwatch / Рубеж перекрытия | Стратегический | High | ✅ `_process_overwatch()` в `tick.py` (шаг 1.9); `overwatch_config` в `capabilities`; авто-огонь при обнаружении в секторе; restore task после ухода цели; OrderType + parser + response template |
+| 5 | Топливо (Fuel system) | Быстрая победа | Low | ✅ `movement.py` (FUEL_CONSUMING_UNIT_TYPES, consumption, cap speed); `resupply.py` (cache + logistics fuel rates); `visibility_service.py` (fuel field в сериализации); `session_service.py` (инициализация fuel=1.0); `units.js` (⛽ display с цветовым предупреждением) |
+| 6 | Дезактивация РХБЗ | Перспектива | Low | ✅ `decontaminate` OrderType + parser + phrasebook + response template + task assignment в tick.py fallback + `_process_decontaminate` в `engineering.py` (proximity check, progress per tick, ticks_remaining reduction, decon_complete event, auto-clear task). Полностью интегрировано через `process_engineering()` → `tick.py`. |
+| 7 | ФРАГО | Средний | Medium | ✅ `is_frago` + `frago_patch` в `ParsedOrderData`; `_process_orders()` в `tick.py` применяет patch к current_task; OrderParser/intent_interpreter понимают контекст FRAGO; phrasebook test cases |
+| 8 | Каскадирование замысла | Стратегический | High | ✅ `intent_cascade.py`; `process_intent_cascade()` вызывается из `tick.py` (шаг 1a2); HQ типы (`headquarters`, `command_post`, `infantry_battalion`, `infantry_company`, `tank_company`, `mech_company`); 1 уровень вниз; явные приказы игрока имеют приоритет |
+| 9 | ВАРНО | Перспектива | Low | ✅ task_type `"warno"` обрабатывается в `tick.py`: `warno_state` в capabilities, morale/ammo bonus при получении реального приказа после WARNO; OrderType + parser + phrasebook + `wilco_warno` response template |
+| 10 | Контроль объектов / Захват рубежа | Средний | Medium | ✅ `objective_control.py`; `process_objective_control()` + `check_deterministic_victory()` в tick.py (шаг 5d); отслеживание `controlled_by` в MapObject.properties; события `objective_captured`/`objective_contested`/`objective_lost`; детерминированная победа без LLM |
+| 11 | ААР / Replay | Средний | Medium | ✅ `replay.js` (`KReplay`); `GET /sessions/{id}/replay` из Event table; transport controls (play/pause/step/speed); AAR через LLM; in-replay mode скрывает orders panel |
+| 12 | Инъекция трения | Средний | Low | ✅ `_apply_friction()` в `tick.py` (шаг 1a); 6 типов трения (`breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty`); `POST /api/admin/sessions/{id}/inject-friction` + `DELETE …/inject-friction/{unit_id}`; admin.js UI с кнопкой ⚡ |
+| 13 | Скриптованный Red AI | Перспектива | Medium | ✅ `script_mode` в `doctrine_profile` RedAgent; `_run_script_mode()` в `runner.py` (пропускает LLM); временные шаги (from_tick/to_tick/action/target_snail); admin panel: переключатель Script Mode + JSON textarea |
+| 14 | OPORD Builder | Перспектива | Low | ✅ 5-секционный аккордеон в `sb-panel` (Обстановка/Задача/Выполнение/Тыл/Управление). `toggleOpordSection()`, `saveOpord()` сохраняет `objectives.opord` JSONB + генерирует Markdown в `scenario.description`. `_fillOpordFields()` восстанавливает поля при загрузке сценария. CSS `.sb-opord-item/.sb-opord-hdr/.sb-opord-body/.sb-opord-5w`. |
+| 15 | LZ/PZ риск высадки | Перспектива | Medium | ✅ `landing_zone` в MAP_OBJECT_DEFS; `process_lz_risk()` в `map_objects.py`; вызов из `tick.py` (шаг 3e); auto-suppress при enemy< 300m; `deterministic_roll` для вероятности потери; events `aviation_lz_risk`/`aviation_lz_casualty` |
+| 16 | ПВО (Air Defense) | Стратегический | Medium | ✅ `_process_air_defense()` в `tick.py` (шаг 3d); MANPADS/SAM дальности и probabilities; поражение aviation units; деградация силы + подавление; event `air_defense_engagement`; 4 unit типа в unit_types.json (`manpads_team`, `manpads_section`, `sam_section`, `aa_gun_section`) |
+| 17 | Адаптивное самообучение | Маховик качества | High | ✅ `session_analyzer.py` (extract_analyzable_orders); `phrasebook_miner.py` (mine_proposals, llm_judge); `proposal_store.py` (CRUD); `LearningProposal` model + alembic migration 009; admin API: `POST /analyze`, `GET /proposals`, `PATCH /proposals/{id}` (approve/reject/apply); применение одобренных предложений в phrasebook TOML |
+| 18 | Tutorial / Onboarding | Критичный для UX | Medium | ✅ `tutorial.js` (`KTutorial`): spotlight-шаги, авто-старт для новых пользователей; `tutorial_completed` в User модели + alembic migration 008; `POST /api/auth/tutorial-complete`; кнопка "Tutorial" в user menu; `startIfNeeded()` при логине |
+
+### Итог
+- ✅ Полностью реализовано: **19 из 19** пунктов (0–18)
+- 🔶 Частично: **0**
+- ❌ Не реализовано: **0**
+
+### Bugs fixed (23 мая 2026)
+- **bypass_en test case** — `bypass`, `envelop`, `continue to objective` добавлены в `order_detection.move` lexicon в `order_phrasebook.toml`. "Bypass the enemy strongpoint and continue to objective." теперь корректно классифицируется как `command / move`.
 
 ---
 

@@ -1,26 +1,48 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 import tomllib
 
 
 _PHRASEBOOK_PATH = Path(__file__).resolve().parents[1] / "data" / "order_phrasebook.toml"
 
+# Mtime-based hot-reload cache (plan §0.10)
+_PHRASEBOOK_CACHE: dict | None = None
+_PHRASEBOOK_MTIME: float = 0.0
+
 
 def get_order_phrasebook_path() -> Path:
     return _PHRASEBOOK_PATH
 
 
-@lru_cache(maxsize=1)
+def get_phrasebook() -> dict:
+    """Load phrasebook, auto-reloading if the TOML file changed on disk."""
+    global _PHRASEBOOK_CACHE, _PHRASEBOOK_MTIME
+    try:
+        mtime = _PHRASEBOOK_PATH.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    if _PHRASEBOOK_CACHE is None or mtime != _PHRASEBOOK_MTIME:
+        with _PHRASEBOOK_PATH.open("rb") as fh:
+            _PHRASEBOOK_CACHE = tomllib.load(fh)
+        _PHRASEBOOK_MTIME = mtime
+    return _PHRASEBOOK_CACHE
+
+
+def reload_phrasebook() -> None:
+    """Force-invalidate the phrasebook cache so next call reloads from disk."""
+    global _PHRASEBOOK_CACHE
+    _PHRASEBOOK_CACHE = None
+
+
+# Backward-compat aliases used throughout the codebase
 def load_order_phrasebook() -> dict:
-    with _PHRASEBOOK_PATH.open("rb") as fh:
-        return tomllib.load(fh)
+    return get_phrasebook()
 
 
 def get_order_parser_lexicon() -> dict:
-    return load_order_phrasebook()["lexicon"]
+    return get_phrasebook()["lexicon"]
 
 
 def get_order_phrasebook_cases() -> list[dict]:
-    return load_order_phrasebook().get("case", [])
+    return get_phrasebook().get("case", [])
