@@ -658,13 +658,21 @@ const KUnits = (() => {
             } else {
                 // Own-side (or admin view): show ~1p instead of 0p for critically wounded living units
                 const _persDisplay = _effPers != null ? (_effPers > 0 ? `${_effPers}p` : '~1p') : '?p';
+                // Fuel indicator (only for units that have a fuel system)
+                let _fuelTag = '';
+                if (u.fuel != null) {
+                    const _fuelPct = Math.round(u.fuel * 100);
+                    const _fuelColor = u.fuel < 0.20 ? '#ff7043' : (u.fuel < 0.50 ? '#ffa726' : '#a5d6a7');
+                    _fuelTag = ` <span style="color:${_fuelColor}" title="Fuel">⛽ ${_fuelPct}%</span>`;
+                }
                 tooltipHtml = `<b>${u.name}</b> <span style="font-size:10px;color:#aaa;">(${_persDisplay})</span>`
                     + (_stackCount > 1 ? ` <span style="background:#ff9800;color:#000;font-size:9px;padding:0 4px;border-radius:3px;font-weight:700;">×${_stackCount}</span>` : '')
                     + `<br>`
                     + `<span style="color:${statusColor};font-weight:600;">${ttStatusIcon} ${ttStatus}</span> `
                     + _pathWarnTag
                     + `<span style="color:#64b5f6">👁 ${_fmtDist(detR)}${tooltipEyeTag}</span> `
-                    + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`;
+                    + `<span style="color:#ff9800">🎯 ${_fmtDist(fireR)}</span>`
+                    + _fuelTag;
             }
             marker.bindTooltip(tooltipHtml, {
                 permanent: false,
@@ -1923,6 +1931,10 @@ const KUnits = (() => {
         }
         _drawSelectionOverlays();
         _updateSelectionUI();
+        // Tutorial event
+        if (selectedUnitIds.size > 0) {
+            document.dispatchEvent(new CustomEvent('kshu:unit-selected'));
+        }
     }
 
     function toggleSelect(unitId) {

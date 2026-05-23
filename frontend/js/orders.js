@@ -707,6 +707,8 @@ const KOrders = (() => {
             if (resp.ok) {
                 textArea.value = '';
                 textArea.style.height = '';
+                // Tutorial event
+                document.dispatchEvent(new CustomEvent('kshu:order-submitted'));
                 // Enrich with local user info for radio log display
                 result.issuer_name = typeof KSessionUI !== 'undefined' ? KSessionUI.getUserName() : '';
                 _orders.unshift(result);

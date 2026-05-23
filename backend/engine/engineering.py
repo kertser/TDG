@@ -69,6 +69,13 @@ BRIDGE_CAPABLE = {
     "construction_engineer_platoon",
 }
 
+DECON_CAPABLE = {
+    "combat_engineer_platoon", "combat_engineer_section",
+    "combat_engineer_team", "engineer_platoon", "engineer_section",
+}
+
+DECONTAMINATE_TICKS = 5  # ticks to complete full decontamination
+
 
 def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlat = (lat2 - lat1) * METERS_PER_DEG_LAT
@@ -131,6 +138,10 @@ def process_engineering(
 
         elif task_type == "deploy_bridge":
             evts = _process_deploy_bridge(unit, task, session_id, new_objects_out)
+            events.extend(evts)
+
+        elif task_type == "decontaminate":
+            evts = _process_decontaminate(unit, task, objects_by_id)
             events.extend(evts)
 
     return events
@@ -419,3 +430,87 @@ def _process_deploy_bridge(unit, task: dict, session_id, new_objects_out: list) 
 
     return events
 
+
+def _process_decontaminate(unit, task: dict, objects_by_id: dict) -> list[dict]:
+    """
+    Decontaminate a chemical_cloud or other toxic area.
+
+    Task format:
+        {type: "decontaminate", target_object_id: UUID (optional), target_location: {lat, lon}}
+
+    If target_object_id is provided, the chemical_cloud object loses remaining ticks faster.
+    If no specific object, clears any chemical_cloud within DECON_RADIUS_M of the unit.
+    """
+    events = []
+
+    if unit.unit_type not in DECON_CAPABLE:
+        return events
+
+    pos = _get_position(unit)
+    if not pos:
+        return events
+    u_lat, u_lon = pos
+
+    # Progress tracking
+    task_new = dict(task)
+    progress = task.get("decon_progress", 0.0)
+    progress += 1.0 / DECONTAMINATE_TICKS  # each tick advances by fraction
+
+    DECON_RADIUS_M = 200.0  # engineer can decontaminate within 200m
+
+    # Find nearest chemical_cloud within range and reduce its ticks
+    accelerated = False
+    for obj in objects_by_id.values():
+        if obj.object_type != "chemical_cloud" or not obj.is_active:
+            continue
+        tid = task.get("target_object_id")
+        if tid and str(obj.id) != str(tid):
+            continue
+        if obj.geometry is None:
+            continue
+        try:
+            obj_pt = to_shape(obj.geometry).centroid
+        except Exception:
+            continue
+        dlat = (obj_pt.y - u_lat) * METERS_PER_DEG_LAT
+        dlon = (obj_pt.x - u_lon) * METERS_PER_DEG_LON_AT_48
+        dist = math.sqrt(dlat * dlat + dlon * dlon)
+        if dist > DECON_RADIUS_M:
+            continue
+        # Reduce the cloud's ticks_remaining — engineers speed up dissipation by 2 ticks/tick
+        props = dict(obj.properties or {})
+        remaining = max(0, int(props.get("ticks_remaining", 0)) - 2)
+        props["ticks_remaining"] = remaining
+        if remaining <= 0:
+            obj.is_active = False
+            events.append({
+                "event_type": "decontamination_complete",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} cleared chemical contamination",
+                "payload": {"action": "decon_complete", "object_id": str(obj.id)},
+            })
+        else:
+            obj.properties = props
+            events.append({
+                "event_type": "engineering",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} decontaminating area ({remaining} ticks remaining)",
+                "payload": {"action": "decon_progress", "ticks_remaining": remaining},
+            })
+        accelerated = True
+        break
+
+    if progress >= 1.0:
+        unit.current_task = None
+    else:
+        task_new["decon_progress"] = progress
+        unit.current_task = task_new
+        if not accelerated:
+            events.append({
+                "event_type": "engineering",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} decontaminating area ({progress*100:.0f}%)",
+                "payload": {"action": "decon_progress", "progress": round(progress, 3)},
+            })
+
+    return events

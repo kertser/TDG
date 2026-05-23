@@ -13,13 +13,13 @@ from short range, modified by terrain, weather, and day/night cycle.
 
 from __future__ import annotations
 
-import hashlib
 import math
 import uuid
 
 from geoalchemy2.shape import to_shape
 
 from backend.engine.terrain import TerrainService
+from backend.engine._rng import deterministic_roll
 
 # Approximate meters per degree
 METERS_PER_DEG_LAT = 111_320.0
@@ -90,9 +90,9 @@ def _distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _deterministic_roll(tick: int, observer_id: uuid.UUID, target_id: uuid.UUID) -> float:
-    """Deterministic pseudo-random [0,1) for replay reproducibility."""
-    h = hashlib.sha256(f"{tick}:{observer_id}:{target_id}".encode()).hexdigest()
-    return int(h[:8], 16) / 0xFFFFFFFF
+    """Deterministic pseudo-random [0,1) for replay reproducibility.
+    Delegates to the canonical engine._rng implementation."""
+    return deterministic_roll(tick, observer_id, target_id)
 
 
 def _posture_modifier(target_task: dict | None) -> float:

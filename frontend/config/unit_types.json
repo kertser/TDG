@@ -438,8 +438,8 @@
     },
     "transport_helicopter": {
         "label": "Transport Helicopter",
-        "sidc_blue": "10031001141400000000",
-        "sidc_red": "10061001141400000000",
+        "sidc_blue": "10031001141206000000",
+        "sidc_red": "10061001141206000000",
         "speed": 45.0,
         "speed_slow": 25.0,
         "speed_fast": 60.0,
@@ -453,8 +453,8 @@
     },
     "recon_uav": {
         "label": "Recon UAV",
-        "sidc_blue": "10031001111200000000",
-        "sidc_red": "10061001111200000000",
+        "sidc_blue": "10031000111219000000",
+        "sidc_red": "10061000111219000000",
         "speed": 25.0,
         "speed_slow": 15.0,
         "speed_fast": 35.0,
@@ -463,6 +463,58 @@
         "personnel": 0,
         "eye_height": 200.0,
         "is_aviation": true,
+        "indirect_fire": false
+    },
+    "manpads_team": {
+        "label": "MANPADS Team",
+        "sidc_blue": "10031000111301020000",
+        "sidc_red": "10061000111301020000",
+        "speed": 1.5,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
+        "det": 3500,
+        "fire": 3000,
+        "personnel": 4,
+        "eye_height": 2.0,
+        "indirect_fire": false
+    },
+    "manpads_section": {
+        "label": "MANPADS Section",
+        "sidc_blue": "10031000131301020000",
+        "sidc_red": "10061000131301020000",
+        "speed": 1.5,
+        "speed_slow": 1.0,
+        "speed_fast": 2.5,
+        "det": 4000,
+        "fire": 3500,
+        "personnel": 8,
+        "eye_height": 2.0,
+        "indirect_fire": false
+    },
+    "sam_section": {
+        "label": "SAM Section",
+        "sidc_blue": "10031000131301030000",
+        "sidc_red": "10061000131301030000",
+        "speed": 5.0,
+        "speed_slow": 3.0,
+        "speed_fast": 8.0,
+        "det": 10000,
+        "fire": 8000,
+        "personnel": 12,
+        "eye_height": 4.0,
+        "indirect_fire": false
+    },
+    "aa_gun_section": {
+        "label": "AA Gun Section",
+        "sidc_blue": "10031000131301010000",
+        "sidc_red": "10061000131301010000",
+        "speed": 3.0,
+        "speed_slow": 2.0,
+        "speed_fast": 5.0,
+        "det": 3000,
+        "fire": 2500,
+        "personnel": 10,
+        "eye_height": 3.0,
         "indirect_fire": false
     }
 }

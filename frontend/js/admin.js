@@ -4751,6 +4751,7 @@ const KAdmin = (() => {
         const effectContainer = document.getElementById('admin-effect-buttons');
         if (!obstacleContainer || !structureContainer) return;
 
+        const BRIDGE_ICON = `<svg viewBox="0 0 22 14" width="20" height="12" style="display:inline-block;vertical-align:-1px;" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="8" width="22" height="2" fill="currentColor"/><path d="M1.5,9Q11,1 20.5,9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="0" y="10" width="3" height="4" fill="currentColor"/><rect x="19" y="10" width="3" height="4" fill="currentColor"/><line x1="2" y1="13.5" x2="20" y2="13.5" stroke="#4fc3f7" stroke-width="0.9" opacity="0.55"/></svg>`;
         const ICONS = {
             barbed_wire: '🪡', concertina_wire: '🔪', minefield: '💣',
             at_minefield: '🎯', entrenchment: '⛏', anti_tank_ditch: '🕳',
@@ -4758,7 +4759,8 @@ const KAdmin = (() => {
             pillbox: '🛡', observation_tower: '👁',
             field_hospital: '✚', command_post_structure: '⚑',
             fuel_depot: '⛽', airfield: '✈️', supply_cache: '🗃',
-            bridge_structure: '🌁',
+            bridge_structure: BRIDGE_ICON,
+            objective_point: '◎', objective_area: '⬡', landing_zone: '🚁',
             smoke: '🌫', fog_effect: '🌁', fire_effect: '🔥', chemical_cloud: '☣',
         };
         const GEOM_HINTS = {
@@ -4851,6 +4853,7 @@ const KAdmin = (() => {
                 return;
             }
 
+            const BRIDGE_ICON = `<svg viewBox="0 0 22 14" width="18" height="11" style="display:inline-block;vertical-align:-1px;" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="8" width="22" height="2" fill="currentColor"/><path d="M1.5,9Q11,1 20.5,9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><rect x="0" y="10" width="3" height="4" fill="currentColor"/><rect x="19" y="10" width="3" height="4" fill="currentColor"/><line x1="2" y1="13.5" x2="20" y2="13.5" stroke="#4fc3f7" stroke-width="0.9" opacity="0.55"/></svg>`;
             const ICONS = {
                 barbed_wire: '🪡', concertina_wire: '🔪', minefield: '💣',
                 at_minefield: '🎯', entrenchment: '⛏', anti_tank_ditch: '🕳',
@@ -4858,7 +4861,8 @@ const KAdmin = (() => {
                 pillbox: '🛡', observation_tower: '👁',
                 field_hospital: '✚', command_post_structure: '⚑',
                 fuel_depot: '⛽', airfield: '✈️', supply_cache: '🗃',
-                bridge_structure: '🌁',
+                bridge_structure: BRIDGE_ICON,
+                objective_point: '◎', objective_area: '⬡', landing_zone: '🚁',
             };
 
             let html = '';

@@ -31,6 +31,14 @@ _CONCEALMENT_UNIT_TYPES = {
 }
 
 
+def _get_unit_fuel(unit: Unit) -> float | None:
+    """Return fuel level for units that have a fuel system, None for infantry/foot units."""
+    from backend.engine.movement import FUEL_CONSUMING_UNIT_TYPES
+    if unit.unit_type not in FUEL_CONSUMING_UNIT_TYPES:
+        return None
+    return float((unit.capabilities or {}).get("fuel", 1.0))
+
+
 def _is_concealed_unit(unit: Unit) -> bool:
     """Check if a unit is in concealment mode (mirrors detection.py logic).
 
@@ -92,6 +100,8 @@ def _serialize_unit(unit: Unit) -> dict:
         "assigned_user_ids": unit.assigned_user_ids,
         "unit_status": status,
         "formation": (unit.capabilities or {}).get("formation"),
+        # Fuel: exposed for units that have a fuel system; None for infantry etc.
+        "fuel": _get_unit_fuel(unit),
     }
 
 
@@ -406,6 +416,7 @@ async def get_visible_units(
         serialized["assigned_user_ids"] = None
         serialized["capabilities"] = None
         serialized["formation"] = None
+        serialized["fuel"] = None   # fuel is own-side only
 
         # ── Distance-based identification ──
         # At close range (or recon observation), we can identify exact unit

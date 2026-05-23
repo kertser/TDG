@@ -118,6 +118,43 @@ const KMapObjects = (() => {
             `<line x1="10" y1="10.5" x2="110" y2="10.5" stroke="#fff" stroke-width="0.5" opacity="0.25"/>` +
             `<line x1="10" y1="25.5" x2="110" y2="25.5" stroke="#fff" stroke-width="0.5" opacity="0.25"/>` +
             `</svg>`,
+        objective_point: (c) =>
+            // NATO tactical objective: double-ring bullseye + 8-point crosshair + center dot
+            `<svg viewBox="0 0 48 48" width="48" height="48">` +
+            // Faint outer awareness ring
+            `<circle cx="24" cy="24" r="21" fill="none" stroke="${c}" stroke-width="0.8" opacity="0.3"/>` +
+            // Main bold ring with translucent fill
+            `<circle cx="24" cy="24" r="13.5" fill="rgba(255,215,0,0.16)" stroke="${c}" stroke-width="3"/>` +
+            // Inner dashed bullseye ring
+            `<circle cx="24" cy="24" r="7" fill="none" stroke="${c}" stroke-width="1.5" stroke-dasharray="3,2.5" opacity="0.85"/>` +
+            // Cardinal tick marks — extend well beyond outer ring
+            `<line x1="24" y1="0" x2="24" y2="10" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>` +
+            `<line x1="24" y1="38" x2="24" y2="48" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>` +
+            `<line x1="0" y1="24" x2="10" y2="24" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>` +
+            `<line x1="38" y1="24" x2="48" y2="24" stroke="${c}" stroke-width="2.5" stroke-linecap="round"/>` +
+            // Diagonal tick marks (45°) — shorter, just outside outer ring
+            `<line x1="9" y1="9" x2="13.5" y2="13.5" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>` +
+            `<line x1="39" y1="9" x2="34.5" y2="13.5" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>` +
+            `<line x1="9" y1="39" x2="13.5" y2="34.5" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>` +
+            `<line x1="39" y1="39" x2="34.5" y2="34.5" stroke="${c}" stroke-width="1.5" stroke-linecap="round"/>` +
+            // Center solid dot
+            `<circle cx="24" cy="24" r="4" fill="${c}"/>` +
+            `</svg>`,
+        landing_zone: (c) =>
+            // Helicopter LZ: circular helipad — outer ring + inner dashed ring + bold H + approach arrows
+            `<svg viewBox="0 0 48 48" width="48" height="48">` +
+            // Outer circle
+            `<circle cx="24" cy="24" r="21" fill="rgba(0,204,102,0.13)" stroke="${c}" stroke-width="3"/>` +
+            // Inner dashed guidance ring
+            `<circle cx="24" cy="24" r="14" fill="none" stroke="${c}" stroke-width="1.2" stroke-dasharray="4,3" opacity="0.65"/>` +
+            // Bold H letterform
+            `<line x1="14" y1="13" x2="14" y2="35" stroke="${c}" stroke-width="4.5" stroke-linecap="round"/>` +
+            `<line x1="34" y1="13" x2="34" y2="35" stroke="${c}" stroke-width="4.5" stroke-linecap="round"/>` +
+            `<line x1="14" y1="24" x2="34" y2="24" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>` +
+            // Approach arrows (N and S) indicating helicopter entry direction
+            `<polygon points="24,1 19.5,8 28.5,8" fill="${c}"/>` +
+            `<polygon points="24,47 19.5,40 28.5,40" fill="${c}"/>` +
+            `</svg>`,
         airfield: (c) =>
             // Airfield: realistic top-down runway with taxiway, apron, markings
             `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 56" width="140" height="56">` +
@@ -203,6 +240,8 @@ const KMapObjects = (() => {
         command_post_structure: '#1565C0', fuel_depot: '#F57F17',
         airfield: '#37474F', supply_cache: '#8D6E63',
         bridge_structure: '#757575',
+        objective_point: '#FFD700', objective_area: '#FFD700',
+        landing_zone: '#00CC66',
         smoke: '#888888', fog_effect: '#E0E0E0',
         fire_effect: '#FF4400', chemical_cloud: '#AACC00',
     };
@@ -781,7 +820,9 @@ const KMapObjects = (() => {
         // Determine icon: SVG function or emoji fallback
         const svgFn = STRUCTURE_SVGS[obj.object_type];
         let iconHtml;
-        let iconW = 32, iconH = 32;
+        // objective_point and landing_zone SVGs are 48×48; others are 32×32
+        const isLargeIcon = (obj.object_type === 'objective_point' || obj.object_type === 'landing_zone');
+        let iconW = isLargeIcon ? 48 : 32, iconH = isLargeIcon ? 48 : 32;
         if (svgFn) {
             iconHtml = `<div class="map-obj-svg-wrap" style="opacity:${opacity};" title="${label}">${svgFn(color)}</div>`;
         } else {
@@ -1351,12 +1392,78 @@ const KMapObjects = (() => {
         return group;
     }
 
-    // ── Polygon obstacles (minefields) ────────────────────────
+    // ── Polygon obstacles (minefields) & objective areas ──────
 
     function _createPolygonLayer(obj, color, inactive, opacity) {
         const rings = obj.geometry.type === 'Polygon'
             ? [obj.geometry.coordinates[0].map(c => [c[1], c[0]])]
             : obj.geometry.coordinates.map(poly => poly[0].map(c => [c[1], c[0]]));
+
+        // ── Objective area: elegant military boundary with vertex markers & label ──
+        if (obj.object_type === 'objective_area') {
+            const objColor = color || '#FFD700';
+            const group = L.featureGroup();
+
+            // Outer polygon: bold dashed boundary
+            const outerPoly = L.polygon(rings, {
+                color: objColor,
+                weight: 3,
+                dashArray: '12, 6',
+                opacity: inactive ? 0.3 : opacity,
+                fillColor: objColor,
+                fillOpacity: inactive ? 0.04 : 0.10,
+                interactive: true,
+            });
+            group.addLayer(outerPoly);
+
+            // Inner polygon: thin solid inner border (creates double-line effect)
+            // approximate by a second polygon with slightly smaller opacity
+            const innerPoly = L.polygon(rings, {
+                color: objColor,
+                weight: 1.2,
+                dashArray: null,
+                opacity: inactive ? 0.15 : 0.45,
+                fill: false,
+                interactive: false,
+            });
+            group.addLayer(innerPoly);
+
+            if (!inactive) {
+                // Vertex diamond markers at each corner
+                const verts = rings[0];
+                const lastIdx = verts.length - 1;
+                verts.forEach(([rlat, rlon], i) => {
+                    if (i === lastIdx) return; // skip duplicate closing vert
+                    group.addLayer(L.marker([rlat, rlon], {
+                        icon: L.divIcon({
+                            className: '',
+                            html: `<svg viewBox="0 0 10 10" width="10" height="10"><polygon points="5,0 10,5 5,10 0,5" fill="${objColor}" stroke="rgba(0,0,0,0.55)" stroke-width="1"/></svg>`,
+                            iconSize: [10, 10],
+                            iconAnchor: [5, 5],
+                        }),
+                        interactive: false,
+                    }));
+                });
+
+                // Centroid "OBJ" label in military text-box style
+                let cLat = 0, cLon = 0;
+                verts.forEach(([rlat, rlon]) => { cLat += rlat; cLon += rlon; });
+                cLat /= verts.length; cLon /= verts.length;
+                const objName = obj.label || 'OBJ';
+                group.addLayer(L.marker([cLat, cLon], {
+                    icon: L.divIcon({
+                        className: '',
+                        html: `<div style="background:rgba(0,0,0,0.70);color:${objColor};font-size:11px;font-weight:800;font-family:'Arial Narrow',Arial,sans-serif;white-space:nowrap;padding:2px 7px 2px 7px;border:2px solid ${objColor};border-radius:2px;letter-spacing:0.06em;pointer-events:none;line-height:1.4;text-shadow:0 0 6px rgba(0,0,0,0.9);">${objName}</div>`,
+                        iconAnchor: [0, -8],
+                    }),
+                    interactive: false,
+                }));
+            }
+
+            _bindTooltipAndContext(outerPoly, obj);
+            if (_isAdminOpen()) _addDragHandle(group, obj, rings[0]);
+            return group;
+        }
 
         // ── Minefields and other polygons ──
         const style = { color, weight: 2, opacity, fillColor: color, fillOpacity: inactive ? 0.05 : 0.15 };

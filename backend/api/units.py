@@ -492,6 +492,12 @@ UNIT_TYPE_SPEEDS: dict[str, dict[str, float]] = {
     "attack_helicopter":        {"slow": 30.0, "fast": 70.0},   # ~108–252 km/h
     "transport_helicopter":     {"slow": 25.0, "fast": 60.0},   # ~90–216 km/h
     "recon_uav":                {"slow": 15.0, "fast": 35.0},   # ~54–126 km/h
+    # Air defense units
+    "manpads_team":             {"slow": 1.0, "fast": 2.5},     # dismounted, foot speed
+    "manpads_section":          {"slow": 1.0, "fast": 2.5},
+    "sam_section":              {"slow": 3.0, "fast": 8.0},     # vehicle-mounted
+    "sam_battery":              {"slow": 2.5, "fast": 7.0},
+    "aa_gun_section":           {"slow": 2.0, "fast": 5.0},
 }
 DEFAULT_SPEEDS = {"slow": 1.2, "fast": 3.0}  # fallback for unknown types
 

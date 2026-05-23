@@ -109,6 +109,36 @@ TEMPLATES_RU = {
         "Здесь {unit}... *помехи*... при...нял... *помехи*... выполн...",
         "{unit}... *шум*... понял... *треск*...",
     ],
+    "wilco_designate": [
+        "Здесь {unit}. Принял. Цель обозначена, передаю данные целеуказания. {status_text}",
+        "{unit}, приём. Так точно, цель захвачена — передаю координаты. {status_text}",
+        "Здесь {unit}. Обозначаю цель. Данные для огня — готовы. {status_text}",
+        "{unit} принял. Цель в прицеле, целеуказание отправлено. {status_text}",
+    ],
+    "wilco_adjust": [
+        "Здесь {unit}. Принял корректировку, применяю. {status_text}",
+        "{unit}, приём. Так точно, переношу огонь согласно корректировке. {status_text}",
+        "Здесь {unit}. Коррекция принята. Уточняю точку падения. {status_text}",
+        "{unit} принял. Корректировка применена, продолжаю наблюдение. {status_text}",
+    ],
+    "wilco_overwatch": [
+        "Здесь {unit}. Принял, занимаю рубеж перекрытия. Огонь по обнаружению. {status_text}",
+        "{unit}, приём. Так точно, прикрываю сектор. При появлении противника — открываю огонь. {status_text}",
+        "Здесь {unit}. Принял. Веду наблюдение, готов к ведению огня по сектору. {status_text}",
+        "{unit} принял. Рубеж перекрытия — занял. Готов к поддержке огнём. {status_text}",
+    ],
+    "wilco_warno": [
+        "Здесь {unit}. Принял предупреждение. Готовлюсь к выполнению задачи. {status_text}",
+        "{unit}, приём. Так точно, повышаю готовность. Жду боевого приказа. {status_text}",
+        "Здесь {unit}. ВАРНО принят. Проверяю снаряжение, ожидаю команды. {status_text}",
+        "{unit} принял. В готовности. Ожидаю подтверждающего приказа. {status_text}",
+    ],
+    "wilco_decontaminate": [
+        "Здесь {unit}. Принял, начинаю дезактивацию района. {status_text}",
+        "{unit}, приём. Так точно, выдвигаемся для ликвидации заражения. {status_text}",
+        "Здесь {unit}. Принял. Приступаем к дезактивации. {status_text}",
+        "{unit} принял. Дезактивация началась, завершение через несколько тиков. {status_text}",
+    ],
 }
 
 TEMPLATES_EN = {
@@ -155,6 +185,36 @@ TEMPLATES_EN = {
         "This is {unit}. Roger, engaging designated target. Inbound hot. {status_text}",
         "{unit}, copy. Airstrike acknowledged. Rolling in on target. {status_text}",
         "This is {unit}. Target acquired. Breaking to attack. {status_text}",
+    ],
+    "wilco_designate": [
+        "This is {unit}. Roger, target designated. Transmitting fire mission data. {status_text}",
+        "{unit}, copy. Target locked — coordinates on the way. {status_text}",
+        "This is {unit}. Designation complete. Stand by for fire data. {status_text}",
+        "{unit}, target in sight. Fire mission data transmitted. {status_text}",
+    ],
+    "wilco_adjust": [
+        "This is {unit}. Roger, adjusting fire. Applying correction. {status_text}",
+        "{unit}, copy. Shift acknowledged, re-firing on updated coordinates. {status_text}",
+        "This is {unit}. Correction received. Adjusting point of impact. {status_text}",
+        "{unit}, adjustment applied. Continuing observation. {status_text}",
+    ],
+    "wilco_overwatch": [
+        "This is {unit}. Roger, taking overwatch position. Engaging on observation. {status_text}",
+        "{unit}, copy. Covering sector, standing by to engage. {status_text}",
+        "This is {unit}. Wilco, overwatch established. Sector locked. {status_text}",
+        "{unit}, in position. Overwatch active, fire on sight. {status_text}",
+    ],
+    "wilco_warno": [
+        "This is {unit}. Roger, WARNO received. Preparing for mission. {status_text}",
+        "{unit}, copy. Warning order acknowledged. Standby for execute order. {status_text}",
+        "This is {unit}. WARNO copy. Equipment checks in progress, awaiting orders. {status_text}",
+        "{unit}, acknowledged. Readiness increased. Awaiting confirmation. {status_text}",
+    ],
+    "wilco_decontaminate": [
+        "This is {unit}. Roger, commencing decontamination. {status_text}",
+        "{unit}, copy. CBRN decontamination operation underway. {status_text}",
+        "This is {unit}. Wilco, clearing contaminated area. Estimated completion — several ticks. {status_text}",
+        "{unit}, decontamination in progress. Stand by. {status_text}",
     ],
     "wilco_observe": [
         "This is {unit}. Roger, taking position. {status_text}",

@@ -128,6 +128,7 @@ DAMAGE_SCALAR = 0.02  # ~2% strength loss per tick under sustained fire
 ATTACK_POSTURE_MOD = 0.65
 DEFEND_POSTURE_MOD = 1.15
 FLANK_PROTECTION_REDUCTION = 0.75
+REAR_PROTECTION_REDUCTION  = 0.55   # attack from rear arc
 SUPPRESSION_BREAKTHROUGH_THRESHOLD = 0.60
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -241,6 +242,163 @@ def _get_protection_from_objects(lat: float, lon: float, map_objects: list) -> f
             best_protection = prot
 
     return best_protection
+
+
+def _compute_flank_factor(attacker, target) -> float:
+    """
+    Returns a protection multiplier based on the attack bearing vs the target's heading.
+
+    < 1.0 means flanking advantage (target protection is weakened).
+    Returns 1.0 (no bonus) when heading data is unavailable or for close-range combat.
+
+    Protection scale:
+      Front arc   (0–60°)  → 1.0   (no reduction)
+      Flank arc  (60–120°) → FLANK_PROTECTION_REDUCTION  (0.75)
+      Rear arc  (120–180°) → REAR_PROTECTION_REDUCTION   (0.55)
+
+    NOT applied to area fire or aviation strikes (handled by callers).
+    """
+    from backend.engine.geo_utils import bearing_deg
+
+    if not isinstance(attacker.heading_deg, (int, float)):
+        return 1.0
+    if not isinstance(target.heading_deg, (int, float)):
+        return 1.0
+    if attacker.position is None or target.position is None:
+        return 1.0
+
+    try:
+        att_pt = to_shape(attacker.position)
+        tgt_pt = to_shape(target.position)
+    except Exception:
+        return 1.0
+
+    # Close-range combat (<100m) is multi-directional — halve the flanking bonus
+    dist = math.hypot(
+        (att_pt.x - tgt_pt.x) * 74_000.0,
+        (att_pt.y - tgt_pt.y) * 111_320.0,
+    )
+    close_range = dist < 100.0
+
+    attack_bearing = bearing_deg(tgt_pt, att_pt)  # direction from target → attacker
+    # Angle between attack bearing and the DIRECTION THE TARGET IS FACING
+    angle_diff = abs((attack_bearing - target.heading_deg + 360) % 360)
+    if angle_diff > 180:
+        angle_diff = 360 - angle_diff
+
+    if angle_diff > 120:
+        factor = REAR_PROTECTION_REDUCTION
+    elif angle_diff > 60:
+        factor = FLANK_PROTECTION_REDUCTION
+    else:
+        return 1.0  # frontal — no reduction
+
+    if close_range:
+        # Halve the advantage at close quarters
+        factor = 1.0 - (1.0 - factor) * 0.5
+
+    return factor
+
+
+# ── §3 Fire Observer → Fire Mission Loop ─────────────────────────────────────
+
+DESIGNATION_STALE_TICKS = 5   # marked_target expires after this many ticks without refresh
+OBSERVER_UNIT_TYPES = {"observation_post", "recon_team", "recon_section", "engineer_recon_team"}
+
+
+def process_target_designation(all_units: list, tick: int) -> list[dict]:
+    """
+    Process designate_target and adjust_fire tasks each tick.
+
+    - Expire stale marked_target entries.
+    - For units with active designate_target task: write marked_target to capabilities.
+    - For units with adjust_fire task: shift the existing marked_target lat/lon and improve accuracy.
+
+    Call this BEFORE process_artillery_support() each tick.
+
+    Returns list of event dicts.
+    """
+    events: list[dict] = []
+    for unit in all_units:
+        if unit.is_destroyed:
+            continue
+        caps = dict(unit.capabilities or {})
+
+        # 1. Expire stale marked_target
+        mt = caps.get("marked_target")
+        if mt and tick > mt.get("stale_after_tick", 0):
+            caps.pop("marked_target", None)
+            unit.capabilities = caps
+            events.append({
+                "event_type": "designation_expired",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} target designation expired",
+                "visibility": unit.side.value if hasattr(unit.side, "value") else str(unit.side),
+                "payload": {"observer_unit_id": str(unit.id)},
+            })
+            continue  # after expiry, no further processing this tick
+
+        task = unit.current_task or {}
+        task_type = task.get("type", "")
+
+        # 2. designate_target → write/refresh marked_target
+        if task_type == "designate_target":
+            target_unit_id = task.get("target_unit_id")
+            target_lat     = task.get("target_lat") or (
+                task.get("target_location", {}).get("lat") if task.get("target_location") else None
+            )
+            target_lon     = task.get("target_lon") or (
+                task.get("target_location", {}).get("lon") if task.get("target_location") else None
+            )
+            if not (target_lat and target_lon) and not target_unit_id:
+                continue  # nothing to designate
+            accuracy_m = 30 if unit.unit_type == "observation_post" else 80
+            caps["marked_target"] = {
+                "target_unit_id": str(target_unit_id) if target_unit_id else None,
+                "target_lat": target_lat,
+                "target_lon": target_lon,
+                "observer_unit_id": str(unit.id),
+                "marked_at_tick": tick,
+                "accuracy_m": accuracy_m,
+                "stale_after_tick": tick + DESIGNATION_STALE_TICKS,
+            }
+            unit.capabilities = caps
+            events.append({
+                "event_type": "target_designated",
+                "actor_unit_id": unit.id,
+                "payload": {k: str(v) if hasattr(v, "__str__") else v
+                            for k, v in caps["marked_target"].items()},
+                "text_summary": f"{unit.name} designated target for fire mission",
+                "visibility": unit.side.value if hasattr(unit.side, "value") else str(unit.side),
+            })
+
+        # 3. adjust_fire → shift own marked_target lat/lon and improve accuracy
+        elif task_type == "adjust_fire":
+            if not mt:
+                events.append({
+                    "event_type": "adjust_fire_no_target",
+                    "actor_unit_id": unit.id,
+                    "text_summary": f"{unit.name} issued adjust_fire but has no active marked_target",
+                    "payload": {},
+                })
+                continue
+            delta_lat = float(task.get("delta_lat", 0))
+            delta_lon = float(task.get("delta_lon", 0))
+            mt["target_lat"] = float(mt.get("target_lat", 0)) + delta_lat
+            mt["target_lon"] = float(mt.get("target_lon", 0)) + delta_lon
+            mt["accuracy_m"]       = max(20.0, float(mt.get("accuracy_m", 80)) * 0.6)
+            mt["stale_after_tick"] = tick + DESIGNATION_STALE_TICKS  # refresh
+            caps["marked_target"]  = mt
+            unit.capabilities      = caps
+            events.append({
+                "event_type": "fire_adjusted",
+                "actor_unit_id": unit.id,
+                "text_summary": f"{unit.name} adjusted fire mission (accuracy now {mt['accuracy_m']:.0f}m)",
+                "visibility": unit.side.value if hasattr(unit.side, "value") else str(unit.side),
+                "payload": {"delta_lat": delta_lat, "delta_lon": delta_lon, "accuracy_m": mt["accuracy_m"]},
+            })
+
+    return events
 
 
 def process_combat(
@@ -511,6 +669,16 @@ def process_combat(
         if combat_role == "flank":
             tgt_protection *= FLANK_PROTECTION_REDUCTION
 
+        # Heading-based flank/rear bonus (independent of combat_role assignment)
+        # Not applied for aviation strikes
+        _aviation_set = {"attack_helicopter", "transport_helicopter", "recon_uav"}
+        heading_flank = 1.0
+        if attacker.unit_type not in _aviation_set:
+            heading_flank = _compute_flank_factor(attacker, target)
+            tgt_protection *= heading_flank
+            if heading_flank < 1.0 and _debug:
+                dlog(f"    [combat] flank factor {heading_flank:.2f} applied vs {target.name}")
+
         # Apply damage
         damage = fire_effectiveness * DAMAGE_SCALAR / tgt_protection
         target.strength = max(0.0, (target.strength or 1.0) - damage)
@@ -578,6 +746,7 @@ def process_combat(
                     "target_lat": tgt_pos[0],
                     "target_lon": tgt_pos[1],
                     "is_artillery": is_arty,
+                    **({"flank_factor": round(heading_flank, 3)} if heading_flank < 1.0 else {}),
                 },
             })
 
@@ -1396,6 +1565,7 @@ def process_artillery_support(
     under_fire: set | None = None,
     attacking_map: dict | None = None,
     fire_requests: list[dict] | None = None,
+    tick: int = 0,
 ) -> list[dict]:
     """
     Auto-assign idle artillery units to support attacking units OR units under fire in their CoC.
@@ -1472,11 +1642,43 @@ def process_artillery_support(
                 refreshed.pop("target_unit_id", None)
             arty.current_task = refreshed
 
+    # ── Convert observer-designated targets into high-priority fire requests ──
+    # Observers with marked_target in capabilities get priority over auto-assignment.
+    observer_reqs: list[dict] = []
+    for u in all_units:
+        if u.is_destroyed:
+            continue
+        mt = (getattr(u, "capabilities", None) or {}).get("marked_target")
+        if not mt:
+            continue
+        obs_lat  = mt.get("target_lat")
+        obs_lon  = mt.get("target_lon")
+        if obs_lat is None or obs_lon is None:
+            continue
+        # Apply accuracy jitter (reproducible per tick)
+        from backend.engine._rng import deterministic_roll
+        from backend.engine.geo_utils import METERS_PER_DEG_LAT, meters_per_deg_lon
+        accuracy_m   = float(mt.get("accuracy_m", 80))
+        jitter_angle = deterministic_roll(tick,     u.id) * 360.0
+        jitter_dist  = deterministic_roll(tick + 1, u.id) * accuracy_m
+        jitter_lat   = math.cos(math.radians(jitter_angle)) * jitter_dist / METERS_PER_DEG_LAT
+        jitter_lon   = math.sin(math.radians(jitter_angle)) * jitter_dist / meters_per_deg_lon(obs_lat)
+        observer_reqs.append({
+            "unit_id": str(u.id),
+            "target_location": {"lat": obs_lat + jitter_lat, "lon": obs_lon + jitter_lon},
+            "target_unit_id": mt.get("target_unit_id"),
+            "_observer_accuracy_m": accuracy_m,
+        })
+    # Sort by accuracy (most accurate designation first)
+    observer_reqs.sort(key=lambda r: r.get("_observer_accuracy_m", 999))
+    # Combine: observer-designated first, then explicit fire requests
+    effective_fire_requests = observer_reqs + (fire_requests or [])
+
     # Track which artillery units have already been tasked this tick
     tasked_artillery = set()
 
     # ── Process explicit fire requests FIRST (highest priority) ──
-    for req in fire_requests:
+    for req in effective_fire_requests:
         req_unit_id = req.get("unit_id")
         req_target_loc = req.get("target_location")
         req_target_uid = req.get("target_unit_id")

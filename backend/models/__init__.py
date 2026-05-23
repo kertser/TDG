@@ -15,6 +15,7 @@ from backend.models.terrain_cell import TerrainCell
 from backend.models.elevation_cell import ElevationCell
 from backend.models.map_object import MapObject, ObjectCategory, ObjectSide
 from backend.models.chat_message import ChatMessage
+from backend.models.learning_proposal import LearningProposal, ProposalType, ProposalStatus
 
 __all__ = [
     "User",
@@ -32,5 +33,6 @@ __all__ = [
     "ElevationCell",
     "MapObject", "ObjectCategory", "ObjectSide",
     "ChatMessage",
+    "LearningProposal", "ProposalType", "ProposalStatus",
 ]
 

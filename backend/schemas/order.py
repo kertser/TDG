@@ -51,11 +51,20 @@ class OrderType(str, enum.Enum):
     resupply = "resupply"
     request_fire = "request_fire"
     report_status = "report_status"
+    # Fire observer loop
+    designate_target = "designate_target"  # ОП обозначает цель для артиллерии
+    adjust_fire      = "adjust_fire"       # корректировка по результату залпа
     # Aviation / air-mobility
     air_assault = "air_assault"     # helicopter insertion of troops
     casevac = "casevac"             # casualty evacuation (combat)
     medevac = "medevac"             # medical evacuation (non-combat)
     airstrike = "airstrike"         # request / execute air strike
+    # Overwatch / covering fire
+    overwatch = "overwatch"         # hold position and auto-fire in designated sector
+    # Warning order
+    warno = "warno"                 # pre-notification of upcoming mission
+    # Engineering — CBRN decontamination
+    decontaminate = "decontaminate"  # engineer decontamination of a chemical-cloud area
 
 
 class SpeedMode(str, enum.Enum):
@@ -75,6 +84,11 @@ class ResponseType(str, enum.Enum):
     wilco_air_assault = "wilco_air_assault"  # will comply — air assault/insertion
     wilco_casevac = "wilco_casevac"          # will comply — casevac/medevac
     wilco_airstrike = "wilco_airstrike"      # will comply — airstrike mission
+    wilco_designate = "wilco_designate"      # will comply — designating target for fire mission
+    wilco_adjust    = "wilco_adjust"         # will comply — adjusting fire correction
+    wilco_overwatch = "wilco_overwatch"      # will comply — overwatch / covering fire in sector
+    wilco_warno     = "wilco_warno"          # will comply — warning order received, preparing
+    wilco_decontaminate = "wilco_decontaminate"  # will comply — decontamination operation
     unable = "unable"                 # cannot comply
     unable_range = "unable_range"     # cannot comply — target beyond max fire range
     unable_route = "unable_route"     # cannot comply — no passable route to destination
@@ -194,6 +208,17 @@ class ParsedOrderData(BaseModel):
         description="For compound commands: subsequent phases after the primary order. "
                     "Each entry: {order_type, locations: [{source_text, ref_type, normalized}], "
                     "speed, formation, condition: 'task_completed'|'location_reached'}",
+    )
+
+    # For FRAGO (Fragmentary Order) — partial update to an existing task
+    is_frago: bool = Field(
+        False,
+        description="True when the message modifies an existing task rather than issuing a new one",
+    )
+    frago_patch: Optional[dict] = Field(
+        None,
+        description="For FRAGO: dict of ONLY the changed fields to merge into the current task "
+                    "(e.g. {target_location: …} or {speed: 'fast'})",
     )
 
     # For acknowledgment / status_report messages

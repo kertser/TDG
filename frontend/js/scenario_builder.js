@@ -723,6 +723,8 @@ const KScenarioBuilder = (() => {
                 if (vbEl) vbEl.value = s.objectives.victory_blue || '';
                 const vrEl = document.getElementById('sb-victory-red');
                 if (vrEl) vrEl.value = s.objectives.victory_red || '';
+                // Fill OPORD fields if stored
+                if (s.objectives.opord) _fillOpordFields(s.objectives.opord);
             }
 
             // Fill grid settings
@@ -1064,6 +1066,211 @@ const KScenarioBuilder = (() => {
     }
 
     // ══════════════════════════════════════════════════
+    // ── OPORD Builder ────────────────────────────────
+    // ══════════════════════════════════════════════════
+
+    /** Toggle an OPORD accordion section open/closed. */
+    function toggleOpordSection(bodyId) {
+        const body = document.getElementById(bodyId);
+        if (!body) return;
+        const hdr = body.previousElementSibling;
+        const isOpen = body.style.display !== 'none';
+        body.style.display = isOpen ? 'none' : '';
+        if (hdr) hdr.classList.toggle('open', !isOpen);
+    }
+
+    /** Collect OPORD field values into a structured object. */
+    function _readOpordFields() {
+        const _v = id => (document.getElementById(id) || {}).value || '';
+        return {
+            situation: {
+                theater: _v('sb-opord-theater'),
+                friendly: _v('sb-opord-friendly'),
+            },
+            mission: {
+                who: _v('sb-opord-who'),
+                what: _v('sb-opord-what'),
+                when: _v('sb-opord-when'),
+                where: _v('sb-opord-where'),
+                why: _v('sb-opord-why'),
+            },
+            execution: {
+                intent: _v('sb-opord-intent'),
+                concept: _v('sb-opord-concept'),
+                coordinating: _v('sb-opord-coord'),
+            },
+            service_support: {
+                ammo: _v('sb-opord-ammo'),
+                fuel: _v('sb-opord-fuel'),
+                medical: _v('sb-opord-medical'),
+                maintenance: _v('sb-opord-maint'),
+            },
+            c2: {
+                hq_location: _v('sb-opord-hq'),
+                radio_nets: _v('sb-opord-nets'),
+                reporting: _v('sb-opord-reporting'),
+                succession: _v('sb-opord-succession'),
+            },
+        };
+    }
+
+    /** Populate OPORD fields from stored opord object. */
+    function _fillOpordFields(opord) {
+        if (!opord) return;
+        const _s = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+        const sit = opord.situation || {};
+        _s('sb-opord-theater', sit.theater);
+        _s('sb-opord-friendly', sit.friendly);
+        const mis = opord.mission || {};
+        _s('sb-opord-who', mis.who);
+        _s('sb-opord-what', mis.what);
+        _s('sb-opord-when', mis.when);
+        _s('sb-opord-where', mis.where);
+        _s('sb-opord-why', mis.why);
+        const ex = opord.execution || {};
+        _s('sb-opord-intent', ex.intent);
+        _s('sb-opord-concept', ex.concept);
+        _s('sb-opord-coord', ex.coordinating);
+        const ss = opord.service_support || {};
+        _s('sb-opord-ammo', ss.ammo);
+        _s('sb-opord-fuel', ss.fuel);
+        _s('sb-opord-medical', ss.medical);
+        _s('sb-opord-maint', ss.maintenance);
+        const c2 = opord.c2 || {};
+        _s('sb-opord-hq', c2.hq_location);
+        _s('sb-opord-nets', c2.radio_nets);
+        _s('sb-opord-reporting', c2.reporting);
+        _s('sb-opord-succession', c2.succession);
+    }
+
+    /** Generate Markdown description from OPORD fields. */
+    function _opordToMarkdown(opord) {
+        const lines = ['# OPERATIONS ORDER', ''];
+        const mis = opord.mission || {};
+        if (mis.who || mis.what || mis.when || mis.where || mis.why) {
+            lines.push('## §2 TASK', '');
+            if (mis.who) lines.push(`**Who:** ${mis.who}`);
+            if (mis.what) lines.push(`**What:** ${mis.what}`);
+            if (mis.when) lines.push(`**When:** ${mis.when}`);
+            if (mis.where) lines.push(`**Where:** ${mis.where}`);
+            if (mis.why) lines.push(`**Why:** ${mis.why}`);
+            lines.push('');
+        }
+        const sit = opord.situation || {};
+        if (sit.theater || sit.friendly) {
+            lines.push('## §1 SITUATION', '');
+            if (sit.theater) lines.push('**Enemy/Theater:**', sit.theater, '');
+            if (sit.friendly) lines.push('**Friendly Forces:**', sit.friendly, '');
+        }
+        const ex = opord.execution || {};
+        if (ex.intent || ex.concept || ex.coordinating) {
+            lines.push('## §3 EXECUTION', '');
+            if (ex.intent) lines.push("**Commander's Intent:**", ex.intent, '');
+            if (ex.concept) lines.push('**Concept of Operations:**', ex.concept, '');
+            if (ex.coordinating) lines.push('**Coordinating Instructions:**', ex.coordinating, '');
+        }
+        const ss = opord.service_support || {};
+        const ssVals = [ss.ammo, ss.fuel, ss.medical, ss.maintenance].filter(Boolean);
+        if (ssVals.length) {
+            lines.push('## §4 SERVICE SUPPORT', '');
+            if (ss.ammo) lines.push(`**Ammo:** ${ss.ammo}`);
+            if (ss.fuel) lines.push(`**Fuel:** ${ss.fuel}`);
+            if (ss.medical) lines.push(`**Medical:** ${ss.medical}`);
+            if (ss.maintenance) lines.push(`**Maintenance:** ${ss.maintenance}`);
+            lines.push('');
+        }
+        const c2 = opord.c2 || {};
+        const c2Vals = [c2.hq_location, c2.radio_nets, c2.reporting, c2.succession].filter(Boolean);
+        if (c2Vals.length) {
+            lines.push('## §5 COMMAND & SIGNAL', '');
+            if (c2.hq_location) lines.push(`**HQ:** ${c2.hq_location}`);
+            if (c2.radio_nets) lines.push(`**Radio Nets:** ${c2.radio_nets}`);
+            if (c2.reporting) lines.push(`**Reporting:** ${c2.reporting}`);
+            if (c2.succession) lines.push(`**Succession:** ${c2.succession}`);
+            lines.push('');
+        }
+        return lines.join('\n').trim();
+    }
+
+    /**
+     * Save the OPORD — writes structured data into objectives.opord and
+     * overwrites scenario.description with generated Markdown.
+     * Uses the same save endpoint as saveScenario() but sends only
+     * description + objectives updates.
+     */
+    async function saveOpord() {
+        if (!_scenarioId) {
+            await KDialogs.alert('Save the scenario first before saving the OPORD.');
+            return;
+        }
+        const title = (document.getElementById('sb-scenario-title') || {}).value || '';
+        if (!title) { await KDialogs.alert('Scenario title required'); return; }
+
+        const opord = _readOpordFields();
+        const description = _opordToMarkdown(opord);
+
+        // Merge into existing objectives
+        const turnLimit = parseInt((document.getElementById('sb-turn-limit') || {}).value) || 0;
+        const mission = ((document.getElementById('sb-scenario-mission') || {}).value || '').trim()
+            || opord.mission.what || '';
+        const victoryBlue = ((document.getElementById('sb-victory-blue') || {}).value || '').trim();
+        const victoryRed = ((document.getElementById('sb-victory-red') || {}).value || '').trim();
+
+        const objectives = {
+            turn_limit: turnLimit,
+            mission: mission || null,
+            victory_blue: victoryBlue || null,
+            victory_red: victoryRed || null,
+            opord,
+        };
+
+        // Build minimal update body (reuse saveScenario payload but with OPORD description)
+        const center = _map.getCenter();
+        const gridOriginLat = parseFloat((document.getElementById('sb-grid-origin-lat') || {}).value) || center.lat;
+        const gridOriginLon = parseFloat((document.getElementById('sb-grid-origin-lon') || {}).value) || center.lng;
+        const gridCols = Math.max(1, parseInt((document.getElementById('sb-grid-cols') || {}).value) || 8);
+        const gridRows = Math.max(1, parseInt((document.getElementById('sb-grid-rows') || {}).value) || 8);
+        const gridSize = Math.max(100, parseInt((document.getElementById('sb-grid-size') || {}).value) || 1000);
+        const grid_settings = {
+            origin_lat: gridOriginLat, origin_lon: gridOriginLon,
+            orientation_deg: 0, base_square_size_m: gridSize,
+            columns: gridCols, rows: gridRows, labeling_scheme: 'alphanumeric',
+        };
+        const blue = _stagedUnits.filter(u => u.side === 'blue').map(_unitToPayload);
+        const red = _stagedUnits.filter(u => u.side === 'red').map(_unitToPayload);
+
+        const body = {
+            title,
+            description,
+            map_center_lat: center.lat,
+            map_center_lon: center.lng,
+            map_zoom: _map.getZoom(),
+            grid_settings,
+            initial_units: { blue, red, red_agents: [] },
+            objectives,
+        };
+
+        try {
+            const resp = await fetch(`/api/scenarios/${_scenarioId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (resp.ok) {
+                // Also update the description textarea to reflect the generated markdown
+                const descEl = document.getElementById('sb-scenario-desc');
+                if (descEl) descEl.value = description;
+                await KDialogs.alert('OPORD saved! Scenario description updated.');
+            } else {
+                const err = await resp.json().catch(() => ({}));
+                await KDialogs.alert('Save failed: ' + (err.detail || resp.status));
+            }
+        } catch (err) {
+            await KDialogs.alert('Save error: ' + err.message);
+        }
+    }
+
+    // ══════════════════════════════════════════════════
     // ── Public API ───────────────────────────────────
     // ══════════════════════════════════════════════════
 
@@ -1077,6 +1284,10 @@ const KScenarioBuilder = (() => {
         init, activate, deactivate, isActive,
         saveScenario, editUnit, removeUnit,
         getUnitTypes, resetUnitTypes, clearGridPreview,
+        /** Toggle an OPORD accordion body open/closed. */
+        toggleOpordSection,
+        /** Save OPORD and generate Markdown description. */
+        saveOpord,
         /** Force-render the builder's grid preview (called by grid.js after a KGrid load while builder is active). */
         forceGridPreview: () => { if (_active) _updateGridPreview(true); },
         // For form callbacks

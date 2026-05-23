@@ -30,8 +30,11 @@ collaborative map drawing, terrain intelligence, and structured order understand
 - **Reports** — Five auto-generated report types: SPOTREP (enemy contacts), SHELREP (under fire), CASREP (unit destroyed), SITREP (periodic status), INTSUM (intelligence summary). Bilingual RU/EN. Unread badge on sidebar tab.
 - **Session Replay** — Turn-by-turn playback with transport controls (play/pause, step forward/back, speed 0.5×–4×), timeline slider, per-tick unit position rendering with smooth animation, and LLM-generated After-Action Report (AAR)
 - **Internationalization (i18n)** — Full EN/RU UI language switching via `KI18n` module; `data-i18n` HTML attributes for declarative translation; language selector in user settings; real-time re-rendering on language change
-- **AI Victory Referee** — LLM-based victory evaluation every 5 ticks against scenario objectives. Game turn limit support. Auto-finish on victory or turn limit.
+- **Objective Control & Victory** — Deterministic territorial victory check each tick (`objective_control.py`): emits `objective_captured`/`objective_contested` events, detects annihilation, evaluates `objectives_to_win` threshold — all without LLM. LLM-based narrative referee runs every 5 ticks against custom scenario objectives. Game turn limit support. Auto-finish on victory or turn limit.
 - **Red AI Opponents** — AI commander agents with 4 doctrine profiles (aggressive/balanced/cautious/defensive), limited knowledge (no Blue leaks), LLM decisions with rule-based fallback
+- **Trainer Friction Injection** — Admin can inject mid-exercise friction onto any unit: `breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty` — each with duration (ticks) and magnitude. Stored in `unit.capabilities.friction`. Clear per-unit or let it expire naturally.
+- **Adaptive Phrasebook Learning** — Admin-triggered statistical mining of command phrasebook proposals from real session data. Cross-session clustering (requires ≥5 sessions, ≥3 users), optional LLM quality judge, human review workflow (approve/reject/apply). Approved proposals are written to `order_phrasebook.toml` and hot-reloaded without restart.
+- **Interactive Tutorial** — Spotlight-based onboarding tutorial auto-shows on first login (`KTutorial`). Step-by-step guided tour with DOM element highlighting. Completion persisted server-side per user; reopenable from settings.
 - **Game Log** — Append-only event timeline, reports panel with channel filtering, app log (separated from tactical data)
 - **Editable Config** — Unit type definitions and display constants stored in JSON config files (`unit_types.json`, `units_config.json`) instead of hardcoded JavaScript
 
@@ -438,30 +441,32 @@ The phrasebook is loaded at startup by `backend/services/order_phrasebook.py` an
 ## Usage
 
 1. Enter a callsign and password, then click **Register** (first time) or **Login**
-2. Click a session from the list to join (sessions are created by the admin)
-3. Click **Start Session** to initialize units from the scenario
-4. Military unit symbols appear on the map (filtered by your side's fog of war)
-5. Use the **map control panel** (top-right) to toggle drawing tools, grid, units, overlays, contacts, labels, and terrain
-6. **Draw overlays**: select a tool (arrow, polyline, rectangle, marker, ellipse, measure) and draw on the map; overlays sync in real-time via WebSocket
-7. **Command units**: left-click to select, shift+click for multi-select, left-drag for rubber-band mass selection, alt+click to cycle stacked units; right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign)
-8. **Submit orders** in the **📡 Orders** tab of the bottom command panel (select units first, or click **👥 All**)
-9. **Radio chat** in the **📻 Radio** tab — send tactical messages to specific commanders or broadcast to all; filter by channel (All / 💬 Chat / 📡 Units)
-10. **Advance simulation** by clicking **Execute Orders** — units move along A*-optimized paths, detect enemies, fight with coordinated roles, and report back via radio
-11. View events and reports in the sidebar tabs (**Events**, **Reports** with unread badge); click the **📋 session name** for scenario briefing
-12. Reference **height tops** in orders: *"Move toward height 170"* / *"Выдвинуться к высоте 170"*
-13. **Switch language**: open user settings and select English or Russian — the entire UI updates in real-time
-14. **Replay a session**: hover the game clock (bottom-right) and click **Replay** to load turn-by-turn playback; use transport controls to step through ticks or auto-play; click **📊 AAR** to generate an AI-written After-Action Report
+2. On first login an **interactive tutorial** walks you through the interface step by step; dismiss at any time or replay it from user settings
+3. Click a session from the list to join (sessions are created by the admin)
+4. Click **Start Session** to initialize units from the scenario
+5. Military unit symbols appear on the map (filtered by your side's fog of war)
+6. Use the **map control panel** (top-right) to toggle drawing tools, grid, units, overlays, contacts, labels, and terrain
+7. **Draw overlays**: select a tool (arrow, polyline, rectangle, marker, ellipse, measure) and draw on the map; overlays sync in real-time via WebSocket
+8. **Command units**: left-click to select, shift+click for multi-select, left-drag for rubber-band mass selection, alt+click to cycle stacked units; right-click for context menu (move slow 🐢/fast ⚡, formation, split, merge, rename, assign)
+9. **Submit orders** in the **📡 Orders** tab of the bottom command panel (select units first, or click **👥 All**)
+10. **Radio chat** in the **📻 Radio** tab — send tactical messages to specific commanders or broadcast to all; filter by channel (All / 💬 Chat / 📡 Units)
+11. **Advance simulation** by clicking **Execute Orders** — units move along A*-optimized paths, detect enemies, fight with coordinated roles, and report back via radio
+12. View events and reports in the sidebar tabs (**Events**, **Reports** with unread badge); click the **📋 session name** for scenario briefing
+13. Reference **height tops** in orders: *"Move toward height 170"* / *"Выдвинуться к высоте 170"*
+14. **Switch language**: open user settings and select English or Russian — the entire UI updates in real-time
+15. **Replay a session**: hover the game clock (bottom-right) and click **Replay** to load turn-by-turn playback; use transport controls to step through ticks or auto-play; click **📊 AAR** to generate an AI-written After-Action Report
 
 ### Admin Panel
 Press the admin button (🔑) and enter the admin password to access:
 - **Session** — start/pause/tick controls, session creation wizard (4 steps), delete all units, reset session
-- **Monitor** — god view (see all units on both sides), unit dashboard with focus/edit/delete/split/merge, debug log toggle (detailed tick-by-tick engine data)
+- **Monitor** — god view (see all units on both sides), unit dashboard with focus/edit/delete/split/merge, debug log toggle (detailed tick-by-tick engine data), **trainer friction injection** (degrade any unit mid-exercise: breakdown, comms failure, ammo shortage, etc.)
 - **Builder** — interactive scenario builder with map-click unit placement, grid configuration, save/load, save session → scenario
 - **CoC** — full chain of command hierarchy editor with drag-and-drop reparenting, bulk assign/unassign
 - **Users** — manage session participants
 - **Types** — unit type editor with live SIDC preview (modify speeds, ranges, personnel, eye heights)
 - **Terrain** — analyze terrain (OSM + ESA + elevation), paint cells manually, clear/reload
 - **Effects** — place area effects: smoke, fog, fire, chemical clouds (transient polygon hazards)
+- **Learning** — trigger phrasebook mining from session order data; review and approve/reject candidate phrasebook expansions; apply approved entries to `order_phrasebook.toml` with live hot-reload
 
 ### Map Objects (Tactical Obstacles & Structures)
 When admin panel is open:
@@ -503,7 +508,7 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 16. **Events & Reports** → notable state changes logged; auto-reports generated (SPOTREP, SHELREP, CASREP, SITREP, INTSUM)
 17. **Radio Chatter** → idle unit reports, peer support requests, casualty reports, artillery fire exchanges, coordinated attack planning, contact-during-advance messages
 18. **Area Effects** → fire/chemical cloud damage applied; effect durations tick down; expired effects removed
-19. **Victory Check** → LLM evaluates victory conditions every 5 ticks; turn limit checked
+19. **Victory Check** → Deterministic objective-control check first (annihilation + objective threshold, no LLM); then LLM evaluates custom victory conditions every 5 ticks; turn limit checked
 20. **Broadcast** → updated state pushed to all connected clients via WebSocket
 
 ### Movement
@@ -545,13 +550,18 @@ The game advances in discrete ticks (default: 1 minute of game time per tick). E
 - **Auto-return fire**: Units under attack with no orders engage nearest attacker (except disengaging units)
 
 ### Unit Types
-39 unit types defined in `frontend/config/unit_types.json`, each with:
+43 unit types defined in `frontend/config/unit_types.json`, each with:
 - MIL-STD-2525D SIDC codes (Blue + Red variants)
 - Slow/fast movement speeds (m/s)
 - Detection range, fire range, personnel count
 - Eye height for LOS calculations
 - Indirect fire flag (mortars, artillery)
 - Special capabilities (aviation terrain bypass, cargo capacity, etc.)
+
+**Air Defence units** (4 types):
+- **MANPADS Team / Section** — 4–8 personnel, 3–3.5km fire range
+- **SAM Section** — 12 personnel, 8km fire range, 10km detection
+- **AA Gun Section** — 10 personnel, 2.5km fire range
 
 **Aviation units** (3 types):
 - **Attack Helicopter** — 70 m/s fast, 5km detection, 4km fire range, 100m eye height
@@ -633,7 +643,7 @@ KShU/
 │   ├── main.py                     # FastAPI app factory
 │   ├── config.py                   # Pydantic settings
 │   ├── database.py                 # Async SQLAlchemy engine
-│   ├── models/                     # SQLAlchemy models (15 tables)
+│   ├── models/                     # SQLAlchemy models (16 tables incl. learning_proposals)
 │   ├── api/                        # REST + WebSocket endpoints
 │   ├── engine/                     # Deterministic rules engine (tick processing)
 │   ├── services/                   # Business logic (grid, orders, visibility, pathfinding, etc.)
@@ -643,6 +653,7 @@ KShU/
 │   │   ├── retrieval_context.py    # Prompt compression & doctrine retrieval
 │   │   ├── local_triage.py         # Local LLM triage classifier
 │   │   ├── los_service.py          # LOS viewshed ray casting
+│   │   ├── learning/               # Adaptive phrasebook mining (session_analyzer, phrasebook_miner, proposal_store)
 │   │   └── terrain_analysis/       # OSM + ESA + elevation analyzers
 │   ├── data/
 │   │   └── order_phrasebook.toml   # Bilingual keyword lexicon + regression cases
@@ -661,6 +672,7 @@ KShU/
 │       ├── admin.js                # Admin panel (~4300 lines)
 │       ├── i18n.js                 # EN/RU internationalization
 │       ├── replay.js               # Session replay with AAR
+│       ├── tutorial.js             # KTutorial spotlight onboarding
 │       ├── terrain.js              # Terrain overlay + elevation
 │       ├── map_objects.js          # Tactical objects (mines, wire, bridges, etc.)
 │       ├── overlays.js             # Drawing tools

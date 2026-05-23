@@ -1163,6 +1163,10 @@ if unit.ammo <= 0:
 | **Phase 9: Reports, Events, Log** | ✅ Complete | Events endpoint + frontend panel. Reports auto-generated: SPOTREP (new contacts), SHELREP (units under fire), CASREP (unit destroyed), SITREP (periodic every 5 ticks), INTSUM (intelligence summary every 10 ticks). Report generator wired into tick loop. Reports persisted to DB and broadcast via WebSocket. Frontend Reports tab with channel filtering (All/SPOTREP/SHELREP/SITREP/INTSUM/CASREP), click-to-locate, export. Bilingual RU/EN. Gamelog combines events+reports+orders. |
 | **Phase 10: Polish & Deployment** | ⚠ Partial | Dev workflow works. Dockerfile/nginx not yet tested in production. |
 | **Phase 11: Terrain Intelligence** | ✅ Complete | TerrainCell/ElevationCell models, OSM Overpass analyzer, ESA WorldCover (optional rasterio), Open-Elevation API, terrain merger, 12-type taxonomy, admin painting, elevation slope/aspect, engine integration (tick loads cells), terrain API (12 endpoints inc. SSE streaming + cell-count), frontend overlay + legend + admin panel. **SSE progress bar** for real-time analysis feedback. **High-res support**: depth 1-4 (333m → 12m cells). **Performance**: O(n) spatial-hash neighbor map, STRtree OSM lookup, concurrent elevation batches, batched DB writes, fast enumerate_cells. |
+| **Tutorial & Onboarding** | ✅ Complete | `frontend/js/tutorial.js` (`KTutorial`): spotlight-based step-by-step tutorial. `startIfNeeded()` auto-shows on first login; `skip()` marks complete. Persisted via `users.tutorial_completed` (migration 008). `POST /api/auth/tutorial-complete` endpoint. `tutorial_completed` returned in `TokenResponse`. |
+| **Objective Control & Deterministic Victory** | ✅ Complete | `backend/engine/objective_control.py`: `process_objective_control()` emits `objective_captured` / `objective_contested` events each tick. `check_deterministic_victory()` checks total annihilation and `objectives_to_win` threshold — fast, no LLM, runs before the LLM referee. Cache per session; call `clear_objective_cache()` on reset. |
+| **Trainer Friction Injection** | ✅ Complete | `POST /api/admin/sessions/{id}/inject-friction` injects degraded-unit scenarios mid-exercise. Friction stored in `unit.capabilities.friction` list as `{type, until_tick, magnitude, comment}`. Types: `breakdown`, `comms_failure`, `position_error`, `ammo_shortage`, `fuel_depletion`, `commander_casualty`. `DELETE …/inject-friction/{unit_id}` clears all friction. |
+| **Adaptive Phrasebook Learning** | ✅ Complete | `backend/services/learning/` package: `session_analyzer` filters analyzable orders, `phrasebook_miner` statistically mines cross-session proposals (≥5 sessions, ≥3 users, ≥85% LLM agreement), `proposal_store` persists to `learning_proposals` DB table (migration 009) and writes approved proposals to `order_phrasebook.toml` + hot-reloads. Admin APIs: `POST /sessions/{id}/analyze-learning`, `GET /learning/proposals`, `PATCH /learning/proposals/{id}`, `POST /learning/apply`. |
 
 ### Features Implemented Beyond Original Plan
 
@@ -1390,6 +1394,12 @@ if unit.ammo <= 0:
 | **Keyword Parser: Map Object Inflection** | `order_parser.py` | Minefield pattern expanded with inflected Russian forms: "минном поле" (prepositional), "минного поля" (genitive), "минному полю" (dative), plus English "mines". Merge target regex truncates at conjunctions ("C-squad and continue..." → "C-squad"). |
 | **Comprehensive Phrasebook Expansion** | `order_phrasebook.toml`, `order_parser.py`, `local_triage.py` | Massive expansion of bilingual command vocabulary — 93 regression test cases (up from ~50). **New command keywords**: adjust fire, fire for effect, shift fire, casevac, medevac, immediately, right now, right away, hit (attack), давай к/на/быстро (colloquial Russian). **New order detection patterns**: `fire_adjustment` (adjust fire, fire for effect, корректировка огня, перенеси огонь), `fire_direction` (concentrate fire, сосредоточить огонь, залп по), `regroup` (rally, regroup, consolidate, перегруппируй, на сбор). **Expanded lexicons**: 60+ command_en keywords (up from ~30), 80+ command_ru keywords (up from ~40), 35+ fast speed keywords (added immediately, right now, right away), halt/defend/withdraw/screen/breach/construct/deploy_bridge/lay_mines patterns greatly expanded. **New test cases**: compound commands (move→attack, halt→defend→request_fire, breach→advance), fire adjustment/correction, regroup/rally, overwatch, cease fire, informal/colloquial (both EN/RU), ack+command disambiguation, coordination orders, construction, concentrated fire, air mobility (casevac/medevac). **Keyword parser improvements**: regroup → move order type, command+location fallback to move (catches "давай к F7-5-6"), engineer verb count in multi-verb detection. **Local triage expansion**: 30+ action verbs (both EN/RU) for compound command detection, 8 new compound markers (after reaching, before attacking, continue to, по занятии, перед атакой). |
 | **Retrieval Context Test Fix** | `test_retrieval_context.py` | Fixed `is_local=True/False` → `profile="local"/"cloud"` in all 3 test calls to match current `build_order_parser_context()` signature. |
+| **Session Replay** | `frontend/js/replay.js`, `backend/api/events.py` (`GET /sessions/{id}/replay`) | Turn-by-turn playback accessible from the game clock panel (bottom-right, expands on hover). Transport controls: play/pause, step ±1 tick, jump to start/end, speed 0.5×–4×. Timeline slider. Units rendered at per-tick positions with smooth animation. **In replay mode**: orders/chat panel hidden, map is view-only. **📊 AAR button** triggers LLM-generated After-Action Report in floating window. Data fetched from `GET /sessions/{id}/replay` which returns per-tick unit position snapshots reconstructed from Event table. |
+| **Internationalization (i18n)** | `frontend/js/i18n.js`, `frontend/index.html` | `KI18n` module with full EN and RU dictionaries (~1000 lines). API: `KI18n.t('key')` to translate, `KI18n.setLang('ru')` to switch, `KI18n.getLang()` to read. HTML attributes for declarative binding: `data-i18n` (textContent), `data-i18n-title` (tooltip), `data-i18n-placeholder`, `data-i18n-html`. Language persisted in user settings. Full UI re-renders on switch. Language selector in settings modal. |
+| **Defensive Posture Advantage** | `backend/engine/combat.py`, `backend/engine/suppression.py` | Posture modifiers applied to `fire_effectiveness`: attacking units ×**0.65**, auto-return-fire defenders ×**1.15**, artillery/suppressing ×1.0 unchanged. Flanking units: target `protection` ×**0.75** (approaching unfortified side). Breakthrough window: when defender suppression ≥ 0.60, attack penalty linearly fades to zero — suppressing first then assaulting is correct doctrine. Equal units in open terrain → **1.77:1 exchange ratio** in favour of defender. Suppression recovery: attacking/advancing units 0.02/tick (can't take cover in motion), stationary/defending/idle 0.05/tick. |
+| **Intent Cascade** | `backend/engine/intent_cascade.py`, `backend/engine/tick.py` | When a HQ unit receives a new move/attack/defend/withdraw/halt order, implied sub-tasks are propagated **1 level deep** to its direct reports on the same tick. Eligible HQ types: `headquarters`, `command_post`, `infantry_battalion`, `infantry_company`, `tank_company`, `mech_company`. Task mapping: move→move (slow), attack→attack, defend→defend (current position), withdraw→disengage (fast), halt→halt. Subordinates with explicit orders issued the same tick are NOT overridden — player intent wins. Fully deterministic, no LLM call. |
+| **Air Defense Unit Types** | `frontend/config/unit_types.json`, `backend/api/units.py` | 4 new anti-air types added: `manpads_team` (4p, 3km fire range), `manpads_section` (8p, 3.5km range), `sam_section` (12p, 8km range, 10km detection), `aa_gun_section` (10p, 2.5km range). Total unit type count is now **43** (README and some docs still reference "39" — that is outdated). |
+| **Engine Utility Modules** | `backend/engine/_rng.py`, `backend/engine/geo_utils.py` | `_rng.py`: `deterministic_roll(tick, *ids) -> float` using BLAKE2b — all engine modules requiring reproducible randomness must use this instead of ad-hoc hash schemes; ensures session replay produces identical results. `geo_utils.py`: `meters_per_deg_lon(lat)`, `planar_offset_m(p_from, p_to)`, `bearing_deg(p_from, p_to)`, `distance_m_latlon(lat1, lon1, lat2, lon2)` — single authoritative source for lat/lon↔meters conversions; import from here, do not define local `METERS_PER_DEG_LAT` constants. |
 
 ### Key Architecture Decisions Made
 
@@ -1446,7 +1456,8 @@ KShU/
 │   │   ├── map_object.py          ← Tactical map objects (barbed wire, mines, etc.)
 │   │   ├── chat_message.py        ← Radio chat messages between commanders
 │   │   ├── terrain_cell.py        ← TerrainCell (snail_path → terrain type + modifiers)
-│   │   └── elevation_cell.py      ← ElevationCell (snail_path → height/slope/aspect)
+│   │   ├── elevation_cell.py      ← ElevationCell (snail_path → height/slope/aspect)
+│   │   └── learning_proposal.py   ← LearningProposal: candidate phrasebook entries mined from session data
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── deps.py
@@ -1486,6 +1497,11 @@ KShU/
 │   │   ├── report_generator.py   ← Auto-generate tick reports: SPOTREP, SHELREP, CASREP, SITREP, INTSUM
 │   │   ├── debug_logger.py      ← Debug log recording to file (admin toggle, tick timing, combat trace)
 │   │   ├── llm_client.py        ← Unified OpenAI/local LLM client wrapper (model routing, fallback)
+│   │   ├── learning/              ← Adaptive phrasebook learning package
+│   │   │   ├── __init__.py
+│   │   │   ├── session_analyzer.py   ← Extract analyzable orders from sessions for mining
+│   │   │   ├── phrasebook_miner.py   ← Statistical cross-session proposal mining + LLM judge
+│   │   │   └── proposal_store.py     ← Persist proposals to DB; apply approved → TOML + hot-reload
 │   │   └── terrain_analysis/      ← Terrain intelligence package
 │   │       ├── __init__.py
 │   │       ├── service.py         ← Orchestrator: analyze_grid()
@@ -1507,13 +1523,16 @@ KShU/
 │   │   ├── contacts.py
 │   │   ├── events.py
 │   │   ├── ammo.py
-│   │   ├── suppression.py
+│   │   ├── suppression.py        ← Posture-aware suppression recovery (0.02 attacking, 0.05 stationary)
 │   │   ├── terrain.py
 │   │   ├── defense.py             ← Defensive posture / dig-in progression
 │   │   ├── engineering.py         ← Engineering unit interactions with tactical objects
 │   │   ├── map_objects.py         ← Tactical object effects on units per tick (+ area effect definitions)
 │   │   ├── radio_chatter.py      ← Auto-generated unit radio messages (idle requests, peer support)
 │   │   ├── resupply.py           ← Resupply engine: supply caches, logistics units, resupply orders
+│   │   ├── intent_cascade.py     ← HQ order intent propagation 1 level to subordinates (deterministic)
+│   │   ├── geo_utils.py          ← Geographic utilities: lat/lon↔meters, bearing, planar offset (single source of truth)
+│   │   ├── _rng.py               ← Deterministic BLAKE2b RNG for reproducible replay (use deterministic_roll())
 │   │   └── structures.py
 │   ├── schemas/
 │   │   ├── __init__.py
@@ -1562,6 +1581,9 @@ KShU/
 │       ├── admin.js              ← Admin panel (~4300 lines): dashboard, CoC (drag-and-drop), wizard, god view, users, types, terrain
 │       ├── dialogs.js            ← KDialogs: themed confirm/alert/prompt/select modals replacing native browser dialogs
 │       ├── terrain.js            ← Terrain overlay rendering, legend, elevation heatmap
+│       ├── i18n.js               ← KI18n module: EN/RU translation dictionaries, data-i18n attr binding, real-time lang switch
+│       ├── replay.js             ← KReplay module: session replay with transport controls, timeline, smooth unit animation, AAR
+│       ├── tutorial.js           ← KTutorial module: spotlight onboarding tutorial, auto-shows on first login
 │       └── ui.js                 ← Map control panel (two 3×2 grids: draw tools + toggles, top-right), sidebar tab switching
 ├── frontend/
 │   ├── verify_sidc.html          ← SIDC verification page: renders all unit types with milsymbol v2.2.0
@@ -1749,6 +1771,28 @@ All services have health checks, restart policies, and proper dependency chains.
 - Run tactical regression tests (`python -m scripts.tactical_tests.run_all`) to validate aviation movement mechanics
 - Production deployment to staging environment
 - Load testing with multiple concurrent sessions
-- After-Action Review (AAR) feature implementation (deferred)
+
+---
+
+## Recent Updates (May 2026)
+
+### 4. Session Replay & AAR
+Full turn-by-turn replay accessible from the game clock panel (bottom-right, expands on hover). The `frontend/js/replay.js` module (`KReplay`) fetches `GET /sessions/{id}/replay` which returns per-tick unit position snapshots reconstructed from the append-only Event table. Transport: play/pause, step ±1 tick, jump start/end, speed 0.5×–4× via dropdown. In replay mode the orders/chat panel hides and the map is view-only. The **📊 AAR** button generates an LLM-written After-Action Report in a floating window.
+
+### 5. Internationalization (i18n)
+`frontend/js/i18n.js` (`KI18n`) provides full EN/RU UI language switching. Use `data-i18n="key"` on HTML elements for declarative binding; `KI18n.applyAll()` re-renders all bound elements on language change. Language is stored in user settings and persists across sessions.
+
+### 6. Defensive Posture Advantage
+`backend/engine/combat.py` now applies posture modifiers to `fire_effectiveness`: attackers ×0.65, defending auto-return-fire ×1.15, flankers reduce target protection by ×0.75. Breakthrough window: when defender suppression ≥ 0.60 the attack penalty linearly fades — simulating the fire-and-movement doctrine "suppress first, then assault". `backend/engine/suppression.py` splits recovery rates: attacking/advancing 0.02/tick vs stationary/defending 0.05/tick.
+
+### 7. Intent Cascade
+`backend/engine/intent_cascade.py` propagates implied sub-tasks from HQ units 1 level to direct reports the same tick their order activates. HQ-eligible types: `headquarters`, `command_post`, `infantry_battalion`, `infantry_company`, `tank_company`, `mech_company`. Explicit player orders on subordinates always win.
+
+### 8. Air Defense & Updated Unit Count
+Added `manpads_team`, `manpads_section`, `sam_section`, `aa_gun_section` to `frontend/config/unit_types.json`. Total unit type count is **43** — references to "39 types" in older docs or comments are outdated.
+
+### 9. Engine Utility Modules
+- `backend/engine/_rng.py` — `deterministic_roll(tick, *ids)` using BLAKE2b. All engine code needing reproducible randomness must use this; ensures replay correctness.
+- `backend/engine/geo_utils.py` — canonical geographic math helpers. Import from here; do not define local `METERS_PER_DEG_LAT` or equivalent constants in engine modules.
 
 

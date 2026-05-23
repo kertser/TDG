@@ -184,6 +184,31 @@ VEHICLE_UNIT_TYPES = {
     "headquarters",
 }
 
+# Aviation unit types — bypass terrain/water/minefield/obstacle restrictions
+AVIATION_UNIT_TYPES = frozenset({
+    "attack_helicopter",
+    "transport_helicopter",
+    "recon_uav",
+})
+
+# ── Fuel system ──────────────────────────────────────────────────────────────
+# Units in this set consume fuel while moving.  Infantry/recon/engineers do NOT.
+FUEL_CONSUMING_UNIT_TYPES = frozenset({
+    "tank_platoon", "tank_company",
+    "mech_platoon", "mech_company",
+    "artillery_battery", "artillery_platoon",
+    "avlb_vehicle", "avlb_section",
+    "logistics_platoon", "logistics_section",
+    "headquarters", "command_post",
+    "attack_helicopter", "transport_helicopter",
+})
+
+FUEL_CONSUMPTION_RATE_GROUND   = 0.002   # per movement tick (~500 ticks to empty)
+FUEL_CONSUMPTION_RATE_AVIATION = 0.006   # helicopters burn faster
+FUEL_LOW_THRESHOLD  = 0.20              # below this: speed capped to FUEL_SLOW_SPEED_MPS
+FUEL_EMPTY_THRESHOLD = 0.02             # below this: unit cannot move at all
+FUEL_SLOW_SPEED_MPS  = 1.2             # m/s when fuel is critically low
+
 
 def _morale_factor(morale: float) -> float:
     if morale > 0.5:
@@ -811,6 +836,38 @@ def process_movement(
             * (1.0 - suppression * 0.7)
             * _morale_factor(morale)
         )
+
+        # ── Fuel system: consume fuel and cap speed when low ──
+        if unit.unit_type in FUEL_CONSUMING_UNIT_TYPES:
+            caps = dict(unit.capabilities or {})
+            fuel = float(caps.get("fuel", 1.0))
+
+            if fuel <= FUEL_EMPTY_THRESHOLD:
+                # Out of fuel — halt and report once
+                if not caps.get("_fuel_empty_reported"):
+                    caps["_fuel_empty_reported"] = True
+                    unit.capabilities = caps
+                    events.append({
+                        "event_type": "fuel_depleted",
+                        "actor_unit_id": unit.id,
+                        "text_summary": f"{unit.name} halted — fuel depleted",
+                        "payload": {"fuel": round(fuel, 4)},
+                        "visibility": unit.side.value if hasattr(unit.side, "value") else str(unit.side),
+                    })
+                continue  # skip movement entirely
+
+            if fuel < FUEL_LOW_THRESHOLD:
+                effective_speed = min(effective_speed, FUEL_SLOW_SPEED_MPS)
+
+            # Consume fuel this tick
+            rate = (
+                FUEL_CONSUMPTION_RATE_AVIATION
+                if unit.unit_type in AVIATION_UNIT_TYPES
+                else FUEL_CONSUMPTION_RATE_GROUND
+            )
+            caps["fuel"] = max(0.0, fuel - rate)
+            caps.pop("_fuel_empty_reported", None)
+            unit.capabilities = caps
 
         distance_this_tick = effective_speed * tick_duration_sec
 

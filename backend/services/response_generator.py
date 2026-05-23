@@ -141,6 +141,15 @@ class ResponseGenerator:
                 return ResponseType.wilco_casevac, None
             if order_type == "airstrike":
                 return ResponseType.wilco_airstrike, None
+            # Overwatch
+            if order_type == "overwatch":
+                return ResponseType.wilco_overwatch, None
+            # WARNO
+            if order_type == "warno":
+                return ResponseType.wilco_warno, None
+            # Decontamination
+            if order_type == "decontaminate":
+                return ResponseType.wilco_decontaminate, None
 
             # Fire mission for artillery/mortar → use fire-specific response
             # BUT only if the order is actually a fire order, not observe/standby
@@ -155,6 +164,11 @@ class ResponseGenerator:
             # Request fire support (non-artillery unit directing CoC fire)
             if order_type == "request_fire":
                 return ResponseType.wilco_request_fire, None
+            # Fire Observer orders
+            if order_type == "designate_target":
+                return ResponseType.wilco_designate, None
+            if order_type == "adjust_fire":
+                return ResponseType.wilco_adjust, None
             # Disengage/Withdraw order → use disengage-specific response
             if order_type in ("disengage", "withdraw"):
                 return ResponseType.wilco_disengage, None

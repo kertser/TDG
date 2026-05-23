@@ -2578,6 +2578,72 @@ button:hover { background: #1a5276; }
     font-size: 11px;
 }
 
+/* ── OPORD Accordion ─────────────────────────────── */
+.sb-opord-item {
+    border: 1px solid #1e3a5f;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    overflow: hidden;
+}
+.sb-opord-hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 8px;
+    background: rgba(15, 52, 96, 0.6);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    color: #90caf9;
+    user-select: none;
+    transition: background 0.15s;
+}
+.sb-opord-hdr:hover { background: rgba(30, 80, 140, 0.7); }
+.sb-opord-chev { font-size: 9px; color: #64b5f6; transition: transform 0.2s; }
+.sb-opord-hdr.open .sb-opord-chev { transform: rotate(180deg); }
+.sb-opord-body {
+    padding: 6px 8px;
+    background: rgba(10, 20, 40, 0.5);
+}
+.sb-opord-body textarea {
+    width: 100%;
+    font-size: 11px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    padding: 4px 6px;
+    box-sizing: border-box;
+    resize: vertical;
+}
+.sb-opord-lbl {
+    display: block;
+    font-size: 10px;
+    color: #90caf9;
+    margin-bottom: 2px;
+}
+.sb-opord-5w {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 3px 6px;
+    align-items: center;
+}
+.sb-opord-5w label {
+    font-size: 10px;
+    color: #90caf9;
+    white-space: nowrap;
+}
+.sb-opord-5w input {
+    font-size: 11px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    padding: 3px 5px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
 /* ── Staged Unit Items ───────────────────────────── */
 .sb-unit-item {
     display: flex;
@@ -5271,3 +5337,40 @@ button:hover { background: #1a5276; }
     letter-spacing: 0.5px;
 }
 
+/* ── KTutorial — Spotlight Onboarding ─────────────────────────────────────── */
+.kt-overlay {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 10000;
+}
+.kt-overlay::before {
+    content: ""; position: absolute; inset: 0;
+    background: rgba(0,0,0,0.55);
+    pointer-events: auto;
+}
+.kt-spotlight {
+    position: absolute; border-radius: 6px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+    background: transparent; pointer-events: none;
+    transition: all 0.25s ease;
+}
+.kt-box {
+    position: absolute; pointer-events: auto;
+    width: 340px; padding: 18px;
+    background: #18202a; color: #e8eef5;
+    border: 1px solid #3a4a5e; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    font: 14px/1.4 system-ui, sans-serif;
+    z-index: 10001;
+}
+.kt-progress { font-size: 11px; color: #6c8295; margin-bottom: 6px; }
+.kt-title    { margin: 0 0 8px; font-size: 16px; color: #ffd479; }
+.kt-body     { margin-bottom: 14px; }
+.kt-body code { background: #2a3645; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+.kt-actions  { display: flex; justify-content: flex-end; gap: 6px; }
+.kt-actions button {
+    background: #2a3645; color: #e8eef5; border: 1px solid #3a4a5e;
+    padding: 6px 12px; border-radius: 4px; cursor: pointer;
+}
+.kt-actions button:hover { background: #36475c; }
+.kt-skip     { color: #8da4b8 !important; margin-right: auto !important; }
