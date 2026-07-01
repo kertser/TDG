@@ -1,177 +1,139 @@
-# Deploying TDG at tdg.alpha-numerical.com
+# Deploying TDG at `tdg.alpha-numerical.com`
 
-> **Краткое резюме (RU):** Это руководство описывает, как запустить TDG под доменным именем
-> `tdg.alpha-numerical.com` с автоматическим TLS (Let's Encrypt) через общий Caddy
-> reverse-proxy, уже используемый приложением SmartVoter на том же сервере
-> `129.159.153.132`. Для этого нужно: добавить DNS A-запись, создать общую Docker-сеть
-> `web`, добавить блок TDG в `Caddyfile` SmartVoter и поднять TDG через prod-оверлей
-> (`docker-compose.prod.yml`). После этого TDG перестаёт слушать порты 80/443 напрямую —
-> весь трафик проходит через Caddy по HTTPS.
+> TDG теперь публикуется не через собственный Caddy, а через внешний reverse proxy
+> в каталоге `~/proxy` (репозиторий `kertser/proxy`).
+> Домен: `tdg.alpha-numerical.com`, TLS выпускается и обновляется автоматически самим Caddy.
+> Стек TDG не открывает `80/443` на хосте; он только подключает `tdg-nginx` к сети `web`.
+> Источник истины для reverse proxy и сертификатов — репозиторий `kertser/proxy`.
+> Подробные инструкции ниже приведены на английском.
 
----
+This guide documents the current production layout: TDG runs behind the shared
+reverse proxy from [`kertser/proxy`](https://github.com/kertser/proxy). The TDG
+stack itself does not run Caddy and does not manage TLS certificates.
+
+## Architecture
+
+```text
+Internet ──► proxy-caddy (:80/:443)  in ~/proxy
+                 │  over Docker network "web"
+                 ▼
+             tdg-nginx (:80 internal)
+                 │
+                 ▼
+             tdg-backend, tdg-postgres, tdg-redis, tdg-llm
+```
 
 ## Prerequisites
 
-- DNS `A` record `tdg → 129.159.153.132` must resolve before the first Caddy request
-  (Caddy uses HTTP-01 challenge to issue the Let's Encrypt certificate).
-- TCP 80 and TCP 443 must be open on the server's firewall / Oracle Cloud security list.
-  (They are already open because SmartVoter works via HTTPS.)
-- SSH access to the server `129.159.153.132`.
+- DNS `A` record `tdg → <server IP>` exists at the same registrar that already
+  hosts the `smartvoter` DNS records.
+- Ingress TCP ports 80 and 443 are open in the cloud provider security list.
+- Docker Compose v2 is installed on the host.
 
----
+For proxy-specific details, see the
+[`kertser/proxy` README](https://github.com/kertser/proxy).
 
-## Step 1 — Add DNS Record
+## One-time setup
 
-In the registrar panel where `smartvoter.alpha-numerical.com` is already configured,
-add one more `A` record:
-
-| Type | Host | Value           | TTL       |
-|------|------|-----------------|-----------|
-| A    | tdg  | 129.159.153.132 | Automatic |
-
-After saving, verify propagation from your Windows machine (PowerShell):
-
-```powershell
-Resolve-DnsName tdg.alpha-numerical.com -Type A
-```
-
-Expected output includes `129.159.153.132`.
-
----
-
-## Step 2 — Confirm Firewall
-
-TCP 80 and TCP 443 must already be open (SmartVoter proves they are).
-If in doubt, check in the Oracle Cloud console:
-**Networking → VCNs → Security Lists → Ingress Rules** — both ports with `0.0.0.0/0`.
-
-No changes needed on the server's OS firewall (`iptables`/`ufw`) either,
-because SmartVoter traffic already passes through.
-
----
-
-## Step 3 — Create the Shared Docker Network (one-time)
-
-Connect to the server via SSH from PowerShell:
-
-```powershell
-# On your Windows machine:
-ssh <user>@129.159.153.132
-```
-
-Then, **on the server** (Linux bash):
+All command blocks in this document run **on the server** and therefore use
+**bash**. The developer workstation is Windows/PowerShell, but that is not used
+for the steps below.
 
 ```bash
-# Create the shared network — skip if it already exists
-docker network create web
+docker network create web   # skip if it already exists
+git clone https://github.com/kertser/proxy.git ~/proxy
+cd ~/proxy
+docker compose up -d
 ```
 
-This network is what lets the Caddy container (in the SmartVoter stack)
-reach the TDG nginx container by hostname `tdg-nginx`.
+This creates or reuses the external Docker network `web` and starts the shared
+host-wide Caddy container (`proxy-caddy`).
 
----
+## Add TDG to the Caddyfile in `~/proxy`
 
-## Step 4 — Update the SmartVoter Caddyfile
-
-On the server, inside the SmartVoter repository directory (e.g. `~/SmartVoter`),
-append the contents of `Caddyfile.tdg` from this repository to the SmartVoter `Caddyfile`:
+This is already present in the current `kertser/proxy` `main` branch. First,
+verify that the site block exists:
 
 ```bash
-# On the server:
-cd ~/SmartVoter
-cat ~/TDG/Caddyfile.tdg >> Caddyfile
+grep tdg.alpha-numerical.com ~/proxy/Caddyfile
 ```
 
-Also make sure the Caddy service in the SmartVoter `docker-compose.prod.yml`
-is attached to the `web` network.
-See the companion SmartVoter PR for the exact change
-(link will be provided once the PR is opened).
+If the block is missing, append this configuration in `~/proxy/Caddyfile`:
 
-After editing, reload the SmartVoter stack so Caddy picks up the new block:
-
-```bash
-# On the server:
-cd ~/SmartVoter
-docker compose -f docker-compose.prod.yml up -d
+```caddyfile
+tdg.alpha-numerical.com {
+    @ws path /ws/*
+    reverse_proxy @ws tdg-nginx:80
+    reverse_proxy tdg-nginx:80
+    encode gzip
+}
 ```
 
-Caddy will automatically obtain a TLS certificate for `tdg.alpha-numerical.com`
-on the first incoming request, **after** the DNS record resolves.
-
----
-
-## Step 5 — Deploy TDG with the Production Overlay
-
-On the server, pull the latest TDG code and start the stack with the production overlay:
+Then hot-reload the proxy:
 
 ```bash
-# On the server:
+cd ~/proxy && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+The shared Caddy instance terminates TLS and forwards plain HTTP to
+`tdg-nginx:80` over the `web` Docker network.
+
+## Deploy TDG
+
+Deploy TDG with the production overlay that removes host port bindings and
+attaches `nginx` and `backend` to `web`:
+
+```bash
 cd ~/TDG
 git pull
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-What the overlay (`docker-compose.prod.yml`) does differently from the base compose:
+The base `docker-compose.yml` remains unchanged, so local development and
+non-proxy deployments still work with plain `docker compose up -d`.
 
-- `nginx.ports` overridden to `[]` — nginx no longer binds host ports 80/443.
-- `nginx` and `backend` services joined to the external `web` network so Caddy can reach them.
+## Verify
 
-The base `docker-compose.yml` is **not modified** — local development continues
-to work with plain `docker compose up -d` (which does publish ports 80/443).
-
----
-
-## Step 6 — Verify
-
-Run these checks from your Windows machine (PowerShell):
-
-```powershell
-# 1. HTTPS endpoint responds
-Invoke-WebRequest -Uri "https://tdg.alpha-numerical.com" -Method Head
-
-# 2. Bare IP no longer serves TDG (nginx ports are not published)
-# This should now time out or return an error (expected behaviour)
-Invoke-WebRequest -Uri "http://129.159.153.132/" -Method Head -TimeoutSec 5
-```
-
-Or using `curl` if available:
-
-```powershell
-curl -I https://tdg.alpha-numerical.com
-```
-
-Expected: HTTP 200 (or a redirect to the app).
-
-To verify WebSocket connectivity, open the TDG frontend in a browser at
-`https://tdg.alpha-numerical.com` and check that the game session connects
-(the bottom radio panel should show "connected").
-
----
-
-## Step 7 — Rollback
-
-If you need to revert to the plain (no-domain) deployment:
+Run the following checks on the server:
 
 ```bash
-# On the server:
-cd ~/TDG
-# Stop the production overlay stack
-docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+curl -I https://tdg.alpha-numerical.com
+curl -I http://<server IP>/
+```
 
-# Restart with the base compose — ports 80/443 are published again
+Expected results:
+
+- `curl -I https://tdg.alpha-numerical.com` returns `200` (or an expected app redirect).
+- `curl -I http://<server IP>/` does **not** return TDG. The bare-IP endpoint is intentionally gone.
+
+Also verify that a WebSocket endpoint upgrades correctly through the proxy:
+
+```bash
+curl -i \
+  -H "Connection: Upgrade" \
+  -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" \
+  -H "Sec-WebSocket-Key: SGVsbG8sIFRERyE=" \
+  https://tdg.alpha-numerical.com/ws/
+```
+
+Any correct WebSocket upgrade response path is acceptable; the important point
+is that the request reaches TDG through `wss://tdg.alpha-numerical.com/ws/...`.
+
+## Rollback
+
+To return to a per-host TDG deployment on port 80:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml down
 docker compose up -d
 ```
 
----
+Warning: this conflicts with `proxy-caddy` on ports 80/443. Stop the proxy
+first, or do not perform this rollback while the shared proxy is running.
 
-## Notes
+## Certificates
 
-- **TLS certificates** are issued automatically by Caddy (Let's Encrypt HTTP-01 challenge).
-  The DNS record **must** resolve to the server IP before the first request, otherwise
-  the challenge fails and Caddy retries with exponential backoff.
-- **No TLS inside TDG** — the TDG nginx container serves plain HTTP on port 80 inside
-  the `web` Docker network. TLS termination is entirely Caddy's responsibility.
-- **Data persistence** — the `pgdata` Docker volume is not affected by switching between
-  base and production overlay.
-- **Local dev** — `deploy.ps1` and `deploy.sh` use only `docker-compose.yml` and are
-  unaffected by this change.
+TLS certificates live in the `proxy_caddy_data` volume owned by the proxy
+stack. This TDG stack does **not** create, mount, rotate, or otherwise manage
+certificates.
