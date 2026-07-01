@@ -1,0 +1,32 @@
+# Production overlay for TDG behind a shared Caddy reverse proxy.
+#
+# Usage on the server (Linux host, bash):
+#   docker network create web   # one-time, if missing
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Assumptions:
+#   - An external Docker network named "web" exists and is also attached to
+#     the Caddy container from the SmartVoter stack (kertser/SmartVoter).
+#   - Public traffic reaches TDG ONLY through Caddy on the domain
+#     tdg.alpha-numerical.com — the TDG nginx container no longer publishes
+#     host ports 80/443.
+#   - The nginx container name is "tdg-nginx" (as declared in
+#     docker-compose.yml). Caddy uses that hostname on the "web" network.
+
+name: tdg
+
+services:
+  nginx:
+    ports: !override []
+    networks:
+      - default
+      - web
+
+  backend:
+    networks:
+      - default
+      - web
+
+networks:
+  web:
+    external: true
