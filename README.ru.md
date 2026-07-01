@@ -230,13 +230,7 @@ git pull
 
 ### Развёртывание на собственном домене (`tdg.alpha-numerical.com`)
 
-TDG можно опубликовать под собственным доменом с автоматическим TLS через общий
-Caddy reverse-proxy (тот же, что используется SmartVoter на одном сервере).
-Prod-оверлей `docker-compose.prod.yml` убирает публикацию портов 80/443 у nginx
-и подключает его к внешней Docker-сети `web`, через которую Caddy обращается к нему.
-
-Полная пошаговая инструкция (DNS, создание сети, правка Caddyfile, деплой, проверка,
-откат): **[docs/DEPLOY_DOMAIN.md](docs/DEPLOY_DOMAIN.md)**.
+**Развёртывание на собственном домене (`tdg.alpha-numerical.com`)** — В production TDG работает за общим reverse proxy из [`kertser/proxy`](https://github.com/kertser/proxy). Этот стек не публикует порты на хосте; TLS завершается централизованно. Полная инструкция по развёртыванию, настройке DNS и откату: **[docs/DEPLOY_DOMAIN.md](docs/DEPLOY_DOMAIN.md)**.
 
 ### Усиление защиты для боевой эксплуатации
 

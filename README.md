@@ -148,13 +148,7 @@ git pull
 
 ### Custom Domain Deployment (`tdg.alpha-numerical.com`)
 
-TDG can be served at a custom domain with automatic TLS via a shared Caddy reverse proxy
-(the same Caddy instance used by SmartVoter on the same server).
-The production overlay `docker-compose.prod.yml` removes the host port bindings from nginx
-and attaches it to an external Docker network `web` so Caddy can reach it.
-
-See **[docs/DEPLOY_DOMAIN.md](docs/DEPLOY_DOMAIN.md)** for the full step-by-step guide
-(DNS setup, shared network creation, Caddyfile update, deployment, verification, and rollback).
+**Custom domain deployment (`tdg.alpha-numerical.com`)** — In production, TDG runs behind the shared reverse proxy from [`kertser/proxy`](https://github.com/kertser/proxy). No ports are published on the host by this stack; TLS is handled centrally. See **[docs/DEPLOY_DOMAIN.md](docs/DEPLOY_DOMAIN.md)** for the full deployment procedure, DNS setup, and rollback steps.
 
 ### Production Hardening
 
